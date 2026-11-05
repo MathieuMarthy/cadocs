@@ -1,0 +1,11 @@
+/target
+node_modules/
+dist/
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Personal, per-developer files
+CLAUDE.local.md
+/local/
