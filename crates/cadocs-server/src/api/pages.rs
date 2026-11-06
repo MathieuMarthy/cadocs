@@ -8,7 +8,7 @@ use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
-use cadocs_collab::Authorizer;
+use cadocs_collab::{Authorizer, Event, PageEvent};
 use cadocs_store::{
     AccountStore, DateCursor, DocStore, MAX_TITLE_CHARS, NewPage, PageMove, PageRecord, PageStore,
     Placement, now_ms,
@@ -151,6 +151,8 @@ async fn create<S: PageStore, A>(
         now: now_ms(),
     };
     let page = state.store.create_page(&new).await?;
+    let event = Event::page(PageEvent::Created, &page.space_id, &page.id);
+    state.registry.publish(&page.workspace_id, event);
     Ok((StatusCode::CREATED, Json(PageBody::from(page))).into_response())
 }
 
@@ -270,12 +272,19 @@ async fn move_page<S: PageStore, A>(
         parent_id: body.parent_id,
         placement: placement(body.after),
     };
-    let page = state
+    let moved = state
         .store
         .move_page(&page, &current.user.id, &destination, now_ms())
         .await?;
     if new_space {
         state.access_changed();
+    }
+    let page = moved.page;
+    let left = Event::page(PageEvent::Moved, &moved.from_space, &page.id);
+    state.registry.publish(&page.workspace_id, left);
+    if moved.from_space != page.space_id {
+        let arrived = Event::page(PageEvent::Moved, &page.space_id, &page.id);
+        state.registry.publish(&page.workspace_id, arrived);
     }
     Ok(Json(page.into()))
 }
@@ -285,11 +294,13 @@ async fn trash<S: PageStore, A>(
     Extension(current): Extension<CurrentSession>,
     PathParam(page): PathParam,
 ) -> Result<StatusCode, ApiError> {
-    state
+    let site = state
         .store
         .trash_page(&page, &current.user.id, now_ms())
         .await?;
     state.access_changed();
+    let event = Event::page(PageEvent::Trashed, &site.space_id, &page);
+    state.registry.publish(&site.workspace_id, event);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -299,6 +310,8 @@ async fn restore<S: PageStore, A>(
     PathParam(page): PathParam,
 ) -> Result<Json<PageBody>, ApiError> {
     let page = state.store.restore_page(&page, &current.user.id).await?;
+    let event = Event::page(PageEvent::Restored, &page.space_id, &page.id);
+    state.registry.publish(&page.workspace_id, event);
     Ok(Json(page.into()))
 }
 
@@ -307,8 +320,10 @@ async fn purge<S: PageStore, A>(
     Extension(current): Extension<CurrentSession>,
     PathParam(page): PathParam,
 ) -> Result<StatusCode, ApiError> {
-    state.store.purge_page(&page, &current.user.id).await?;
+    let site = state.store.purge_page(&page, &current.user.id).await?;
     state.access_changed();
+    let event = Event::page(PageEvent::Purged, &site.space_id, &page);
+    state.registry.publish(&site.workspace_id, event);
     Ok(StatusCode::NO_CONTENT)
 }
 

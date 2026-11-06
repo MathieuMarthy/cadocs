@@ -7,7 +7,8 @@ use super::spaces::{self, HAS_ROLE, space_access};
 use super::workspaces::authorize as authorize_workspace;
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
-    DateCursor, MAX_PAGE_DEPTH, NewPage, PageMove, PageRecord, PageStore, Placement, StoreError,
+    DateCursor, MAX_PAGE_DEPTH, MovedPage, NewPage, PageMove, PageRecord, PageSite, PageStore,
+    Placement, StoreError,
 };
 
 /// A page with all that resolution needs to know about the user `?1`.
@@ -31,6 +32,13 @@ fn scope(row: &SqliteRow) -> Scope {
     Scope {
         page_trashed: row.get::<Option<i64>, _>("deleted_at").is_some(),
         ..spaces::scope(row)
+    }
+}
+
+fn site(row: &SqliteRow) -> PageSite {
+    PageSite {
+        workspace_id: row.get("workspace_id"),
+        space_id: row.get("space_id"),
     }
 }
 
@@ -347,7 +355,7 @@ impl PageStore for SqliteStore {
         actor: &str,
         destination: &PageMove,
         now: i64,
-    ) -> Result<PageRecord, StoreError> {
+    ) -> Result<MovedPage, StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
         let row = authorize(&mut tx, page_id, actor, SpaceAction::EditPage).await?;
         let source: &str = row.get("space_id");
@@ -401,13 +409,19 @@ impl PageStore for SqliteStore {
             .await?;
         }
         let page = reread(&mut tx, page_id, actor).await?;
+        let from_space = source.to_owned();
         tx.commit().await?;
-        Ok(page)
+        Ok(MovedPage { page, from_space })
     }
 
-    async fn trash_page(&self, page_id: &str, actor: &str, now: i64) -> Result<(), StoreError> {
+    async fn trash_page(
+        &self,
+        page_id: &str,
+        actor: &str,
+        now: i64,
+    ) -> Result<PageSite, StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
-        authorize(&mut tx, page_id, actor, SpaceAction::EditPage).await?;
+        let row = authorize(&mut tx, page_id, actor, SpaceAction::EditPage).await?;
         // A restore goes by the date alone: it must differ from any date already in the subtree.
         let latest: Option<i64> = sqlx::query_scalar(AssertSqlSafe(format!(
             "{SUBTREE} SELECT max(deleted_at) FROM pages WHERE id IN (SELECT id FROM subtree)"
@@ -426,7 +440,7 @@ impl PageStore for SqliteStore {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(())
+        Ok(site(&row))
     }
 
     async fn restore_page(&self, page_id: &str, actor: &str) -> Result<PageRecord, StoreError> {
@@ -465,15 +479,15 @@ impl PageStore for SqliteStore {
         Ok(page)
     }
 
-    async fn purge_page(&self, page_id: &str, actor: &str) -> Result<(), StoreError> {
+    async fn purge_page(&self, page_id: &str, actor: &str) -> Result<PageSite, StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
-        authorize(&mut tx, page_id, actor, SpaceAction::PurgePage).await?;
+        let row = authorize(&mut tx, page_id, actor, SpaceAction::PurgePage).await?;
         sqlx::query("DELETE FROM pages WHERE id = ?1")
             .bind(page_id)
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
-        Ok(())
+        Ok(site(&row))
     }
 
     async fn list_trashed_pages(

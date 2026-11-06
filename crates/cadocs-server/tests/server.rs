@@ -12,7 +12,7 @@ use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{Method, Request, StatusCode, header};
 use axum::middleware::from_fn_with_state;
 use axum::routing::post;
-use cadocs_collab::{Authorizer, CollabConfig, DocRegistry, Seat};
+use cadocs_collab::{Authorizer, CollabConfig, DocRegistry, EventSeat, EventStanding, Seat};
 use cadocs_core::permissions::{Scope, SocketMode, SocketOutcome, WorkspaceRole};
 use cadocs_server::api;
 use cadocs_server::client_ip::TrustedProxies;
@@ -22,11 +22,11 @@ use cadocs_server::session::{csrf_token, token_hash};
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Credentials, DateCursor, DocEdit, DocStore,
-    FirstUser, Grant, Invitation, InvitationPreview, InvitedUser, Member, Membership, NewGrant,
-    NewInvitation, NewPage, NewPasswordReset, NewSession, NewSpace, NewWorkspace, PageMove,
-    PageRecord, PageStore, SessionStanding, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore,
-    StoreError, StoredDoc, StoredUpdate, UpdateBasis, UserChanges, UserRecord, Workspace,
-    WorkspaceChanges, WorkspaceStore, now_ms,
+    FirstUser, Grant, Invitation, InvitationPreview, InvitedUser, Member, Membership, MovedPage,
+    NewGrant, NewInvitation, NewPage, NewPasswordReset, NewSession, NewSpace, NewWorkspace,
+    PageMove, PageRecord, PageSite, PageStore, SessionStanding, Snapshot, Space, SpaceChanges,
+    SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, UpdateBasis, UserChanges,
+    UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -93,7 +93,7 @@ impl DocStore for FlakyStore {
         doc_id: &str,
         updates: &[StoredUpdate],
         edit: &DocEdit,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Option<PageSite>, StoreError> {
         if self.fail_writes.load(Ordering::SeqCst) {
             return Err(sqlx::Error::PoolTimedOut.into());
         }
@@ -150,11 +150,16 @@ impl PageStore for FlakyStore {
         actor: &str,
         destination: &PageMove,
         now: i64,
-    ) -> Result<PageRecord, StoreError> {
+    ) -> Result<MovedPage, StoreError> {
         self.inner.move_page(page_id, actor, destination, now).await
     }
 
-    async fn trash_page(&self, page_id: &str, actor: &str, now: i64) -> Result<(), StoreError> {
+    async fn trash_page(
+        &self,
+        page_id: &str,
+        actor: &str,
+        now: i64,
+    ) -> Result<PageSite, StoreError> {
         self.inner.trash_page(page_id, actor, now).await
     }
 
@@ -162,7 +167,7 @@ impl PageStore for FlakyStore {
         self.inner.restore_page(page_id, actor).await
     }
 
-    async fn purge_page(&self, page_id: &str, actor: &str) -> Result<(), StoreError> {
+    async fn purge_page(&self, page_id: &str, actor: &str) -> Result<PageSite, StoreError> {
         self.inner.purge_page(page_id, actor).await
     }
 
@@ -235,8 +240,21 @@ impl SpaceStore for FlakyStore {
         self.inner.update_space(space_id, actor, changes, now).await
     }
 
-    async fn trash_space(&self, space_id: &str, actor: &str, now: i64) -> Result<(), StoreError> {
+    async fn trash_space(
+        &self,
+        space_id: &str,
+        actor: &str,
+        now: i64,
+    ) -> Result<String, StoreError> {
         self.inner.trash_space(space_id, actor, now).await
+    }
+
+    async fn workspace_reach(
+        &self,
+        workspace_id: &str,
+        user_id: &str,
+    ) -> Result<WorkspaceReach, StoreError> {
+        self.inner.workspace_reach(workspace_id, user_id).await
     }
 
     async fn restore_space(
@@ -518,6 +536,10 @@ impl Authorizer for Fixed {
     async fn recheck(&self, _seat: &Seat<'_>) -> Result<SocketOutcome, StoreError> {
         Ok(SocketOutcome::Keep)
     }
+
+    async fn recheck_events(&self, _: &EventSeat<'_>) -> Result<EventStanding, StoreError> {
+        Ok(EventStanding::Open(Vec::new()))
+    }
 }
 
 /// Allows the upgrade, then answers the check made once the socket has joined.
@@ -530,6 +552,10 @@ impl Authorizer for ChangedDuringTheJoin {
 
     async fn recheck(&self, _seat: &Seat<'_>) -> Result<SocketOutcome, StoreError> {
         self.0.ok_or(StoreError::PageNotFound)
+    }
+
+    async fn recheck_events(&self, _: &EventSeat<'_>) -> Result<EventStanding, StoreError> {
+        Ok(EventStanding::Open(Vec::new()))
     }
 }
 
@@ -549,6 +575,10 @@ impl Authorizer for PanicsOnce {
             1 => panic!("a pass that fails badly"),
             _ => Ok(SocketOutcome::Close(4403)),
         }
+    }
+
+    async fn recheck_events(&self, _: &EventSeat<'_>) -> Result<EventStanding, StoreError> {
+        Ok(EventStanding::Open(Vec::new()))
     }
 }
 

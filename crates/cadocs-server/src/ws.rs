@@ -1,16 +1,17 @@
-//! The page socket: checks before the upgrade, then frames between a WebSocket and a `Connection`.
+//! The page and events sockets: checks before the upgrade, then frames between a WebSocket and a
+//! `Connection` or an `EventConnection`.
 
 use std::time::Duration;
 
 use axum::Extension;
 use axum::body::Bytes;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::{Path, RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use cadocs_collab::{
     Authorizer, CLOSE_FRAME_TOO_LARGE, CLOSE_PROTOCOL_ERROR, CLOSE_TOO_SLOW, Close, CollabError,
-    Connection, Outbound, Seat,
+    Connection, EventConnection, EventOutbound, EventSeat, EventStanding, Outbound, Seat,
 };
 use cadocs_core::permissions::SocketOutcome;
 use cadocs_store::DocStore;
@@ -25,6 +26,10 @@ use crate::session::CurrentSession;
 /// sent, so each socket holds about one copy of its document's SyncStep2 for its whole life.
 const READ_BUFFER_BYTES: usize = 4 * 1024;
 const WRITE_BUFFER_BYTES: usize = 4 * 1024;
+
+/// An events frame is a hundred bytes or so, and a client has nothing to send but pongs.
+const EVENTS_BUFFER_BYTES: usize = 1024;
+const EVENTS_MAX_FRAME_BYTES: usize = 1024;
 
 /// How long a closing socket may wait for the client's side of the close handshake.
 const CLOSE_GRACE: Duration = Duration::from_secs(1);
@@ -87,6 +92,115 @@ pub async fn upgrade<S: DocStore, A: Authorizer>(
             run(socket, connection, config).await;
             drop(open_socket);
         })
+}
+
+/// `?workspace=` holds an id, which needs no decoding.
+fn workspace_param(query: Option<&str>) -> Option<&str> {
+    let mut pairs = query.unwrap_or_default().split('&');
+    pairs.find_map(|pair| pair.strip_prefix("workspace="))
+}
+
+/// Behind `api::check_origin` and `session::require`, as a page socket is. A workspace the user is
+/// not a member of answers as one that does not exist.
+pub async fn upgrade_events<S: DocStore, A: Authorizer>(
+    RawQuery(query): RawQuery,
+    State(state): State<AppState<S, A>>,
+    Extension(session): Extension<CurrentSession>,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    let Some(workspace_id) = workspace_param(query.as_deref()) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let user_id = &session.user.id;
+    let hash = session.token_hash();
+    let seat = EventSeat {
+        workspace_id,
+        user_id,
+        session: &hash,
+    };
+    let spaces = match state.authorizer.recheck_events(&seat).await {
+        Ok(EventStanding::Open(spaces)) => spaces,
+        Ok(EventStanding::Close(_)) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => {
+            tracing::error!(workspace_id, %error, "cannot resolve a member");
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        }
+    };
+    let joined = state
+        .registry
+        .join_events(workspace_id, user_id, &hash, spaces);
+    let Ok(connection) = joined else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+
+    // As for a page socket: a recheck only finds sockets that have joined. `settle` keeps what a
+    // recheck decided in the meantime.
+    match state.authorizer.recheck_events(&seat).await {
+        Ok(standing) => connection.settle(standing),
+        Err(error) => {
+            tracing::error!(workspace_id, %error, "cannot resolve a member");
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        }
+    }
+
+    let config = state.socket;
+    let open_socket = state.sockets.subscribe();
+    upgrade
+        .read_buffer_size(EVENTS_BUFFER_BYTES)
+        .write_buffer_size(EVENTS_BUFFER_BYTES)
+        .max_frame_size(EVENTS_MAX_FRAME_BYTES)
+        .max_message_size(EVENTS_MAX_FRAME_BYTES)
+        .on_upgrade(move |socket| async move {
+            run_events(socket, connection, config).await;
+            drop(open_socket);
+        })
+}
+
+async fn run_events(mut socket: WebSocket, mut connection: EventConnection, config: SocketConfig) {
+    let code = pump_events(&mut socket, &mut connection, config).await;
+    // Its place in the socket count is free now, whatever the close handshake takes.
+    drop(connection);
+    let _ = timeout(CLOSE_GRACE, close(&mut socket, code)).await;
+}
+
+/// `pump` for a socket that only sends: anything a client sends but a pong closes it.
+async fn pump_events(
+    socket: &mut WebSocket,
+    connection: &mut EventConnection,
+    config: SocketConfig,
+) -> Option<u16> {
+    let mut ping = interval_at(Instant::now() + config.ping, config.ping);
+    ping.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut last_heard = Instant::now();
+
+    loop {
+        let outgoing = tokio::select! {
+            incoming = socket.recv() => match incoming {
+                Some(Ok(Message::Pong(_))) => {
+                    last_heard = Instant::now();
+                    continue;
+                }
+                Some(Ok(Message::Close(_))) | None => return None,
+                Some(Ok(_)) => return Some(CLOSE_PROTOCOL_ERROR),
+                Some(Err(error)) => return read_error_code(error),
+            },
+            outbound = connection.next() => match outbound {
+                EventOutbound::Text(frame) => Message::Text(frame.into()),
+                EventOutbound::Close(code) => return Some(code),
+            },
+            _ = ping.tick() => {
+                if last_heard.elapsed() >= config.ping_timeout {
+                    return Some(CLOSE_TOO_SLOW);
+                }
+                Message::Ping(Bytes::new())
+            }
+        };
+        match timeout(config.ping_timeout, socket.send(outgoing)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => return None,
+            Err(_) => return Some(CLOSE_TOO_SLOW),
+        }
+    }
 }
 
 async fn run(mut socket: WebSocket, mut connection: Connection, config: SocketConfig) {

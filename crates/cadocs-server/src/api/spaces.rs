@@ -6,7 +6,7 @@ use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
-use cadocs_collab::Authorizer;
+use cadocs_collab::{Authorizer, Event, SpaceEvent};
 use cadocs_core::permissions::{DefaultRole, SpaceRole};
 use cadocs_store::{
     AccountStore, DocStore, Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges,
@@ -162,6 +162,12 @@ async fn create<S: SpaceStore, A>(
         now: now_ms(),
     };
     let space = state.store.create_space(&new).await?;
+    // Nobody has this space in their set yet: the recheck gives it to its readers.
+    let event = Event::space(SpaceEvent::Created, &space.id);
+    state
+        .registry
+        .publish_after_recheck(&space.workspace_id, event);
+    state.access_changed();
     Ok((StatusCode::CREATED, Json(SpaceBody::from(space))).into_response())
 }
 
@@ -215,6 +221,8 @@ async fn update<S: SpaceStore, A>(
     if new_default_role {
         state.access_changed();
     }
+    let event = Event::space(SpaceEvent::Updated, &space.id);
+    state.registry.publish(&space.workspace_id, event);
     Ok(Json(space.into()))
 }
 
@@ -223,11 +231,13 @@ async fn trash<S: SpaceStore, A>(
     Extension(current): Extension<CurrentSession>,
     PathParam(space): PathParam,
 ) -> Result<StatusCode, ApiError> {
-    state
+    let workspace = state
         .store
         .trash_space(&space, &current.user.id, now_ms())
         .await?;
     state.access_changed();
+    let event = Event::space(SpaceEvent::Trashed, &space);
+    state.registry.publish(&workspace, event);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -240,6 +250,8 @@ async fn restore<S: SpaceStore, A>(
         .store
         .restore_space(&space, &current.user.id, now_ms())
         .await?;
+    let event = Event::space(SpaceEvent::Restored, &space.id);
+    state.registry.publish(&space.workspace_id, event);
     Ok(Json(space.into()))
 }
 

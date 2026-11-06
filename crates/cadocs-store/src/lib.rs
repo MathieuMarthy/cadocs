@@ -14,10 +14,12 @@ pub use accounts::{
     NewPasswordReset, NewSession, SessionStanding, UpdateBasis, User, UserChanges, UserRecord,
 };
 pub use pages::{
-    DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, NewPage, PageMove, PageRecord, PageStore,
-    Placement,
+    DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, MovedPage, NewPage, PageMove, PageRecord,
+    PageStore, Placement,
 };
-pub use spaces::{Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore};
+pub use spaces::{
+    Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore, WorkspaceReach,
+};
 pub use sqlite::SqliteStore;
 pub use workspaces::{
     Invitation, InvitationPreview, InvitedUser, MAX_SLUG_CHARS, Member, NewInvitation,
@@ -116,6 +118,13 @@ pub struct DocEdit {
     pub author: Option<String>,
 }
 
+/// Where a page sits, for what is announced to the readers of its space.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageSite {
+    pub workspace_id: String,
+    pub space_id: String,
+}
+
 impl DocEdit {
     /// A client can put any length in the Yjs title, and this copy is read with every page.
     pub fn clip_title(mut title: String) -> String {
@@ -154,13 +163,14 @@ pub trait DocStore: Send + Sync + 'static {
     /// a batch that was already stored succeeds, so a flush can retry after a lost commit. A `seq`
     /// below 1, covered by the snapshot, or stored with other data is a `SeqConflict`: `load`
     /// would never return that update, so it must not pass for durable. The same transaction
-    /// applies `edit` to the page. A document whose page is gone is a `PageNotFound`.
+    /// applies `edit` to the page, and answers where the page sits if that changed its title. A
+    /// document whose page is gone is a `PageNotFound`.
     fn append_updates(
         &self,
         doc_id: &str,
         updates: &[StoredUpdate],
         edit: &DocEdit,
-    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<PageSite>, StoreError>> + Send;
 
     /// Writes the snapshot and deletes the updates it covers, in one transaction. Updates after
     /// `snapshot.upto_seq` stay. A snapshot older than the stored one is refused, because the

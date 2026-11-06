@@ -7,7 +7,7 @@ use std::future::Future;
 
 use cadocs_core::permissions::{Scope, SpaceRole};
 
-use crate::StoreError;
+use crate::{PageSite, StoreError};
 
 /// How many levels a tree may have. Deleting a page runs nested triggers down its subtree, and
 /// SQLite refuses more than 1000: a deeper tree could never be purged, nor its workspace deleted.
@@ -64,6 +64,13 @@ pub struct PageRecord {
     pub deleted_by: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// A page after a move, and the space it left, the same one for a move inside a space.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MovedPage {
+    pub page: PageRecord,
+    pub from_space: String,
 }
 
 /// Where a list ordered by date starts again: after this row.
@@ -131,7 +138,7 @@ pub trait PageStore: Send + Sync + 'static {
         actor: &str,
         destination: &PageMove,
         now: i64,
-    ) -> impl Future<Output = Result<PageRecord, StoreError>> + Send;
+    ) -> impl Future<Output = Result<MovedPage, StoreError>> + Send;
 
     /// Takes the live descendants, with one date. Refused with `PageNotFound` or `NotAllowed`.
     fn trash_page(
@@ -139,7 +146,7 @@ pub trait PageStore: Send + Sync + 'static {
         page_id: &str,
         actor: &str,
         now: i64,
-    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+    ) -> impl Future<Output = Result<PageSite, StoreError>> + Send;
 
     /// Brings back what was trashed with the page, at the root of the space if its parent stays
     /// in the trash. Refused with `PageNotFound`, or `NotAllowed` for a page that is not in the
@@ -156,7 +163,7 @@ pub trait PageStore: Send + Sync + 'static {
         &self,
         page_id: &str,
         actor: &str,
-    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+    ) -> impl Future<Output = Result<PageSite, StoreError>> + Send;
 
     /// At most `limit` trashed pages, the last trashed first. Refused with `SpaceNotFound` or
     /// `NotAllowed`.

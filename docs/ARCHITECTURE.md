@@ -62,7 +62,7 @@ Awareness (cursors, names, colours) is never persisted. When a socket closes, th
 
 ### Events
 
-A page socket only covers its page. Changes to the tree and to titles reach other users through one events socket per tab (ADR 0011). A REST handler or a flush that changes the tree publishes to the workspace hub, and each socket forwards the events for spaces its user can read. Events carry ids only, and the client refetches through REST.
+A page socket only covers its page. Changes to the tree and to titles reach other users through one events socket per tab (ADR 0011). A REST handler or a flush that changes the tree publishes to the workspace hub, and each socket forwards the events for spaces its user can read. Events carry ids only, and the client refetches through REST. The hubs live in `DocRegistry`, beside the rooms, because a flush publishes `page.renamed`, the socket count is shared, and one recheck pass covers both kinds of socket.
 
 ### Persistence and compaction
 

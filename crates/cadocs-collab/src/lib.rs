@@ -4,6 +4,7 @@
 //! [`Connection`], and maps [`CollabError`] to an HTTP status before the upgrade.
 
 mod connection;
+mod events;
 mod registry;
 mod room;
 
@@ -13,11 +14,14 @@ use std::time::Duration;
 
 use cadocs_core::permissions::{
     CLOSE_FORBIDDEN, CLOSE_NOT_FOUND, CLOSE_SESSION_ENDED, Scope, SocketMode, SocketOutcome,
-    page_socket_mode, recompute_page_socket,
+    SpaceRole, page_socket_mode, recompute_page_socket,
 };
-use cadocs_store::{AccountStore, PageStore, SessionStanding, StoreError, now_ms};
+use cadocs_store::{
+    AccountStore, PageStore, SessionStanding, SpaceStore, StoreError, WorkspaceReach, now_ms,
+};
 
 pub use connection::{Close, Connection, Outbound};
+pub use events::{Event, EventConnection, EventOutbound, PageEvent, SpaceEvent};
 pub use registry::DocRegistry;
 
 /// Server shutting down.
@@ -98,6 +102,23 @@ pub struct Seat<'a> {
     pub mode: SocketMode,
 }
 
+/// An open events socket, as a recheck sees it.
+#[derive(Debug, Clone, Copy)]
+pub struct EventSeat<'a> {
+    pub workspace_id: &'a str,
+    pub user_id: &'a str,
+    /// The hash of the session that opened the socket.
+    pub session: &'a str,
+}
+
+/// What an events socket is worth now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventStanding {
+    /// It stays, with the spaces its user has a role on, ordered by id.
+    Open(Vec<(String, SpaceRole)>),
+    Close(u16),
+}
+
 pub trait Authorizer: Send + Sync + 'static {
     /// Decides the mode of a page socket before the upgrade. `None` refuses it.
     fn authorize(
@@ -111,6 +132,12 @@ pub trait Authorizer: Send + Sync + 'static {
         &self,
         seat: &Seat<'_>,
     ) -> impl Future<Output = Result<SocketOutcome, StoreError>> + Send;
+
+    /// Decides an events socket, before the upgrade and for as long as it stays open.
+    fn recheck_events(
+        &self,
+        seat: &EventSeat<'_>,
+    ) -> impl Future<Output = Result<EventStanding, StoreError>> + Send;
 }
 
 /// Resolves the role of a user from the database, as REST does.
@@ -125,7 +152,7 @@ impl<S> PageAuthorizer<S> {
     }
 }
 
-impl<S: PageStore + AccountStore> Authorizer for PageAuthorizer<S> {
+impl<S: PageStore + SpaceStore + AccountStore> Authorizer for PageAuthorizer<S> {
     async fn authorize(
         &self,
         page_id: &str,
@@ -151,5 +178,22 @@ impl<S: PageStore + AccountStore> Authorizer for PageAuthorizer<S> {
                 recompute_page_socket(seat.mode, scope)
             }),
         )
+    }
+
+    async fn recheck_events(&self, seat: &EventSeat<'_>) -> Result<EventStanding, StoreError> {
+        let standing = self
+            .store
+            .session_standing(seat.session, seat.user_id, now_ms());
+        match standing.await? {
+            SessionStanding::Active => {}
+            SessionStanding::Disabled => return Ok(EventStanding::Close(CLOSE_FORBIDDEN)),
+            SessionStanding::Ended => return Ok(EventStanding::Close(CLOSE_SESSION_ENDED)),
+        }
+        let reach = self.store.workspace_reach(seat.workspace_id, seat.user_id);
+        Ok(match reach.await? {
+            WorkspaceReach::Member(spaces) => EventStanding::Open(spaces),
+            WorkspaceReach::Stranger => EventStanding::Close(CLOSE_FORBIDDEN),
+            WorkspaceReach::Gone => EventStanding::Close(CLOSE_NOT_FOUND),
+        })
     }
 }

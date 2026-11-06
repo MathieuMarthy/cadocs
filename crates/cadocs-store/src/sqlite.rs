@@ -12,7 +12,7 @@ use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
 
-use crate::{DocEdit, DocStore, Snapshot, StoreError, StoredDoc, StoredUpdate, now_ms};
+use crate::{DocEdit, DocStore, PageSite, Snapshot, StoreError, StoredDoc, StoredUpdate, now_ms};
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations/sqlite");
 
@@ -132,13 +132,24 @@ impl DocStore for SqliteStore {
         doc_id: &str,
         updates: &[StoredUpdate],
         edit: &DocEdit,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Option<PageSite>, StoreError> {
         if updates.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
 
         let created_at = now_ms();
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        // Most flushes keep the title, and only a new one is worth telling anyone.
+        let renamed =
+            sqlx::query("SELECT workspace_id, space_id FROM pages WHERE id = ?1 AND title <> ?2")
+                .bind(doc_id)
+                .bind(&edit.title)
+                .fetch_optional(&mut *tx)
+                .await?
+                .map(|row| PageSite {
+                    workspace_id: row.get("workspace_id"),
+                    space_id: row.get("space_id"),
+                });
         // Reading the author from `users`: a foreign key error here would fail every retry.
         let page = sqlx::query(
             "UPDATE pages SET
@@ -200,7 +211,7 @@ impl DocStore for SqliteStore {
             }
         }
         tx.commit().await?;
-        Ok(())
+        Ok(renamed)
     }
 
     async fn compact(&self, doc_id: &str, snapshot: &Snapshot) -> Result<(), StoreError> {

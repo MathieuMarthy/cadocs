@@ -9,7 +9,10 @@ use sqlx::{AssertSqlSafe, Row, SqliteConnection};
 
 use super::workspaces::{authorize as authorize_workspace, numbered_slug};
 use super::{BEGIN_WRITE, SqliteStore};
-use crate::{Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore, StoreError};
+use crate::{
+    Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore, StoreError,
+    WorkspaceReach,
+};
 
 /// What resolution needs to know about the user `?1` and the space `s`.
 macro_rules! space_access {
@@ -262,6 +265,43 @@ impl SpaceStore for SqliteStore {
         Ok(row.as_ref().filter(|row| readable(row)).and_then(space))
     }
 
+    async fn workspace_reach(
+        &self,
+        workspace_id: &str,
+        user_id: &str,
+    ) -> Result<WorkspaceReach, StoreError> {
+        let mut reader = self.reader.acquire().await?;
+        let action = WorkspaceAction::Read;
+        match authorize_workspace(&mut reader, workspace_id, user_id, action).await {
+            Ok(()) => {}
+            // In this order, so that a workspace deleted between two reads cannot pass for a
+            // removal.
+            Err(StoreError::WorkspaceNotFound) => {
+                let exists: bool =
+                    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM workspaces WHERE id = ?1)")
+                        .bind(workspace_id)
+                        .fetch_one(&mut *reader)
+                        .await?;
+                return Ok(match exists {
+                    true => WorkspaceReach::Stranger,
+                    false => WorkspaceReach::Gone,
+                });
+            }
+            Err(error) => return Err(error),
+        }
+        let rows = sqlx::query(AssertSqlSafe(format!(
+            "{SELECT_SPACE} WHERE s.workspace_id = ?2 AND {HAS_ROLE} ORDER BY s.id"
+        )))
+        .bind(user_id)
+        .bind(workspace_id)
+        .fetch_all(&mut *reader)
+        .await?;
+        let spaces = rows.iter().filter_map(space);
+        Ok(WorkspaceReach::Member(
+            spaces.map(|space| (space.id, space.role)).collect(),
+        ))
+    }
+
     async fn update_space(
         &self,
         space_id: &str,
@@ -292,16 +332,21 @@ impl SpaceStore for SqliteStore {
         Ok(space)
     }
 
-    async fn trash_space(&self, space_id: &str, actor: &str, now: i64) -> Result<(), StoreError> {
+    async fn trash_space(
+        &self,
+        space_id: &str,
+        actor: &str,
+        now: i64,
+    ) -> Result<String, StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
-        authorize(&mut tx, space_id, actor, SpaceAction::TrashSpace).await?;
+        let row = authorize(&mut tx, space_id, actor, SpaceAction::TrashSpace).await?;
         sqlx::query("UPDATE spaces SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1")
             .bind(space_id)
             .bind(now)
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
-        Ok(())
+        Ok(row.get("workspace_id"))
     }
 
     async fn restore_space(

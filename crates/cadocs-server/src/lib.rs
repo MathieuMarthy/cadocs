@@ -140,6 +140,12 @@ where
                 .route_layer(from_fn_with_state(state.clone(), session::require::<S, A>))
                 .route_layer(from_fn_with_state(state.http.clone(), api::check_origin)),
         )
+        .route(
+            "/ws/events",
+            get(ws::upgrade_events::<S, A>)
+                .route_layer(from_fn_with_state(state.clone(), session::require::<S, A>))
+                .route_layer(from_fn_with_state(state.http.clone(), api::check_origin)),
+        )
         .nest("/api/v1", api::router(&state))
         .route("/api/v1/", any(api::not_found))
         .fallback_service(get(assets::serve::<E>))

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use cadocs_collab::{CollabConfig, Connection, DocRegistry, Outbound};
 use cadocs_core::permissions::SocketMode;
-use cadocs_store::{DocEdit, DocStore, Snapshot, StoreError, StoredDoc, StoredUpdate};
+use cadocs_store::{DocEdit, DocStore, PageSite, Snapshot, StoreError, StoredDoc, StoredUpdate};
 use tokio::sync::Notify;
 use tokio::time::timeout;
 use yrs::sync::{Awareness, Message, SyncMessage};
@@ -58,6 +58,10 @@ pub struct Stats {
     pub appends: usize,
     pub compacts: usize,
 }
+
+/// Where every page of a `MemStore` sits.
+pub const WORKSPACE: &str = "ws";
+pub const SPACE: &str = "space";
 
 #[derive(Default)]
 pub struct MemStore {
@@ -131,7 +135,7 @@ impl DocStore for MemStore {
         doc_id: &str,
         updates: &[StoredUpdate],
         edit: &DocEdit,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Option<PageSite>, StoreError> {
         self.stats.lock().unwrap().appends += 1;
         self.append_gate.pass().await;
         if self.page_gone.load(Ordering::SeqCst) {
@@ -158,8 +162,14 @@ impl DocStore for MemStore {
                 doc.updates.push(update.clone());
             }
         }
-        self.edits.lock().unwrap().push(edit.clone());
-        Ok(())
+        let mut edits = self.edits.lock().unwrap();
+        let title = edits.iter().rev().find_map(|edit| edit.title.as_ref());
+        let renamed = edit.title.is_some() && edit.title.as_ref() != title;
+        edits.push(edit.clone());
+        Ok(renamed.then(|| PageSite {
+            workspace_id: WORKSPACE.to_owned(),
+            space_id: SPACE.to_owned(),
+        }))
     }
 
     async fn compact(&self, doc_id: &str, snapshot: &Snapshot) -> Result<(), StoreError> {

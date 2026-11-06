@@ -6,13 +6,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use cadocs_core::permissions::{SocketMode, SocketOutcome};
+use cadocs_core::permissions::{SocketMode, SocketOutcome, SpaceRole};
 use cadocs_store::{DocEdit, DocStore, StoreError, StoredUpdate};
 use tokio::sync::{Notify, Semaphore, watch};
 use tokio::time::{Instant, sleep, sleep_until};
 use tracing::warn;
 
 use crate::connection::Connection;
+use crate::events::{Event, EventConnection, EventHubs, PageEvent};
 use crate::room::{Room, Transition, lock};
 use crate::{Authorizer, CLOSE_GOING_AWAY, CollabConfig, CollabError, Seat};
 
@@ -36,7 +37,9 @@ struct Inner<S> {
     store: Arc<S>,
     config: CollabConfig,
     rooms: Mutex<Rooms>,
+    /// Page and events sockets alike.
     sockets: Arc<Semaphore>,
+    events: Arc<EventHubs>,
     failing_rooms: AtomicUsize,
     unloaded: Notify,
 }
@@ -66,15 +69,35 @@ impl<S> Clone for DocRegistry<S> {
     }
 }
 
+impl<S> DocRegistry<S> {
+    /// Tells the sockets of a workspace, for those whose user reads the space of `event`.
+    pub fn publish(&self, workspace_id: &str, event: Event) {
+        self.inner.events.publish(workspace_id, event);
+    }
+
+    /// Publishes `event` after the next recheck, for a space whose readers only that recheck can
+    /// tell. A recheck must follow, through `AppState::access_changed` in the server.
+    pub fn publish_after_recheck(&self, workspace_id: &str, event: Event) {
+        self.inner.events.hold(workspace_id, event);
+    }
+
+    /// Workspaces with an events socket.
+    pub fn event_hubs(&self) -> usize {
+        self.inner.events.count()
+    }
+}
+
 impl<S: DocStore> DocRegistry<S> {
     pub fn new(store: Arc<S>, config: CollabConfig) -> Self {
         let sockets = Arc::new(Semaphore::new(config.max_sockets));
+        let events = Arc::new(EventHubs::new(config.send_queue));
         Self {
             inner: Arc::new(Inner {
                 store,
                 config,
                 rooms: Mutex::default(),
                 sockets,
+                events,
                 failing_rooms: AtomicUsize::new(0),
                 unloaded: Notify::new(),
             }),
@@ -102,6 +125,22 @@ impl<S: DocStore> DocRegistry<S> {
             room.join(mode, user_id, session, permit)
         })
         .await
+    }
+
+    /// Opens an events socket on a workspace, for a user with a role on `spaces`, ordered by id.
+    pub fn join_events(
+        &self,
+        workspace_id: &str,
+        user_id: &str,
+        session: &str,
+        spaces: Vec<(String, SpaceRole)>,
+    ) -> Result<EventConnection, CollabError> {
+        let sockets = self.inner.sockets.clone();
+        let permit = sockets
+            .try_acquire_owned()
+            .map_err(|_| CollabError::AtCapacity)?;
+        let hubs = &self.inner.events;
+        hubs.join(workspace_id, user_id, session, spaces, permit)
     }
 
     /// Waits until a document's room is live, loading it if needed. A check that decides a write
@@ -147,6 +186,25 @@ impl<S: DocStore> DocRegistry<S> {
     /// Asks `authorizer` about every open socket, and closes those it refuses. A socket that cannot
     /// be checked stays open, and the last failure is returned, for the next pass to fix.
     pub async fn recheck(&self, authorizer: &impl Authorizer) -> Result<(), StoreError> {
+        // Taken first: what is held was stored before this pass, so the pass sees its readers.
+        let held = self.inner.events.take_held();
+        let mut result = self.recheck_page_sockets(authorizer).await;
+        for seat in self.inner.events.open_seats() {
+            match authorizer.recheck_events(&seat.view()).await {
+                Ok(standing) => self.inner.events.settle(&seat, standing),
+                Err(error) => {
+                    warn!(%error, "cannot recheck an events socket");
+                    result = Err(error);
+                }
+            }
+        }
+        for (workspace_id, event) in held {
+            self.inner.events.publish(&workspace_id, event);
+        }
+        result
+    }
+
+    async fn recheck_page_sockets(&self, authorizer: &impl Authorizer) -> Result<(), StoreError> {
         let rooms: Vec<_> = lock(&self.inner.rooms)
             .slots
             .values()
@@ -200,6 +258,7 @@ impl<S: DocStore> DocRegistry<S> {
     /// Refuses new connections, closes every socket with `1001`, and flushes and unloads every
     /// room. Returns the last failure, if any: those edits only remain in connected clients.
     pub async fn shutdown(&self) -> Result<(), CollabError> {
+        self.inner.events.close_all();
         loop {
             // A room that failed in the last round may be back and flushed in this one.
             let mut result = Ok(());
@@ -450,7 +509,11 @@ impl<S: DocStore> RoomTask<S> {
             .append_updates(&self.room.doc_id, &self.batch, &self.edit)
             .await
         {
-            Ok(()) => {
+            Ok(renamed) => {
+                if let Some(site) = renamed {
+                    let event = Event::page(PageEvent::Renamed, &site.space_id, &self.room.doc_id);
+                    self.inner.events.publish(&site.workspace_id, event);
+                }
                 let batch = mem::take(&mut self.batch);
                 self.edit = DocEdit::default();
                 let bytes: usize = batch.iter().map(|update| update.data.len()).sum();

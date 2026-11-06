@@ -25,9 +25,9 @@ Environment variables only, so no config file format has to be parsed or documen
 | `CADOCS_ROOM_IDLE_SECS` **P** | `60` | Delay before an empty room unloads |
 | `CADOCS_ROOM_QUEUE_BYTES` **P** | `4194304` | Unflushed updates a room may hold |
 | `CADOCS_MAX_ROOMS` **P** | `256` | Loaded rooms. Idle rooms are unloaded first. If all are live, new connections get `503` |
-| `CADOCS_MAX_SOCKETS` **P** | `512` | Open WebSockets of any kind. Past this, `503`. `DocRegistry` holds the count, and the events socket must share it |
+| `CADOCS_MAX_SOCKETS` **P** | `512` | Open WebSockets of any kind. Past this, `503`. `DocRegistry` holds the count, for page and events sockets alike |
 | `CADOCS_MAX_FRAME_BYTES` **P** | `8388608` | Largest incoming frame |
-| `CADOCS_SEND_QUEUE` **P** | `256` | Queued messages per socket |
+| `CADOCS_SEND_QUEUE` **P** | `256` | Queued messages per socket. Also the events a workspace hub keeps, up to 4096, which an events socket may fall behind by before it gets `resync` |
 | `CADOCS_PING_SECS` **P** | `30` | Ping interval |
 | `CADOCS_SOCKET_RECHECK_SECS` **P** | `60` | Time between two checks of every open socket: the longest a socket outlives its session, or a change made by a command beside the server. A change made through the API closes sockets at once |
 | `CADOCS_PING_TIMEOUT_SECS` **P** | `90` | Silence before a socket closes, and the longest a single send may take. Must be above `CADOCS_PING_SECS` |

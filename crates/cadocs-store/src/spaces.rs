@@ -67,6 +67,18 @@ pub struct Grant {
     pub created_at: i64,
 }
 
+/// How a user stands in a workspace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceReach {
+    /// The workspace no longer exists.
+    Gone,
+    /// The user is not an enabled member.
+    Stranger,
+    /// A member, with each space they have a role on, ordered by id. A trashed space counts: its
+    /// readers must hear that it came back.
+    Member(Vec<(String, SpaceRole)>),
+}
+
 pub trait SpaceStore: Send + Sync + 'static {
     /// Refused with `WorkspaceNotFound` for a stranger and `NotAllowed` for a member.
     fn create_space(
@@ -100,6 +112,13 @@ pub trait SpaceStore: Send + Sync + 'static {
         actor: &str,
     ) -> impl Future<Output = Result<Option<Space>, StoreError>> + Send;
 
+    /// What an events socket of this user may hear about this workspace, as things stand now.
+    fn workspace_reach(
+        &self,
+        workspace_id: &str,
+        user_id: &str,
+    ) -> impl Future<Output = Result<WorkspaceReach, StoreError>> + Send;
+
     /// Refused with `SpaceNotFound` or `NotAllowed`.
     fn update_space(
         &self,
@@ -109,13 +128,13 @@ pub trait SpaceStore: Send + Sync + 'static {
         now: i64,
     ) -> impl Future<Output = Result<Space, StoreError>> + Send;
 
-    /// Refused with `SpaceNotFound` or `NotAllowed`.
+    /// Answers the workspace of the space. Refused with `SpaceNotFound` or `NotAllowed`.
     fn trash_space(
         &self,
         space_id: &str,
         actor: &str,
         now: i64,
-    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+    ) -> impl Future<Output = Result<String, StoreError>> + Send;
 
     /// Refused with `SpaceNotFound`, or `NotAllowed` for a space that is not in the trash.
     fn restore_space(

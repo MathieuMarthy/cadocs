@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use cadocs_collab::{
     Authorizer, CLOSE_FRAME_TOO_LARGE, CLOSE_GOING_AWAY, CLOSE_PAGE_GONE, CLOSE_PROTOCOL_ERROR,
-    CLOSE_STORAGE_FAILING, CLOSE_TOO_SLOW, Close, CollabConfig, CollabError, DocRegistry, Outbound,
-    Seat,
+    CLOSE_STORAGE_FAILING, CLOSE_TOO_SLOW, Close, CollabConfig, CollabError, DocRegistry,
+    EventSeat, EventStanding, Outbound, Seat,
 };
 use cadocs_core::permissions::SocketMode::{ReadOnly, ReadWrite};
 use cadocs_core::permissions::{SocketMode, SocketOutcome};
@@ -2172,6 +2172,10 @@ impl Authorizer for Rules {
             true => SocketOutcome::Close(4403),
             false => SocketOutcome::Keep,
         })
+    }
+
+    async fn recheck_events(&self, _: &EventSeat<'_>) -> Result<EventStanding, StoreError> {
+        Ok(EventStanding::Open(Vec::new()))
     }
 }
 

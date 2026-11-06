@@ -27,6 +27,7 @@ pub struct Api {
     pub addr: std::net::SocketAddr,
     pub db: SqlitePool,
     pub store: Arc<SqliteStore>,
+    pub registry: DocRegistry<SqliteStore>,
     _stop: oneshot::Sender<()>,
     _dir: TempDir,
 }
@@ -95,7 +96,7 @@ pub async fn start_tuned(public_url: &str, proxies: &str, settings: &[(&str, &st
     .unwrap();
     let registry = DocRegistry::new(store.clone(), config.collab);
     let state = AppState::new(
-        registry,
+        registry.clone(),
         store.clone(),
         Arc::new(PageAuthorizer::new(store.clone())),
         config.socket,
@@ -115,6 +116,7 @@ pub async fn start_tuned(public_url: &str, proxies: &str, settings: &[(&str, &st
         addr,
         db,
         store,
+        registry,
         _stop: stop,
         _dir: dir,
     }

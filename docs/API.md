@@ -298,7 +298,7 @@ By default, `y-websocket` reconnects after any close code except 4400 to 4499, w
 GET /ws/events?workspace={workspace_id}      MVP
 ```
 
-The checks before the upgrade are the same as for a page socket, with workspace membership in place of page access. Frames are server to client, as JSON text (ADR 0011). A client frame closes the socket. Close codes `1001`, `4401`, `4403` and `4408` apply.
+The checks before the upgrade are the same as for a page socket, with workspace membership in place of page access. Frames are server to client, as JSON text (ADR 0011). A client frame other than a pong closes the socket with `1002`. Close codes `1001`, `4401`, `4403`, `4404` (the workspace was deleted) and `4408` apply. A missing `workspace` parameter answers `404`, like a workspace the user is not a member of.
 
 Events are hints. The client refetches through REST, and refetches the tree after every reconnect.
 
@@ -308,8 +308,8 @@ Events are hints. The client refetches through REST, and refetches the tree afte
 
 | Type | Fields | Meaning |
 | --- | --- | --- |
-| `page.created`, `page.moved`, `page.renamed`, `page.trashed`, `page.restored` | `space`, `page` | The tree changed. A move across spaces is sent to both |
-| `space.created`, `space.updated`, `space.trashed`, `space.restored` | `space` | The space list changed |
+| `page.created`, `page.moved`, `page.renamed`, `page.trashed`, `page.restored`, `page.purged` | `space`, `page` | The tree or the trash changed. A move across spaces is sent to both |
+| `space.created`, `space.updated`, `space.trashed`, `space.restored` | `space` | The space list changed. A reader of a new space may also get `access.changed` |
 | `access.changed` | none | The user's permissions changed, reload the space list |
 | `notification` | `id` | A new notification (V1) |
 | `resync` | none | Events were dropped because the client lagged, reload everything shown |

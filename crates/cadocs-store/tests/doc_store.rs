@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use cadocs_store::{
-    DocEdit, DocStore, MAX_TITLE_CHARS, PageStore, Snapshot, SqliteStore, StoreError, StoredDoc,
-    StoredUpdate,
+    DocEdit, DocStore, MAX_TITLE_CHARS, PageSite, PageStore, Snapshot, SqliteStore, StoreError,
+    StoredDoc, StoredUpdate,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 use sqlx::{Connection, Row};
@@ -179,6 +179,24 @@ async fn a_flush_copies_the_title_and_who_wrote() {
     assert_eq!(title, "Plans");
     assert_eq!(updated_by.as_deref(), Some("ada"));
     assert!(updated_at > 1);
+}
+
+#[tokio::test]
+async fn a_flush_tells_where_the_title_changed() {
+    let (store, _dir) = open().await;
+    let plans = edit("Plans", "ada");
+    let site = PageSite {
+        workspace_id: "ws".to_owned(),
+        space_id: "space".to_owned(),
+    };
+    let flush = |seq, edit| {
+        let updates = updates([seq]);
+        let store = &store;
+        async move { store.append_updates(DOC, &updates, edit).await.unwrap() }
+    };
+    assert_eq!(flush(1, &plans).await, Some(site));
+    assert_eq!(flush(2, &plans).await, None);
+    assert_eq!(flush(3, &NO_EDIT).await, None);
 }
 
 #[tokio::test]
