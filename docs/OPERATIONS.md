@@ -67,7 +67,7 @@ data/
 
 ## Deployment
 
-- **Platforms:** Linux `x86_64` and `aarch64`, on the `-gnu` targets. A `musl` build would need mimalloc, because musl's allocator is too slow for this workload. The benchmark settles the allocator.
+- **Platforms:** Linux `x86_64` and `aarch64`, on the `-gnu` targets. The server calls glibc's `malloc_trim` (ADR 0015), so a `musl` build does not link. musl's allocator is also too slow for this workload.
 - **Docker:** a small glibc base image, a non-root user, and one volume on the data folder.
 - **TLS:** handled by a reverse proxy (Caddy, nginx, Traefik). cadocs has no TLS code. Plain HTTP works on `localhost` only, because browsers accept `Secure` cookies there.
 - **Reverse proxy:** it must forward WebSocket upgrades and keep them open past the ping interval. Set `CADOCS_TRUSTED_PROXIES`, otherwise rate limits see the proxy as one client.

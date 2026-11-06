@@ -137,7 +137,7 @@ These figures are design estimates. The prototype's measurements are in [Measure
 
 Other strategies:
 
-- **Allocator.** Freed memory does not always return to the OS. The benchmark compares glibc, `MALLOC_ARENA_MAX=2` and mimalloc, including after unload.
+- **Allocator.** Freed memory does not always return to the OS. The server stays on glibc and calls `malloc_trim` after a room unloads (ADR 0015).
 - **Dependencies.** Each crate must justify its cost ([CARGO_WORKSPACE.md](CARGO_WORKSPACE.md)).
 - **No in-memory caches of database rows.** SQLite and the OS page cache are already fast enough at this scale.
 - **Backpressure everywhere.** Every queue is bounded, so load shows up as latency or a refused connection instead of memory growth.
@@ -170,7 +170,35 @@ Fixed before the first measurement. A change after that needs a new ADR, and old
 
 ## Measured results
 
-Not measured yet. The prototype benchmark will fill in this section.
+**Verdict: go.** Every target holds with glibc, on the server of ADR 0015. The first run was a no-go: without the trim, RSS after unloading 100 documents stayed at 72 MB. The scenario did not change between the two runs.
+
+Run on 2026-11-06 with `bench/rss.sh run`, on an Intel Core Ultra 5 236V, Linux 7.3.1, transparent huge pages set to `always`. RSS in MB (10^6 bytes). Each document count starts a fresh server, and the idle row shows the one before the 10 documents. The mimalloc column comes from the previous run, on a build removed after it, so `bench/rss.sh` no longer produces it.
+
+| Measure | Target | glibc | glibc, `MALLOC_ARENA_MAX=2` | mimalloc |
+| --- | --- | --- | --- | --- |
+| Idle | 30 or less | 7.5 | 7.5 | 17.8 |
+| 10 documents | under 50 | 16.3 | 15.8 | 28.0 |
+| After unload of 10 | idle plus 10 | 11.5 | 11.5 | 28.4 (missed) |
+| 100 documents | under 100 | 74.5 | 72.7 | 88.1 |
+| After unload of 100 | idle plus 10 | 14.1 | 14.3 | 95.1 (missed) |
+
+glibc with 100 documents, in MB: PSS 71.8, anonymous 67.2, peak 74.5. After unload: PSS 11.5, anonymous 6.9. Idle: PSS 4.8, anonymous 0.7, so most of the idle RSS is the file-backed binary.
+
+The server keeps glibc with its default settings: `MALLOC_ARENA_MAX=2` changes nothing beyond noise. The release binary is 6.1 MB.
+
+Costs, from `bench/rss.sh extras` on glibc, outside the scenario:
+
+| Cost | Measured | Estimate in the budget |
+| --- | --- | --- |
+| Per open socket on the benchmark document | 62 KiB | tens of KB |
+| Per loaded document, after the load | about 530 KiB, 10 to 15 times its encoded size of 37 to 56 KB | a few times its encoded size |
+| Opening 100 documents with a 2,000-row log instead of a compacted one | 3.0 MB more in total | not estimated |
+
+- A socket's cost is mostly the write buffer, which keeps the capacity of the SyncStep2 it sent. It grows with the document, as a 4 MiB document showed in step 3.
+- A loaded document costs far more than estimated: each `yrs` block is a heap structure, and 2,000 edits make thousands of them. The cap of `CADOCS_MAX_ROOMS` (256) would therefore reach about 140 MB with this document, which is above the MVP's 100 MB. The MVP's scenario has 30 pages, so it holds, but a larger active set needs a lower cap.
+- `load` holding the whole log is not a problem at this size, so `DocStore` stays as it is.
+
+Not measured: documents much larger than 20 KB, peaks on `aarch64`, and variance beyond the three runs of this step. glibc agreed within 0.4 MB on every measure the trim does not touch, while mimalloc moved by up to 8 MB over two runs.
 
 ## Limits accepted by design
 

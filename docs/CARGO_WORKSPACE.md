@@ -24,6 +24,8 @@ cadocs/
 
 `cadocs-server` embeds `web/dist`, which is not committed. Build the front end first (`npm --prefix web ci && npm --prefix web run build`), otherwise the binary serves no page and the build prints a warning. Debug builds read the folder at run time.
 
+`cadocs-bench` is outside `default-members`, so a plain `cargo build --release` does not build it. Built together, its dependency features would unify into the server's and change the shipped binary. Use `--workspace` for tests and clippy, and `-p` to build it.
+
 The prototype contains `core`, `store`, `collab`, `server` and `bench`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
 
 ## Selected crates
@@ -44,7 +46,6 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `anyhow` | Error context in the binary and tools | None | Low |
 | `serde`, `serde_json` | Checking that awareness states are JSON. Already pulled in by yrs | None extra | None extra |
 | `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
-| `mimalloc` (optional feature) | Candidate allocator, kept only if the benchmark justifies it | To be measured | Low |
 
 ### Dev tools only
 
@@ -89,7 +90,7 @@ Fractional indexing, rate limiting and the data folder lock (`std::fs::File::try
 | `aws-sdk-s3` | Very large dependency tree (ADR 0005) |
 | `async-graphql` | REST covers the need |
 | `actix-web` | Fine, but axum shares the tokio and tower ecosystem already in use |
-| `jemallocator` | Good at returning memory, but a slower build and larger binary. Would be compared if mimalloc disappoints |
+| `mimalloc`, `jemallocator` | glibc and `malloc_trim` hold the targets (ADR 0015). mimalloc was measured and lost, jemalloc was not needed |
 
 ## Release profile
 
