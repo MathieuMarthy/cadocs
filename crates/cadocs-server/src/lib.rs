@@ -6,8 +6,10 @@ pub mod cli;
 pub mod client_ip;
 pub mod config;
 pub mod data_dir;
+pub mod password;
 pub mod rate_limit;
 pub mod security;
+pub mod session;
 mod ws;
 
 use std::future::{Future, IntoFuture};
@@ -22,13 +24,15 @@ use axum::http::StatusCode;
 use axum::middleware::map_response;
 use axum::routing::{any, get};
 use cadocs_collab::{Authorizer, DocRegistry};
-use cadocs_store::DocStore;
+use cadocs_store::{AccountStore, DocStore};
 use rust_embed::RustEmbed;
 use tokio::net::TcpListener;
 use tokio::sync::{oneshot, watch};
 use tokio::time::timeout;
 
 use crate::config::{HttpConfig, SocketConfig};
+use crate::password::Passwords;
+use crate::rate_limit::RateLimiter;
 
 /// How long shutdown waits for HTTP requests in progress.
 const HTTP_GRACE: Duration = Duration::from_secs(2);
@@ -41,6 +45,9 @@ pub struct AppState<S, A> {
     pub authorizer: Arc<A>,
     pub socket: SocketConfig,
     pub http: Arc<HttpConfig>,
+    pub passwords: Arc<Passwords>,
+    /// Shared by the routes that check or hash a password.
+    pub password_guesses: Arc<RateLimiter>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
     sockets: watch::Sender<()>,
 }
@@ -53,6 +60,8 @@ impl<S, A> Clone for AppState<S, A> {
             authorizer: self.authorizer.clone(),
             socket: self.socket,
             http: self.http.clone(),
+            passwords: self.passwords.clone(),
+            password_guesses: self.password_guesses.clone(),
             sockets: self.sockets.clone(),
         }
     }
@@ -72,16 +81,26 @@ impl<S, A> AppState<S, A> {
             authorizer,
             socket,
             http: Arc::new(http),
+            passwords: Arc::default(),
+            password_guesses: Arc::new(RateLimiter::new(
+                api::auth::GUESS_BURST,
+                api::auth::GUESS_REFILL,
+            )),
             sockets: watch::Sender::new(()),
         }
     }
 }
 
-pub fn router<S: DocStore, A: Authorizer, E: RustEmbed + 'static>(state: AppState<S, A>) -> Router {
+pub fn router<S, A, E>(state: AppState<S, A>) -> Router
+where
+    S: DocStore + AccountStore,
+    A: Authorizer,
+    E: RustEmbed + 'static,
+{
     Router::new()
         .route("/health", get(health::<S, A>))
         .route("/ws/{doc}", get(ws::upgrade::<S, A>))
-        .nest("/api/v1", api::router(state.http.clone()))
+        .nest("/api/v1", api::router(&state))
         .route("/api/v1/", any(api::not_found))
         .fallback_service(get(assets::serve::<E>))
         .layer(map_response(security::add_headers))
@@ -97,7 +116,7 @@ async fn health<S: DocStore, A: Authorizer>(State(state): State<AppState<S, A>>)
 }
 
 /// Serves until `shutdown` resolves, then closes every socket and flushes every room.
-pub async fn serve<S: DocStore, A: Authorizer, E: RustEmbed + 'static>(
+pub async fn serve<S: DocStore + AccountStore, A: Authorizer, E: RustEmbed + 'static>(
     listener: TcpListener,
     state: AppState<S, A>,
     shutdown: impl Future<Output = ()> + Send + 'static,

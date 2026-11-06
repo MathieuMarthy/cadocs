@@ -17,8 +17,12 @@ use cadocs_server::api;
 use cadocs_server::client_ip::TrustedProxies;
 use cadocs_server::config::{HttpConfig, PublicUrl, SocketConfig};
 use cadocs_server::rate_limit::RateLimiter;
+use cadocs_server::session::token_hash;
 use cadocs_server::{AppState, router, serve};
-use cadocs_store::{DocStore, Snapshot, SqliteStore, StoreError, StoredDoc, StoredUpdate};
+use cadocs_store::{
+    AccountStore, ActiveSession, Credentials, DocStore, FirstUser, Membership, NewSession,
+    Snapshot, SqliteStore, StoreError, StoredDoc, StoredUpdate, UpdateBasis, UserChanges, now_ms,
+};
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
 use serde_json::{Value, json};
@@ -82,6 +86,81 @@ impl DocStore for FlakyStore {
     }
 }
 
+impl AccountStore for FlakyStore {
+    async fn has_users(&self) -> Result<bool, StoreError> {
+        self.inner.has_users().await
+    }
+
+    async fn create_first_user(
+        &self,
+        user: &FirstUser,
+        session: &NewSession,
+    ) -> Result<(), StoreError> {
+        self.inner.create_first_user(user, session).await
+    }
+
+    async fn credentials(&self, email: &str) -> Result<Option<Credentials>, StoreError> {
+        self.inner.credentials(email).await
+    }
+
+    async fn password_hash(&self, user_id: &str) -> Result<Option<String>, StoreError> {
+        self.inner.password_hash(user_id).await
+    }
+
+    async fn create_session(
+        &self,
+        session: &NewSession,
+        checked_hash: &str,
+    ) -> Result<bool, StoreError> {
+        self.inner.create_session(session, checked_hash).await
+    }
+
+    async fn session(
+        &self,
+        token_hash: &str,
+        now: i64,
+    ) -> Result<Option<ActiveSession>, StoreError> {
+        if self.fail_ping.load(Ordering::SeqCst) {
+            return Err(sqlx::Error::PoolTimedOut.into());
+        }
+        self.inner.session(token_hash, now).await
+    }
+
+    async fn touch_session(
+        &self,
+        token_hash: &str,
+        now: i64,
+        expires_at: i64,
+    ) -> Result<(), StoreError> {
+        if self.fail_writes.load(Ordering::SeqCst) {
+            return Err(sqlx::Error::PoolTimedOut.into());
+        }
+        self.inner.touch_session(token_hash, now, expires_at).await
+    }
+
+    async fn delete_session(&self, token_hash: &str) -> Result<(), StoreError> {
+        self.inner.delete_session(token_hash).await
+    }
+
+    async fn memberships(&self, user_id: &str) -> Result<Vec<Membership>, StoreError> {
+        self.inner.memberships(user_id).await
+    }
+
+    async fn update_user(
+        &self,
+        user_id: &str,
+        changes: &UserChanges,
+        basis: &UpdateBasis<'_>,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        self.inner.update_user(user_id, changes, basis, now).await
+    }
+
+    async fn delete_user(&self, user_id: &str) -> Result<(), StoreError> {
+        self.inner.delete_user(user_id).await
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Fixed(Option<SocketMode>);
 
@@ -102,6 +181,7 @@ fn http() -> HttpConfig {
     HttpConfig {
         public_url: PublicUrl::parse(PUBLIC_ORIGIN).unwrap(),
         trusted_proxies: TrustedProxies::default(),
+        session_lifetime: Duration::from_secs(60),
     }
 }
 
@@ -255,6 +335,70 @@ async fn health_fails_when_the_database_does_not_answer() {
         get(state, "/health").await.status(),
         StatusCode::SERVICE_UNAVAILABLE
     );
+}
+
+/// A session in the database of `state`, and the cookie that opens it.
+async fn open_session(state: &AppState<FlakyStore, Permissive>, last_seen_at: i64) -> String {
+    let user = FirstUser {
+        id: "user".to_owned(),
+        email: "ada@example.org".to_owned(),
+        name: "Ada".to_owned(),
+        password_hash: "unused".to_owned(),
+        workspace_id: "workspace".to_owned(),
+        workspace_slug: "workspace".to_owned(),
+        workspace_name: "Workspace".to_owned(),
+    };
+    let session = NewSession {
+        token_hash: token_hash("token"),
+        user_id: user.id.clone(),
+        now: last_seen_at,
+        expires_at: i64::MAX,
+    };
+    state
+        .store
+        .create_first_user(&user, &session)
+        .await
+        .unwrap();
+    "session=token".to_owned()
+}
+
+async fn get_session(
+    state: AppState<FlakyStore, Permissive>,
+    cookie: &str,
+) -> axum::response::Response {
+    let request = Request::get("/api/v1/session")
+        .header(header::COOKIE, cookie)
+        .body(Body::empty())
+        .unwrap();
+    router::<_, _, Fixtures>(state)
+        .oneshot(request)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_failing_database_is_not_a_logout() {
+    let dir = TempDir::new().unwrap();
+    let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+    let cookie = open_session(&state, now_ms()).await;
+    state.store.fail_ping.store(true, Ordering::SeqCst);
+
+    let response = get_session(state, &cookie).await;
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body_json(response).await["error"]["code"], "unavailable");
+}
+
+#[tokio::test]
+async fn a_session_that_cannot_be_extended_still_works() {
+    let dir = TempDir::new().unwrap();
+    let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+    let cookie = open_session(&state, 0).await;
+    state.store.fail_writes.store(true, Ordering::SeqCst);
+
+    let response = get_session(state, &cookie).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    // The browser must not outlive the row.
+    assert!(response.headers().get(header::SET_COOKIE).is_none());
 }
 
 #[tokio::test]

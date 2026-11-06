@@ -1,11 +1,11 @@
 # API
 
-All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Only the WebSocket route marked "prototype" exists today, and any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
+All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today the WebSocket route marked "prototype", and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/session` and `/me`. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
 
 ## Conventions
 
 - **Authentication**: an `HttpOnly`, `Secure`, `SameSite=Lax` session cookie.
-- **CSRF**: mutating requests require the `X-CSRF-Token` header, whose value comes from `GET /session`.
+- **CSRF**: mutating requests with a session require the `X-CSRF-Token` header, whose value comes from `GET /session`. It is derived from the session token, so it needs no storage and lasts as long as the session. Routes that run before a session exists (`/auth/setup`, `/auth/login`) have no token to check: they rely on the `Origin` check and on requiring a JSON content type, which a cross-site form cannot send.
 - **Ids**: UUIDv7 strings.
 - **Pagination**: `?limit=` (maximum 100) and an opaque `?cursor=`. Responses have the form `{ "items": [...], "next_cursor": "..." | null }`.
 - **Origin**: a request that sends an `Origin` other than the one of `CADOCS_PUBLIC_URL` gets `403` `forbidden`. Clients outside a browser send none.
@@ -47,8 +47,20 @@ Minimum role per route: `member` is a workspace role. Space roles are `viewer` <
 | GET | `/auth/oidc/{provider}/callback` | none | Finish an OIDC login (V1) |
 | GET | `/session` | user | Current user, workspaces, CSRF token |
 | PATCH | `/me` | user | Update name, email or password. Email and password need the current password, and a new password revokes other sessions |
-| DELETE | `/me` | user | Delete the account, refused for a last owner |
+| DELETE | `/me` | user | Delete the account, refused with `409` for the last enabled owner of a workspace or the last enabled instance admin |
 | POST, DELETE | `/me/totp` | user | Enable or disable MFA (V1) |
+
+Bodies and answers:
+
+- `POST /auth/setup` takes `{ email, name, password, workspace_name }`, and answers `201` with the session body and the cookie. Once an account exists it answers `409`.
+- `POST /auth/login` takes `{ email, password }`, and answers `200` with the session body and the cookie. An unknown email, a wrong password and a disabled account all answer the same `401`, in the same time.
+- `GET /session` answers `{ user: { id, email, name, is_instance_admin }, workspaces: [{ id, slug, name, role }], csrf_token }`.
+- `POST /auth/logout` and `DELETE /me` answer `204` and clear the cookie.
+- `PATCH /me` takes `{ name?, email?, password?, current_password? }` and answers the `user` object. A wrong or missing `current_password` is a `400` that names that field, an email in use is a `409` that names `email`, and a `401` means the session or the password changed while the request waited.
+
+An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a password 8 to 1024 characters. These routes refuse bodies over 16 KiB.
+
+`/auth/setup`, `/auth/login` and a `PATCH /me` that checks the current password share one limit per client: a burst of 10, then one every 15 seconds. A hash that waits over 10 seconds for its turn answers `503`.
 
 ### Instance administration
 

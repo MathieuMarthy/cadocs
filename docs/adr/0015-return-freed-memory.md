@@ -29,6 +29,7 @@ The benchmark scenario did not change. The whole run was repeated on the new ser
 - cadocs depends on glibc, which [OPERATIONS.md](../OPERATIONS.md) already required. A `musl` target needs its own answer to this problem.
 - While rooms unload, a trim briefly holds each arena's lock. A busy server pays this at most once per 5 seconds.
 - Memory freed by anything other than an unload is only returned at the next unload. MVP peaks such as password hashing and exports must check their own return to the idle target: the exit criterion on login peaks measures this.
+- Password hashing needed it. After the first hash, glibc raises its mmap threshold, so later 19 MB blocks stay in a heap: RSS went from 8 MB to 28 MB after 8 logins and stayed there. `Passwords::hash_finished` now triggers the same delayed trim, which brings RSS back to 8.6 MB.
 
 ## Rejected alternatives
 

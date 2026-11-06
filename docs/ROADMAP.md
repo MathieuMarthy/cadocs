@@ -50,7 +50,7 @@ Scope:
 Steps, one session each. Each step adds the migration for the tables it needs, and its REST routes come with tests of the permissions they use. A step that adds a dependency or a background task reports the idle RSS, so a drift shows before the final benchmark.
 
 - [x] **Step 1:** HTTP foundation: `/api/v1` router, error shape, `CADOCS_PUBLIC_URL` and the `Origin` check, `CADOCS_TRUSTED_PROXIES`, rate limiter, security headers, read and write pools, data folder lock, `serve` subcommand. Done when each of these has a test and the prototype socket still works.
-- [ ] **Step 2:** Accounts and sessions: `users`, `sessions`, `workspaces`, `workspace_members`, `/auth/setup`, login, logout, `/session`, `/me`, session middleware, CSRF, Argon2 behind a semaphore. Done when first run, login, expiry, CSRF and rate limits are tested.
+- [x] **Step 2:** Accounts and sessions: `users`, `sessions`, `workspaces`, `workspace_members`, `/auth/setup`, login, logout, `/session`, `/me`, session middleware, CSRF, Argon2 behind a semaphore. Done when first run, login, expiry, CSRF and rate limits are tested.
 - [ ] **Step 3:** Instance administration: `/admin/users`, `password_resets`, reset links, `cadocs reset-password`, the last instance admin check. Done when the instance actions of [PERMISSIONS.md](PERMISSIONS.md) pass over REST.
 - [ ] **Step 4:** Workspaces, members and invitations, with the last owner check. Done when the workspace actions pass over REST and an invited user can join with a link.
 - [ ] **Step 5:** Spaces and grants: routes, space trash, role resolution from database rows. Done when each rule of the resolution order passes over REST.

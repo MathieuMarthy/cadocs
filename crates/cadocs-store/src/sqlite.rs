@@ -1,12 +1,14 @@
+mod accounts;
+
 use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use sqlx::Row;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
 
-use crate::{DocStore, Snapshot, StoreError, StoredDoc, StoredUpdate};
+use crate::{DocStore, Snapshot, StoreError, StoredDoc, StoredUpdate, now_ms};
 
 /// Each connection has a thread and a page cache, so they are few and closed when idle.
 const READER_CONNECTIONS: u32 = 2;
@@ -55,12 +57,6 @@ fn connect_options(path: &Path) -> SqliteConnectOptions {
         .foreign_keys(true)
         // 512 KiB per connection: the OS page cache does the real caching.
         .pragma("cache_size", "-512")
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_millis() as i64)
 }
 
 impl DocStore for SqliteStore {

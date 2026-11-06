@@ -132,6 +132,7 @@ async fn start(dir: &TempDir) -> Server {
         HttpConfig {
             public_url: PublicUrl::parse("http://127.0.0.1:3000").unwrap(),
             trusted_proxies: TrustedProxies::default(),
+            session_lifetime: Duration::from_secs(60),
         },
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

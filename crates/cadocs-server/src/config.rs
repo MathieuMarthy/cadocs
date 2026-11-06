@@ -14,6 +14,9 @@ use crate::client_ip::TrustedProxies;
 /// Far above any sensible value, and small enough for timers and semaphores not to overflow.
 const MAX_SECS: u64 = 365 * 24 * 60 * 60;
 const MAX_COUNT: usize = 1 << 24;
+const SECS_PER_DAY: u64 = 24 * 60 * 60;
+const DEFAULT_SESSION_DAYS: u64 = 30;
+const MAX_SESSION_DAYS: u64 = 3650;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -30,6 +33,8 @@ pub struct Config {
 pub struct HttpConfig {
     pub public_url: PublicUrl,
     pub trusted_proxies: TrustedProxies,
+    /// How long a session lasts after its last use.
+    pub session_lifetime: Duration,
 }
 
 /// `CADOCS_PUBLIC_URL`, reduced to what is compared with a browser's `Origin`.
@@ -123,6 +128,7 @@ impl Config {
             http: HttpConfig {
                 public_url: read.public_url()?,
                 trusted_proxies: read.trusted_proxies()?,
+                session_lifetime: read.session_lifetime()?,
             },
             collab: CollabConfig {
                 flush_interval: Duration::from_millis(read.value(
@@ -187,6 +193,15 @@ impl Config {
 struct Reader<F>(F);
 
 impl<F: Fn(&str) -> Option<String>> Reader<F> {
+    fn session_lifetime(&self) -> anyhow::Result<Duration> {
+        let days = self.value("CADOCS_SESSION_DAYS", DEFAULT_SESSION_DAYS)?;
+        ensure!(
+            (1..=MAX_SESSION_DAYS).contains(&days),
+            "CADOCS_SESSION_DAYS must be between 1 and {MAX_SESSION_DAYS}"
+        );
+        Ok(Duration::from_secs(days * SECS_PER_DAY))
+    }
+
     fn value<T>(&self, name: &str, default: T) -> anyhow::Result<T>
     where
         T: FromStr,
@@ -240,6 +255,21 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::ORIGIN, origin.parse().unwrap());
         headers
+    }
+
+    #[test]
+    fn a_session_lasts_thirty_days_unless_set_otherwise() {
+        let days = |count: u64| Duration::from_secs(count * SECS_PER_DAY);
+        assert_eq!(config(&[]).unwrap().http.session_lifetime, days(30));
+        let set = config(&[("CADOCS_SESSION_DAYS", "7")]).unwrap();
+        assert_eq!(set.http.session_lifetime, days(7));
+        for refused in ["0", "3651", "-1", "soon"] {
+            let error = config(&[("CADOCS_SESSION_DAYS", refused)]).unwrap_err();
+            assert!(
+                format!("{error:#}").contains("CADOCS_SESSION_DAYS"),
+                "{error:#}"
+            );
+        }
     }
 
     #[test]

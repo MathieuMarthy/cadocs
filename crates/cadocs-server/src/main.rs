@@ -8,6 +8,7 @@ use cadocs_collab::{DocRegistry, Permissive};
 use cadocs_server::assets::WebAssets;
 use cadocs_server::cli::{self, Command};
 use cadocs_server::config::Config;
+use cadocs_server::password::Passwords;
 use cadocs_server::{AppState, data_dir, serve};
 use cadocs_store::{DocStore, SqliteStore};
 use tokio::net::TcpListener;
@@ -19,7 +20,8 @@ const WORKER_THREADS: usize = 2;
 const MAX_BLOCKING_THREADS: usize = 4;
 /// The default made explicit: only the pages a thread touches count towards RSS.
 const THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
-/// Rooms left idle together unload together, and one trim is enough for all of them.
+/// Rooms left idle together unload together, and one trim is enough for all of them. So is one
+/// for a burst of logins.
 const TRIM_DELAY: Duration = Duration::from_secs(5);
 
 unsafe extern "C" {
@@ -49,14 +51,14 @@ async fn run(config: Config) -> anyhow::Result<()> {
 
     let store = Arc::new(SqliteStore::open(&config.data_dir.join("cadocs.db")).await?);
     let registry = DocRegistry::new(store.clone(), config.collab.clone());
-    tokio::spawn(return_freed_memory(registry.clone()));
     let state = AppState::new(
-        registry,
+        registry.clone(),
         store,
         Arc::new(Permissive),
         config.socket,
         config.http,
     );
+    tokio::spawn(return_freed_memory(registry, state.passwords.clone()));
 
     let listener = TcpListener::bind(config.bind)
         .await
@@ -66,9 +68,13 @@ async fn run(config: Config) -> anyhow::Result<()> {
 }
 
 /// glibc keeps what an unloaded room frees, because the free blocks sit below live ones (ADR 0015).
-async fn return_freed_memory<S: DocStore>(registry: DocRegistry<S>) {
+/// It keeps the 19 MB of a password hash too, as its mmap threshold grows after the first one.
+async fn return_freed_memory<S: DocStore>(registry: DocRegistry<S>, passwords: Arc<Passwords>) {
     loop {
-        registry.room_unloaded().await;
+        tokio::select! {
+            () = registry.room_unloaded() => {}
+            () = passwords.hash_finished() => {}
+        }
         sleep(TRIM_DELAY).await;
         // Blocking: it walks each heap with that arena locked.
         // SAFETY: takes no pointer, and glibc locks each arena itself.

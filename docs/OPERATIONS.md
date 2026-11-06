@@ -36,7 +36,7 @@ Environment variables only, so no config file format has to be parsed or documen
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `CADOCS_SESSION_DAYS` | `30` | Session lifetime, extended by use |
+| `CADOCS_SESSION_DAYS` **P** | `30` | Session lifetime, 1 to 3650, extended by use |
 | `CADOCS_MAX_UPLOAD_MB` | `25` | Largest attachment |
 | `CADOCS_WORKSPACE_QUOTA_MB` | `0` | Attachment storage per workspace, `0` for no limit |
 | `CADOCS_TRASH_DAYS` | `30` | Time in the trash before purging |

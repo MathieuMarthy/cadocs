@@ -132,7 +132,7 @@ These figures are design estimates. The prototype's measurements are in [Measure
 | SQLite | 2 to 4 MB | Few connections, `cache_size` limited to 512 KiB each. The OS page cache does the real caching and is not counted against the process |
 | Per WebSocket | tens of KB | Bounded send queue, capped socket count. A slow client is disconnected, never buffered without limit |
 | Per loaded document | a few times its encoded size | Unload after inactivity, compact on unload, capped room count |
-| Peaks: password hashing | 19 MB per hash at OWASP settings | Semaphore allowing one or two concurrent hashes |
+| Peaks: password hashing | 19 MB per hash at OWASP settings | A semaphore allows one hash at a time, and a `malloc_trim` follows 5 seconds after (ADR 0015) |
 | Peaks: uploads and exports | bounded | Stream to disk, never buffer a whole file. One export job at a time |
 
 Other strategies:

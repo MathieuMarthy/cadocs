@@ -1,10 +1,23 @@
 //! Store traits and their SQLite implementation (ADR 0002).
 
+mod accounts;
 mod sqlite;
 
 use std::future::Future;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+pub use accounts::{
+    AccountStore, ActiveSession, Credentials, FirstUser, Membership, NewSession, UpdateBasis, User,
+    UserChanges,
+};
 pub use sqlite::SqliteStore;
+
+/// The current time as stored: milliseconds since the Unix epoch.
+pub fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as i64)
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -20,6 +33,16 @@ pub enum StoreError {
         stored: i64,
         offered: i64,
     },
+    #[error("the instance is already set up")]
+    AlreadySetUp,
+    #[error("another account uses this email")]
+    EmailTaken,
+    #[error("the session or password behind this change is gone")]
+    StaleCredentials,
+    #[error("this user is the last owner of a workspace")]
+    LastOwner,
+    #[error("this user is the last enabled instance admin")]
+    LastInstanceAdmin,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

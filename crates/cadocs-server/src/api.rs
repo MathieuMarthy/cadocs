@@ -1,5 +1,7 @@
 //! The REST API under `/api/v1`: its error shape and what every route shares (`docs/API.md`).
 
+pub mod auth;
+
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Display;
@@ -7,18 +9,21 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::extract::rejection::JsonRejection;
+use axum::extract::{ConnectInfo, FromRequest, Request, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
 use cadocs_collab::Authorizer;
-use cadocs_store::DocStore;
+use cadocs_store::{AccountStore, DocStore, StoreError};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::AppState;
 use crate::config::HttpConfig;
+use crate::password::PasswordError;
 use crate::rate_limit::RateLimiter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +114,7 @@ pub struct ApiError {
     code: ErrorCode,
     message: Cow<'static, str>,
     fields: BTreeMap<&'static str, &'static str>,
+    retry_after: Option<u64>,
 }
 
 impl ApiError {
@@ -117,6 +123,7 @@ impl ApiError {
             code,
             message: code.message().into(),
             fields: BTreeMap::new(),
+            retry_after: None,
         }
     }
 
@@ -136,6 +143,59 @@ impl ApiError {
     pub fn internal(cause: impl Display) -> Self {
         tracing::error!(%cause, "request failed");
         Self::new(ErrorCode::Internal)
+    }
+}
+
+impl From<StoreError> for ApiError {
+    fn from(error: StoreError) -> Self {
+        let conflict = ApiError::new(ErrorCode::Conflict);
+        match error {
+            StoreError::AlreadySetUp => conflict.with_message("This instance is already set up"),
+            StoreError::EmailTaken => conflict
+                .with_message("Another account uses this email")
+                .with_field("email", "taken"),
+            StoreError::StaleCredentials => ApiError::new(ErrorCode::Unauthenticated),
+            StoreError::LastOwner => conflict.with_message("You are the last owner of a workspace"),
+            StoreError::LastInstanceAdmin => {
+                conflict.with_message("You are the last instance admin")
+            }
+            error => {
+                tracing::error!(%error, "storage failed");
+                ApiError::new(ErrorCode::Unavailable)
+            }
+        }
+    }
+}
+
+impl From<PasswordError> for ApiError {
+    fn from(error: PasswordError) -> Self {
+        match error {
+            PasswordError::Busy => ApiError::new(ErrorCode::Unavailable),
+            PasswordError::Failed(cause) => ApiError::internal(cause),
+        }
+    }
+}
+
+/// `axum::Json` for a request, with its refusals in the error shape. It only accepts a JSON
+/// content type, which a cross-site form cannot send without a CORS preflight.
+pub struct JsonBody<T>(pub T);
+
+impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for JsonBody<T> {
+    type Rejection = ApiError;
+
+    async fn from_request(request: Request, state: &S) -> Result<Self, ApiError> {
+        match Json::<T>::from_request(request, state).await {
+            Ok(Json(body)) => Ok(Self(body)),
+            Err(rejection) => Err(body_refused(&rejection)),
+        }
+    }
+}
+
+fn body_refused(rejection: &JsonRejection) -> ApiError {
+    if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        ApiError::new(ErrorCode::TooLarge)
+    } else {
+        ApiError::new(ErrorCode::InvalidRequest).with_message(rejection.body_text())
     }
 }
 
@@ -161,15 +221,27 @@ impl IntoResponse for ApiError {
                 fields: &self.fields,
             },
         };
-        (self.code.status(), Json(body)).into_response()
+        let mut response = (self.code.status(), Json(body)).into_response();
+        if let Some(wait) = self.retry_after {
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from(wait));
+        }
+        response
     }
 }
 
-pub fn router<S: DocStore, A: Authorizer>(http: Arc<HttpConfig>) -> Router<AppState<S, A>> {
+pub fn router<S, A>(state: &AppState<S, A>) -> Router<AppState<S, A>>
+where
+    S: DocStore + AccountStore,
+    A: Authorizer,
+{
     // A nested fallback only sees paths below the root of the nest. `router` in `lib.rs` also
     // covers the root with a slash, which a nest cannot reach.
-    let routes = Router::new().route("/", any(not_found));
-    finish(routes, http)
+    let routes = Router::new()
+        .route("/", any(not_found))
+        .merge(auth::routes(state));
+    finish(routes, state.http.clone())
 }
 
 /// Must come after every route: both calls below only reach the routes that already exist.
@@ -210,17 +282,24 @@ pub async fn rate_limit(
     request: Request,
     next: Next,
 ) -> Response {
-    let client = http.trusted_proxies.client_ip(peer.ip(), request.headers());
-    match limiter.check(client) {
+    match count_request(&limiter, &http, peer, request.headers()) {
         Ok(()) => next.run(request).await,
-        Err(wait) => {
-            let mut response = ApiError::new(ErrorCode::RateLimited).into_response();
-            response
-                .headers_mut()
-                .insert(header::RETRY_AFTER, HeaderValue::from(whole_secs(wait)));
-            response
-        }
+        Err(error) => error.into_response(),
     }
+}
+
+/// For a handler that only limits some of its requests.
+pub fn count_request(
+    limiter: &RateLimiter,
+    http: &HttpConfig,
+    peer: SocketAddr,
+    headers: &HeaderMap,
+) -> Result<(), ApiError> {
+    let client = http.trusted_proxies.client_ip(peer.ip(), headers);
+    limiter.check(client).map_err(|wait| ApiError {
+        retry_after: Some(whole_secs(wait)),
+        ..ApiError::new(ErrorCode::RateLimited)
+    })
 }
 
 /// Rounded up: a client that waits this long is sure to pass.
@@ -243,6 +322,7 @@ mod tests {
         let http = HttpConfig {
             public_url: PublicUrl::parse("https://wiki.example.org").unwrap(),
             trusted_proxies: TrustedProxies::default(),
+            session_lifetime: Duration::from_secs(60),
         };
         finish(
             Router::new().route("/thing", post(|| async { "done" })),

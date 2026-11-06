@@ -10,16 +10,22 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+argon2.workspace = true
 axum.workspace = true
 cadocs-collab.workspace = true
 cadocs-core.workspace = true
 cadocs-store.workspace = true
+getrandom.workspace = true
 rust-embed.workspace = true
 serde = { workspace = true, features = ["derive"] }
+sha2.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tungstenite.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true

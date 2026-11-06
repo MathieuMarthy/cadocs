@@ -20,7 +20,7 @@ cadocs/
 └── docs/
 ```
 
-`cadocs-core` depends on nothing heavy, so permission tests compile and run quickly. `cadocs-collab` knows the store only through a trait, so it can be tested with an in-memory store. Only `cadocs-server` knows about axum.
+`cadocs-core` depends on nothing heavy, so permission tests compile and run quickly. `cadocs-store` uses it for the last owner and last instance admin checks, which must run inside a transaction. `cadocs-collab` knows the store only through a trait, so it can be tested with an in-memory store. Only `cadocs-server` knows about axum.
 
 `cadocs-server` embeds `web/dist`, which is not committed. Build the front end first (`npm --prefix web ci && npm --prefix web run build`), otherwise the binary serves no page and the build prints a warning. Debug builds read the folder at run time.
 
@@ -45,6 +45,9 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `thiserror` | Typed errors in the library crates | None | None |
 | `anyhow` | Error context in the binary and tools | None | Low |
 | `serde` (`derive` in the server), `serde_json` | Checking that awareness states are JSON, and the REST bodies. Already pulled in by yrs | None extra | None extra |
+| `argon2` (`alloc`, `getrandom`, `password-hash`) | Password hashing at OWASP settings | 19 MB per hash, one at a time, returned by a trim (ADR 0015) | With the next two rows, 0.4 MB in all, routes included |
+| `sha2`, `subtle`, `getrandom` | Session tokens, their hash and constant-time CSRF comparison. `sha2` and `getrandom` were already in the tree through `rust-embed` and `tempfile` | None | See `argon2` |
+| `uuid` (`std`, `v7`) | Sortable ids | None | See `argon2` |
 | `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
 
 ### Dev tools only
@@ -63,13 +66,10 @@ These never reach the server binary.
 
 | Crate | Stage | Why | Cost note |
 | --- | --- | --- | --- |
-| `argon2` | MVP | Password hashing | About 19 MB per hash, capped by a semaphore |
-| `uuid` (`v7`) | MVP | Sortable ids | Very low |
 | `tower-http` | MVP | Timeouts, compression, tracing, limited features | Low |
 | `pulldown-cmark` | MVP | Markdown parsing, no allocation-heavy DOM | Low |
 | `rust-stemmers` | MVP | Snowball stemmers (ADR 0007) | Static tables in the binary |
 | `zstd` | MVP | Compression of revisions | Bounded by compression level |
-| `sha2`, `subtle`, `getrandom` | MVP | Tokens and constant-time comparison, as in uptime-monitoring | Very low |
 | `jiff` | MVP | Dates, as in uptime-monitoring | Low without the bundled tz database |
 | `async_zip` | MVP | Streaming zip for exports with attachments and for imports | Low, nothing buffered whole |
 | `lettre` | V1 | SMTP, optional feature | Only in builds that enable it |

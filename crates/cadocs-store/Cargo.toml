@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+cadocs-core.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 
