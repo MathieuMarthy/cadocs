@@ -12,7 +12,7 @@ Steps, one session each:
 
 - [x] **Step 1:** Cargo workspace, `cadocs-core` (permissions), `cadocs-store` (migrations, updates, snapshots). Done when the matrix of [PERMISSIONS.md](PERMISSIONS.md) and the store tests pass.
 - [x] **Step 2:** `cadocs-collab` (rooms, y-sync, batched flush, compaction, unload, limits from [OPERATIONS.md](OPERATIONS.md)). Done when replay, compaction equivalence, unload and reload, load/unload concurrency, read-only, awareness cleanup, room cap and flush failure tests pass.
-- [ ] **Step 3:** `cadocs-server` (`/ws/{doc}`, `/health`, embedded front end), `web/` (TipTap, Brut tokens), `docs/DESIGN_SYSTEM.md`. Done when the page edits and persists when opened by hand.
+- [x] **Step 3:** `cadocs-server` (`/ws/{doc}`, `/health`, embedded front end), `web/` (TipTap, Brut tokens), `docs/DESIGN_SYSTEM.md`. Done when the page edits and persists when opened by hand.
 - [ ] **Step 4:** Node test with the real `yjs` and `y-websocket`, Playwright test with two browsers. Done when both pass, including after a server restart.
 - [ ] **Step 5:** `cadocs-bench`, `bench/rss.sh`, allocator comparison, following the [benchmark scenario](ARCHITECTURE.md#benchmark-scenario). Done when the results are in `ARCHITECTURE.md` and the go or no-go is recorded.
 

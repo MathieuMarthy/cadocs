@@ -1,0 +1,62 @@
+/* Brut design tokens. See docs/DESIGN_SYSTEM.md for what each one is for. */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f5f5f4;
+  --panel: #ebebea;
+  --ink: #141414;
+  --ink-2: #2d2d2c;
+  --muted: #5a5a58;
+  --line: #cdcdca;
+  --accent: #ff5a1f;
+  --accent-text: #b3390d;
+  --selection: var(--ink);
+  --selection-ink: var(--bg);
+  --mark: #ffdccb;
+  --ok: #2e7d32;
+  --shadow-offset: 5px 5px 0 #141414;
+
+  --presence-1: #f5b83d;
+  --presence-1-ink: #1a1200;
+  --presence-2: #f49ac1;
+  --presence-2-ink: #2a0a18;
+  --presence-3: #7cc4f2;
+  --presence-3-ink: #04202f;
+
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-14: 56px;
+
+  --radius-none: 0;
+
+  --measure: 700px;
+  --sidebar-width: 264px;
+  --topbar-height: 56px;
+  --row-height: 30px;
+  --control-height: 34px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0e0e;
+    --panel: #151515;
+    --ink: #e6e6e4;
+    --ink-2: #c8c8c5;
+    --muted: #999996;
+    --line: #2b2b2b;
+    --accent: #ff6b30;
+    --accent-text: #ff8a5c;
+    --mark: #3f2516;
+    --ok: #6ccb6f;
+    --shadow-offset: 5px 5px 0 #e6e6e4;
+  }
+}

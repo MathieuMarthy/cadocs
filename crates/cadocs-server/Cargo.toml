@@ -1,0 +1,29 @@
+[package]
+name = "cadocs-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "cadocs"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+cadocs-collab.workspace = true
+cadocs-core.workspace = true
+cadocs-store.workspace = true
+rust-embed.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tungstenite.workspace = true
+
+[dev-dependencies]
+futures-util.workspace = true
+sqlx.workspace = true
+tempfile.workspace = true
+tokio-tungstenite.workspace = true
+tower.workspace = true
+yrs.workspace = true

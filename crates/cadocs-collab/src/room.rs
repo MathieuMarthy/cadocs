@@ -120,6 +120,13 @@ impl RoomState {
         }
     }
 
+    fn broadcast_all(&mut self, message: &Message) {
+        let frame: Arc<[u8]> = message.encode_v1().into();
+        for client in self.clients.values_mut() {
+            client.send(frame.clone());
+        }
+    }
+
     fn reply(&mut self, id: u64, message: Message) {
         if let Some(client) = self.clients.get_mut(&id) {
             client.send(message.encode_v1().into());
@@ -341,7 +348,9 @@ impl Room {
                         .awareness
                         .update_with_clients(summary.all_changes())
                         .map_err(|_| Close(CLOSE_PROTOCOL_ERROR))?;
-                    state.broadcast(id, &Message::Awareness(update));
+                    // To the sender too, as `y-websocket`'s server does: its client reconnects
+                    // after 30 seconds of silence, and this is all it hears when alone.
+                    state.broadcast_all(&Message::Awareness(update));
                 }
                 Ok(())
             }

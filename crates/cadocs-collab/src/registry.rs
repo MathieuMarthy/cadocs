@@ -104,6 +104,11 @@ impl<S: DocStore> DocRegistry<S> {
         }
     }
 
+    /// Largest frame a socket may receive, for the socket layer's own limit.
+    pub fn max_frame_bytes(&self) -> usize {
+        self.inner.config.max_frame_bytes
+    }
+
     /// Rooms in memory, including those loading or unloading.
     pub fn loaded_rooms(&self) -> usize {
         lock(&self.inner.rooms).slots.len()

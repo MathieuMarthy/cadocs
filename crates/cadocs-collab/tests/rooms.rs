@@ -571,6 +571,27 @@ async fn a_closed_socket_leaves_no_ghost_cursor() {
     assert!(carol.present().is_empty());
 }
 
+/// `y-websocket` reconnects after 30 seconds without a message, and pings do not reach it. The
+/// echo of its own 15-second heartbeat is what a client alone in a room hears.
+#[tokio::test(start_paused = true)]
+async fn a_client_hears_its_own_awareness_back() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut alice = Peer::join(&registry, ReadWrite).await;
+    alice.pump().await;
+
+    alice.announce(r#"{"name":"alice"}"#);
+
+    let echo = tokio::time::timeout(Duration::from_secs(1), alice.conn.next()).await;
+    assert!(matches!(echo, Ok(Outbound::Frame(_))));
+
+    // A heartbeat bumps the clock and leaves the state as it was.
+    alice.announce(r#"{"name":"alice"}"#);
+
+    let echo = tokio::time::timeout(Duration::from_secs(1), alice.conn.next()).await;
+    assert!(matches!(echo, Ok(Outbound::Frame(_))));
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_new_client_receives_current_presence() {
     let store = MemStore::new();

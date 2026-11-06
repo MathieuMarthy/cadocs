@@ -22,6 +22,8 @@ cadocs/
 
 `cadocs-core` depends on nothing heavy, so permission tests compile and run quickly. `cadocs-collab` knows the store only through a trait, so it can be tested with an in-memory store. Only `cadocs-server` knows about axum.
 
+`cadocs-server` embeds `web/dist`, which is not committed. Build the front end first (`npm --prefix web ci && npm --prefix web run build`), otherwise the binary serves no page and the build prints a warning. Debug builds read the folder at run time.
+
 The prototype contains `core`, `store`, `collab`, `server` and `bench`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
 
 ## Selected crates
@@ -33,15 +35,15 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | Crate | Why | RAM | Binary |
 | --- | --- | --- | --- |
 | `tokio` | Async runtime, required by axum and sqlx. Features limited to what is used | Low, set by worker count | Medium |
-| `axum` (`ws` feature, `multipart` from the MVP) | Same stack as uptime-monitoring. Thin layer over hyper | Low | Medium |
+| `axum` (`http1`, `tokio`, `ws`, no default features, `multipart` from the MVP) | Same stack as uptime-monitoring. Thin layer over hyper | Low. Socket buffers are set to 4 KiB each way instead of 128 KiB | Medium |
 | `yrs` (`sync` feature, so observers are `Send`) | Yjs port, the core of ADR 0003. Includes sync and awareness | Scales with loaded documents | Medium |
 | `sqlx` (`sqlite`, `runtime-tokio`, `migrate`, `macros` for `migrate!`, no default features) | Async SQLite with embedded migrations, path to PostgreSQL | Each connection has a thread and a page cache, bounded by pool size | Medium, bundled SQLite included |
-| `rust-embed` | Static front end in the binary, as in uptime-monitoring | None until served (file-backed) | Size of the assets |
+| `rust-embed` (no `mime-guess`: the build produces six file types) | Static front end in the binary, as in uptime-monitoring | None until served (file-backed) | Size of the assets |
 | `tracing`, `tracing-subscriber` (`env-filter`) | Structured logs | Low | Low |
 | `thiserror` | Typed errors in the library crates | None | None |
 | `anyhow` | Error context in the binary and tools | None | Low |
 | `serde`, `serde_json` | Checking that awareness states are JSON. Already pulled in by yrs | None extra | None extra |
-| `futures-util` (no default features) | Splitting WebSocket streams | None | Low |
+| `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
 | `mimalloc` (optional feature) | Candidate allocator, kept only if the benchmark justifies it | To be measured | Low |
 
 ### Dev tools only
@@ -50,7 +52,8 @@ These never reach the server binary.
 
 | Crate | Why |
 | --- | --- |
-| `tokio-tungstenite` | WebSocket client in `cadocs-bench` and in integration tests |
+| `tokio-tungstenite`, `futures-util` | WebSocket client in `cadocs-bench` and in integration tests. Same version as axum's, so it is not compiled twice |
+| `tower` (`util`) | Calling the router directly in tests |
 | `tempfile` | Temporary databases in tests |
 
 ### Planned

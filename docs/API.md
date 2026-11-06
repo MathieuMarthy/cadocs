@@ -174,6 +174,8 @@ The URL matches what `y-websocket` builds: the server URL followed by `/` and th
 3. The page must exist and be readable, otherwise `404`.
 4. The resulting role sets the connection mode: read-write for `editor` and above, read-only otherwise. A `commenter` is read-only on the wire: comments go through REST.
 
+The prototype has no public URL or session. A browser's `Origin` must match the `Host` header, and that host must be `localhost`, `127.0.0.1` or `[::1]`, which also stops DNS rebinding. Otherwise the answer is `403`. Clients that send no `Origin` are accepted. A prototype `doc_id` is 1 to 64 letters, digits, `-` or `_`, otherwise `404`. At capacity or during shutdown, the answer is `503`.
+
 Since browsers cannot read the status of a failed upgrade, the client confirms its session through REST after repeated failures.
 
 ### Frames
@@ -206,16 +208,18 @@ client                                  server
   │ ───────── Update ────────────────────► │  applied, broadcast, queued
   │ ◄──────── Update (from others) ─────── │
   │ ───────── Awareness ─────────────────► │  broadcast
+  │ ◄──────── Awareness (echo) ────────── │
 ```
 
 ### Rules
 
 - **Read-only.** `SyncStep2` and `Update` frames from a read-only client are dropped, and the server sends one Auth frame per socket with the reason `read-only`. `y-websocket` answers every SyncStep1 with a SyncStep2, so a read-only client gets this frame at each connection, and it only logs a warning. Awareness is still accepted, so a reader's presence shows.
+- **Awareness echo.** An awareness change goes back to its sender too, as with `y-websocket`'s server. That client reconnects after 30 seconds without a message and cannot see WebSocket pings, so a client alone in a room lives on the echo of its 15-second heartbeat.
 - **Awareness ownership.** The server tracks the client ids each socket announced, and removes them on close with a null state at the same clock, as `y-websocket`'s server does. A client that reconnects with an unchanged clock therefore shows again at its next change, at most one heartbeat later.
 - **Awareness limits.** A socket may introduce 16 client ids over its life, and a state must be valid JSON of at most 64 KiB. Otherwise the socket closes with `1002`. Removing an unknown id is ignored. Ownership of an id is not checked yet, so a socket can overwrite another cursor.
 - **Limits.** A frame over the maximum size closes the socket, and so does a frame declaring more entries than its bytes can hold (yrs would reserve memory for that count first). Each client has a send queue bounded in frames (`CADOCS_SEND_QUEUE`) and in bytes (`CADOCS_MAX_FRAME_BYTES`). A client that stops reading is closed rather than buffered.
-- **Keep-alive.** The server pings periodically, and closes a socket that stays silent past the timeout.
-- **Malformed frames** close the socket with `1002`, without affecting the room. An Auth frame or an unknown message type from a client counts as malformed.
+- **Keep-alive.** The server pings periodically, and closes a socket with `4408` when it stays silent past the timeout, or when one send takes longer than that.
+- **Malformed frames** close the socket with `1002`, without affecting the room. An Auth frame, an unknown message type or a text frame from a client counts as malformed.
 - **One message per frame.** `y-websocket` reads a single message from a frame, so the server never packs several. It reads the first message of a client frame and ignores any bytes after it, as `y-websocket`'s own server does.
 
 ### Close codes

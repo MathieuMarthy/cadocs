@@ -103,6 +103,10 @@ impl MemStore {
 }
 
 impl DocStore for MemStore {
+    async fn ping(&self) -> Result<(), StoreError> {
+        Ok(())
+    }
+
     async fn load(&self, doc_id: &str) -> Result<StoredDoc, StoreError> {
         self.stats.lock().unwrap().loads += 1;
         self.load_gate.pass().await;

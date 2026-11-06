@@ -55,6 +55,9 @@ impl StoredDoc {
 
 /// Persistence of Yjs documents. `cadocs-collab` only knows this trait.
 pub trait DocStore: Send + Sync + 'static {
+    /// Checks that the database answers, for `/health`.
+    fn ping(&self) -> impl Future<Output = Result<(), StoreError>> + Send;
+
     /// Reads a document as of one point in time, so a concurrent compaction cannot hide updates.
     fn load(&self, doc_id: &str) -> impl Future<Output = Result<StoredDoc, StoreError>> + Send;
 

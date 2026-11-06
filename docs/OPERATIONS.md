@@ -12,7 +12,7 @@ Environment variables only, so no config file format has to be parsed or documen
 | --- | --- | --- |
 | `CADOCS_DATA_DIR` **P** | `./data` | Data folder, on a local disk |
 | `CADOCS_BIND` **P** | `127.0.0.1:3000` | Listen address |
-| `CADOCS_PUBLIC_URL` | none, required from the MVP | Public URL. Sets the allowed `Origin`, and the `Secure` cookie flag when it is `https` |
+| `CADOCS_PUBLIC_URL` | none, required from the MVP | Public URL. Sets the allowed `Origin`, and the `Secure` cookie flag when it is `https`. Until then, a browser's `Origin` must match the `Host` header, on a loopback name |
 | `CADOCS_TRUSTED_PROXIES` | empty | Proxy addresses allowed to set `X-Forwarded-For` |
 | `CADOCS_LOG` **P** | `info` | Log filter |
 
@@ -29,7 +29,7 @@ Environment variables only, so no config file format has to be parsed or documen
 | `CADOCS_MAX_FRAME_BYTES` **P** | `8388608` | Largest incoming frame |
 | `CADOCS_SEND_QUEUE` **P** | `256` | Queued messages per socket |
 | `CADOCS_PING_SECS` **P** | `30` | Ping interval |
-| `CADOCS_PING_TIMEOUT_SECS` **P** | `90` | Silence before a socket closes |
+| `CADOCS_PING_TIMEOUT_SECS` **P** | `90` | Silence before a socket closes, and the longest a single send may take. Must be above `CADOCS_PING_SECS` |
 | `CADOCS_DOC_READS` | `2` | Concurrent document reads outside a room ([ARCHITECTURE.md](ARCHITECTURE.md#reading-a-document-outside-a-room)) |
 
 ### Content
@@ -74,7 +74,7 @@ data/
 
 ## Security headers
 
-Sent on every HTML response.
+Sent on every HTML response. The embedded front end sends them on all its files.
 
 | Header | Value |
 | --- | --- |

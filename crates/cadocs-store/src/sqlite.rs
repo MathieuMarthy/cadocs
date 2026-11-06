@@ -64,6 +64,14 @@ fn now_ms() -> i64 {
 }
 
 impl DocStore for SqliteStore {
+    async fn ping(&self) -> Result<(), StoreError> {
+        // Reads the schema page, so a broken file fails here and not only at the next flush.
+        sqlx::query("SELECT count(*) FROM sqlite_master")
+            .execute(&self.reader)
+            .await?;
+        Ok(())
+    }
+
     async fn load(&self, doc_id: &str) -> Result<StoredDoc, StoreError> {
         let mut tx = self.reader.begin().await?;
 

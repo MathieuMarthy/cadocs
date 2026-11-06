@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>cadocs</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <span class="logo" aria-hidden="true"></span>
+      <nav class="breadcrumb" aria-label="location">
+        <span>cadocs</span>
+        <span class="sep">/</span>
+        <span id="doc-name" class="current"></span>
+      </nav>
+      <div class="topbar-end">
+        <span id="status" class="status" role="status"></span>
+        <div id="presence" class="presence"></div>
+      </div>
+    </header>
+    <main class="page">
+      <input id="title" class="title" type="text" placeholder="untitled" aria-label="page title" autocomplete="off" />
+      <div id="editor"></div>
+    </main>
+  </body>
+</html>
