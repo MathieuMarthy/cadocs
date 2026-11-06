@@ -1,6 +1,14 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# A plain `cargo build` must not build `cadocs-bench`: its features would unify into the server's
+# dependencies and change the binary that ships. `--workspace` still covers it.
+default-members = [
+    "crates/cadocs-collab",
+    "crates/cadocs-core",
+    "crates/cadocs-server",
+    "crates/cadocs-store",
+]
 
 [workspace.package]
 version = "0.1.0"
