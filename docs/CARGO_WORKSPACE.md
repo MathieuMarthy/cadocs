@@ -37,14 +37,14 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | Crate | Why | RAM | Binary |
 | --- | --- | --- | --- |
 | `tokio` | Async runtime, required by axum and sqlx. Features limited to what is used | Low, set by worker count | Medium |
-| `axum` (`http1`, `tokio`, `ws`, no default features, `multipart` from the MVP) | Same stack as uptime-monitoring. Thin layer over hyper | Low. Socket buffers are set to 4 KiB each way instead of 128 KiB | Medium |
+| `axum` (`http1`, `json`, `tokio`, `ws`, no default features, `multipart` from the MVP) | Same stack as uptime-monitoring. Thin layer over hyper | Low. Socket buffers are set to 4 KiB each way instead of 128 KiB | Medium |
 | `yrs` (`sync` feature, so observers are `Send`) | Yjs port, the core of ADR 0003. Includes sync and awareness | Scales with loaded documents | Medium |
 | `sqlx` (`sqlite`, `runtime-tokio`, `migrate`, `macros` for `migrate!`, no default features) | Async SQLite with embedded migrations, path to PostgreSQL | Each connection has a thread and a page cache, bounded by pool size | Medium, bundled SQLite included |
 | `rust-embed` (no `mime-guess`: the build produces six file types) | Static front end in the binary, as in uptime-monitoring | None until served (file-backed) | Size of the assets |
 | `tracing`, `tracing-subscriber` (`env-filter`) | Structured logs | Low | Low |
 | `thiserror` | Typed errors in the library crates | None | None |
 | `anyhow` | Error context in the binary and tools | None | Low |
-| `serde`, `serde_json` | Checking that awareness states are JSON. Already pulled in by yrs | None extra | None extra |
+| `serde` (`derive` in the server), `serde_json` | Checking that awareness states are JSON, and the REST bodies. Already pulled in by yrs | None extra | None extra |
 | `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
 
 ### Dev tools only
@@ -77,7 +77,7 @@ These never reach the server binary.
 | `totp-lite` | V1 | TOTP codes | Very low |
 | `openidconnect` or a smaller client | V1 | OIDC, optional feature. To evaluate against a hand-written flow | Pulls an HTTP client |
 
-Fractional indexing, rate limiting and the data folder lock (`std::fs::File::try_lock`) are small enough to write without a dependency.
+Fractional indexing, rate limiting, the data folder lock (`std::fs::File::try_lock`) and parsing `CADOCS_PUBLIC_URL` (`http::Uri`) are small enough to write without a dependency.
 
 ## Rejected crates
 

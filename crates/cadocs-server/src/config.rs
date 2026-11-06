@@ -6,7 +6,10 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{Context, ensure};
+use axum::http::{HeaderMap, Uri, header};
 use cadocs_collab::CollabConfig;
+
+use crate::client_ip::TrustedProxies;
 
 /// Far above any sensible value, and small enough for timers and semaphores not to overflow.
 const MAX_SECS: u64 = 365 * 24 * 60 * 60;
@@ -17,8 +20,73 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub bind: SocketAddr,
     pub log: String,
+    pub http: HttpConfig,
     pub collab: CollabConfig,
     pub socket: SocketConfig,
+}
+
+/// What the HTTP layer knows about how the server is reached.
+#[derive(Debug, Clone)]
+pub struct HttpConfig {
+    pub public_url: PublicUrl,
+    pub trusted_proxies: TrustedProxies,
+}
+
+/// `CADOCS_PUBLIC_URL`, reduced to what is compared with a browser's `Origin`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicUrl {
+    origin: String,
+    secure: bool,
+}
+
+impl PublicUrl {
+    /// Takes a scheme and a host, with an optional port. The front end lives at the root, so a path
+    /// cannot work.
+    pub fn parse(url: &str) -> anyhow::Result<Self> {
+        let uri = url.parse::<Uri>().context("not a URL")?;
+        let scheme = uri.scheme_str().unwrap_or_default();
+        ensure!(matches!(scheme, "http" | "https"), "must be http or https");
+        let authority = uri.authority().context("no host")?;
+        let host = authority.host().to_ascii_lowercase();
+        ensure!(!host.is_empty(), "no host");
+        ensure!(!authority.as_str().contains('@'), "must not hold a user");
+        // `Uri` accepts a port it cannot read, and `port_u16` then says there is none.
+        ensure!(
+            authority.as_str().len() == authority.host().len() || uri.port_u16().is_some(),
+            "invalid port"
+        );
+        // `Uri` drops a fragment without a word.
+        ensure!(
+            uri.path() == "/" && uri.query().is_none() && !url.contains('#'),
+            "must not have a path"
+        );
+
+        let secure = scheme == "https";
+        let default_port = if secure { 443 } else { 80 };
+        let origin = match uri.port_u16().filter(|port| *port != default_port) {
+            Some(port) => format!("{scheme}://{host}:{port}"),
+            None => format!("{scheme}://{host}"),
+        };
+        Ok(Self { origin, secure })
+    }
+
+    /// The form browsers send in `Origin`: lower case, and no default port.
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+
+    /// Whether cookies must carry the `Secure` flag.
+    pub fn secure(&self) -> bool {
+        self.secure
+    }
+
+    /// Browsers always send `Origin` on WebSocket upgrades and on mutating requests. A client
+    /// outside a browser sends none, and it has no cookies of a victim to abuse.
+    pub fn allows(&self, headers: &HeaderMap) -> bool {
+        headers
+            .get(header::ORIGIN)
+            .is_none_or(|origin| origin.as_bytes() == self.origin.as_bytes())
+    }
 }
 
 /// Keep-alive of a socket.
@@ -52,6 +120,10 @@ impl Config {
             data_dir: read.value("CADOCS_DATA_DIR", PathBuf::from("./data"))?,
             bind: read.value("CADOCS_BIND", SocketAddr::from(([127, 0, 0, 1], 3000)))?,
             log: read.value("CADOCS_LOG", "info".to_owned())?,
+            http: HttpConfig {
+                public_url: read.public_url()?,
+                trusted_proxies: read.trusted_proxies()?,
+            },
             collab: CollabConfig {
                 flush_interval: Duration::from_millis(read.value(
                     "CADOCS_FLUSH_INTERVAL_MS",
@@ -128,6 +200,18 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
         }
     }
 
+    fn public_url(&self) -> anyhow::Result<PublicUrl> {
+        let name = "CADOCS_PUBLIC_URL";
+        let value = (self.0)(name).with_context(|| format!("{name} is required"))?;
+        PublicUrl::parse(&value).with_context(|| format!("invalid {name}: {value:?}"))
+    }
+
+    fn trusted_proxies(&self) -> anyhow::Result<TrustedProxies> {
+        let name = "CADOCS_TRUSTED_PROXIES";
+        let value = (self.0)(name).unwrap_or_default();
+        TrustedProxies::parse(&value).with_context(|| format!("invalid {name}: {value:?}"))
+    }
+
     fn secs(&self, name: &str, default: Duration) -> anyhow::Result<Duration> {
         self.value(name, default.as_secs()).map(Duration::from_secs)
     }
@@ -137,12 +221,108 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
 mod tests {
     use super::*;
 
-    fn config(vars: &[(&str, &str)]) -> anyhow::Result<Config> {
+    const PUBLIC_URL: (&str, &str) = ("CADOCS_PUBLIC_URL", "https://wiki.example.org");
+
+    fn lookup(vars: &[(&str, &str)]) -> anyhow::Result<Config> {
         Config::from_lookup(|name| {
             vars.iter()
                 .find(|(key, _)| *key == name)
                 .map(|(_, value)| value.to_string())
         })
+    }
+
+    /// The settings in `vars`, on top of the one that has no default.
+    fn config(vars: &[(&str, &str)]) -> anyhow::Result<Config> {
+        lookup(&[vars, &[PUBLIC_URL]].concat())
+    }
+
+    fn origin_headers(origin: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::ORIGIN, origin.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn the_public_url_is_required_and_named() {
+        let error = lookup(&[]).unwrap_err().to_string();
+        assert!(error.contains("CADOCS_PUBLIC_URL"), "{error}");
+    }
+
+    #[test]
+    fn an_invalid_public_url_names_its_variable() {
+        let error = lookup(&[("CADOCS_PUBLIC_URL", "wiki")]).unwrap_err();
+        assert!(error.to_string().contains("CADOCS_PUBLIC_URL"), "{error}");
+    }
+
+    #[test]
+    fn the_origin_is_what_a_browser_would_send() {
+        for (url, origin, secure) in [
+            ("https://wiki.example.org", "https://wiki.example.org", true),
+            (
+                "https://wiki.example.org/",
+                "https://wiki.example.org",
+                true,
+            ),
+            ("HTTPS://Wiki.Example.ORG", "https://wiki.example.org", true),
+            (
+                "https://wiki.example.org:443",
+                "https://wiki.example.org",
+                true,
+            ),
+            (
+                "https://wiki.example.org:8443",
+                "https://wiki.example.org:8443",
+                true,
+            ),
+            (
+                "http://wiki.example.org:80",
+                "http://wiki.example.org",
+                false,
+            ),
+            ("http://127.0.0.1:3000", "http://127.0.0.1:3000", false),
+            ("http://[::1]:3000", "http://[::1]:3000", false),
+        ] {
+            let parsed = PublicUrl::parse(url).unwrap();
+            assert_eq!(parsed.origin(), origin, "{url}");
+            assert_eq!(parsed.secure(), secure, "{url}");
+        }
+    }
+
+    #[test]
+    fn urls_that_cannot_be_an_origin_are_refused() {
+        for url in [
+            "",
+            "wiki.example.org",
+            "/path",
+            "ftp://wiki.example.org",
+            "https://",
+            "https://:443",
+            "https://wiki.example.org/wiki",
+            "https://wiki.example.org/?a=1",
+            "https://wiki.example.org/#top",
+            "https://user@wiki.example.org",
+            "https://wiki.example.org:",
+            "https://wiki.example.org:99999",
+            "https://wiki.example.org:84a3",
+        ] {
+            assert!(PublicUrl::parse(url).is_err(), "{url:?}");
+        }
+    }
+
+    #[test]
+    fn only_the_public_origin_passes() {
+        let url = PublicUrl::parse("https://wiki.example.org").unwrap();
+        assert!(url.allows(&HeaderMap::new()));
+        assert!(url.allows(&origin_headers("https://wiki.example.org")));
+        for origin in [
+            "https://evil.example",
+            "http://wiki.example.org",
+            "https://wiki.example.org:8443",
+            "https://wiki.example.org.evil.example",
+            "null",
+        ] {
+            assert!(!url.allows(&origin_headers(origin)), "{origin}");
+        }
     }
 
     #[test]
@@ -151,6 +331,7 @@ mod tests {
         assert_eq!(config.data_dir, PathBuf::from("./data"));
         assert_eq!(config.bind, "127.0.0.1:3000".parse().unwrap());
         assert_eq!(config.log, "info");
+        assert_eq!(config.http.trusted_proxies, TrustedProxies::default());
         assert_eq!(config.collab.flush_interval, Duration::from_millis(500));
         assert_eq!(config.collab.compact_updates, 500);
         assert_eq!(config.collab.room_idle, Duration::from_secs(60));
@@ -169,6 +350,7 @@ mod tests {
             ("CADOCS_DATA_DIR", "/var/lib/cadocs"),
             ("CADOCS_BIND", "127.0.0.1:8080"),
             ("CADOCS_LOG", "debug"),
+            ("CADOCS_TRUSTED_PROXIES", "10.0.0.1"),
             ("CADOCS_FLUSH_INTERVAL_MS", "100"),
             ("CADOCS_COMPACT_UPDATES", "10"),
             ("CADOCS_ROOM_IDLE_SECS", "5"),
@@ -184,6 +366,11 @@ mod tests {
         assert_eq!(config.data_dir, PathBuf::from("/var/lib/cadocs"));
         assert_eq!(config.bind, "127.0.0.1:8080".parse().unwrap());
         assert_eq!(config.log, "debug");
+        assert_eq!(config.http.public_url.origin(), "https://wiki.example.org");
+        assert_eq!(
+            config.http.trusted_proxies,
+            TrustedProxies::parse("10.0.0.1").unwrap()
+        );
         assert_eq!(config.collab.flush_interval, Duration::from_millis(100));
         assert_eq!(config.collab.compact_updates, 10);
         assert_eq!(config.collab.room_idle, Duration::from_secs(5));
@@ -200,6 +387,11 @@ mod tests {
     fn an_invalid_value_names_its_variable() {
         let error = config(&[("CADOCS_MAX_ROOMS", "many")]).unwrap_err();
         assert!(error.to_string().contains("CADOCS_MAX_ROOMS"), "{error}");
+        let error = config(&[("CADOCS_TRUSTED_PROXIES", "many")]).unwrap_err();
+        assert!(
+            error.to_string().contains("CADOCS_TRUSTED_PROXIES"),
+            "{error}"
+        );
     }
 
     #[test]

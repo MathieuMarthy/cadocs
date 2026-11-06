@@ -5,10 +5,6 @@ use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::{Embed, RustEmbed};
 
-/// See `Security headers` in `docs/OPERATIONS.md`.
-const CSP: &str = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; \
-                   connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
-
 /// The Vite build. In debug builds `rust-embed` reads this folder at run time instead.
 #[derive(Embed)]
 #[folder = "../../web/dist"]
@@ -36,18 +32,6 @@ pub async fn serve<E: RustEmbed>(uri: Uri) -> Response {
         "no-cache"
     };
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
-    headers.insert(
-        header::X_CONTENT_TYPE_OPTIONS,
-        HeaderValue::from_static("nosniff"),
-    );
-    headers.insert(
-        header::REFERRER_POLICY,
-        HeaderValue::from_static("same-origin"),
-    );
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(CSP),
-    );
     response
 }
 

@@ -5,15 +5,23 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use axum::body::Body;
-use axum::http::{Request, StatusCode, header};
+use axum::Router;
+use axum::body::{Body, to_bytes};
+use axum::extract::connect_info::MockConnectInfo;
+use axum::http::{Method, Request, StatusCode, header};
+use axum::middleware::from_fn_with_state;
+use axum::routing::post;
 use cadocs_collab::{Authorizer, CollabConfig, DocRegistry, Permissive};
 use cadocs_core::permissions::SocketMode;
-use cadocs_server::config::SocketConfig;
+use cadocs_server::api;
+use cadocs_server::client_ip::TrustedProxies;
+use cadocs_server::config::{HttpConfig, PublicUrl, SocketConfig};
+use cadocs_server::rate_limit::RateLimiter;
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{DocStore, Snapshot, SqliteStore, StoreError, StoredDoc, StoredUpdate};
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
+use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
@@ -31,6 +39,8 @@ use yrs::updates::encoder::Encode;
 use yrs::{Doc, GetString, ReadTxn, StateVector, Text, Transact, Update};
 
 type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+const PUBLIC_ORIGIN: &str = "https://wiki.example.org";
 
 #[derive(Embed)]
 #[folder = "tests/fixtures"]
@@ -88,6 +98,13 @@ fn collab() -> CollabConfig {
     }
 }
 
+fn http() -> HttpConfig {
+    HttpConfig {
+        public_url: PublicUrl::parse(PUBLIC_ORIGIN).unwrap(),
+        trusted_proxies: TrustedProxies::default(),
+    }
+}
+
 async fn state<A: Authorizer>(
     dir: &TempDir,
     collab: CollabConfig,
@@ -103,7 +120,7 @@ async fn state<A: Authorizer>(
         fail_ping: Arc::default(),
     });
     let registry = DocRegistry::new(store.clone(), collab);
-    AppState::new(registry, store, Arc::new(authorizer), socket)
+    AppState::new(registry, store, Arc::new(authorizer), socket, http())
 }
 
 struct Running {
@@ -153,6 +170,11 @@ async fn get<A: Authorizer>(
         .oneshot(Request::get(path).body(Body::empty()).unwrap())
         .await
         .unwrap()
+}
+
+async fn body_json(response: axum::response::Response) -> Value {
+    let body = to_bytes(response.into_body(), 4096).await.unwrap();
+    serde_json::from_slice(&body).unwrap()
 }
 
 fn sync_step1(doc: &Doc) -> Vec<u8> {
@@ -295,6 +317,155 @@ async fn the_root_serves_the_page_with_its_security_headers() {
         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; \
          connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
     );
+}
+
+#[tokio::test]
+async fn every_kind_of_response_has_the_security_headers() {
+    let dir = TempDir::new().unwrap();
+    for path in ["/", "/missing.js", "/health", "/api/v1/missing", "/ws/doc"] {
+        let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+        let response = get(state, path).await;
+        let headers = response.headers();
+        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{path}");
+        assert_eq!(headers[header::REFERRER_POLICY], "same-origin", "{path}");
+        assert!(
+            headers.contains_key(header::CONTENT_SECURITY_POLICY),
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_handler_keeps_its_own_security_policy() {
+    let strict = "script-src 'none'";
+    let app = Router::new()
+        .route(
+            "/",
+            axum::routing::get(move || async move {
+                ([(header::CONTENT_SECURITY_POLICY, strict)], "public page")
+            }),
+        )
+        .layer(axum::middleware::map_response(
+            cadocs_server::security::add_headers,
+        ));
+    let response = app
+        .oneshot(Request::get("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.headers()[header::CONTENT_SECURITY_POLICY], strict);
+    assert_eq!(
+        response.headers()[header::X_CONTENT_TYPE_OPTIONS],
+        "nosniff"
+    );
+}
+
+#[tokio::test]
+async fn unknown_api_routes_answer_in_the_error_shape() {
+    let dir = TempDir::new().unwrap();
+    for path in ["/api/v1/missing", "/api/v1/a/b", "/api/v1/", "/api/v1"] {
+        let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+        let response = get(state, path).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "application/json",
+            "{path}"
+        );
+        assert_eq!(
+            body_json(response).await,
+            json!({ "error": { "code": "not_found", "message": "Not found" } }),
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_foreign_origin_gets_a_403_from_the_api() {
+    let dir = TempDir::new().unwrap();
+    let app =
+        router::<_, _, Fixtures>(state(&dir, collab(), SocketConfig::default(), Permissive).await);
+    let request = |origin: &str| {
+        Request::post("/api/v1/missing")
+            .header(header::ORIGIN, origin)
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    let refused = app
+        .clone()
+        .oneshot(request("https://evil.example"))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+    assert_eq!(body_json(refused).await["error"]["code"], "forbidden");
+
+    let allowed = app.oneshot(request(PUBLIC_ORIGIN)).await.unwrap();
+    assert_eq!(allowed.status(), StatusCode::NOT_FOUND);
+}
+
+/// A route behind a limiter of two requests, as `peer` would reach it.
+fn limited(proxies: &str, peer: [u8; 4]) -> Router {
+    let limiter = Arc::new(RateLimiter::new(2, Duration::from_secs(90)));
+    let http = Arc::new(HttpConfig {
+        trusted_proxies: TrustedProxies::parse(proxies).unwrap(),
+        ..http()
+    });
+    Router::new()
+        .route("/login", post(|| async { "welcome" }))
+        .route_layer(from_fn_with_state((limiter, http), api::rate_limit))
+        .layer(MockConnectInfo(std::net::SocketAddr::from((peer, 1234))))
+}
+
+async fn login(app: &Router, forwarded_for: Option<&str>) -> axum::response::Response {
+    let mut request = Request::builder().method(Method::POST).uri("/login");
+    if let Some(client) = forwarded_for {
+        request = request.header("x-forwarded-for", client);
+    }
+    app.clone()
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn past_the_limit_a_client_gets_429_and_a_delay() {
+    let app = limited("", [203, 0, 113, 9]);
+    for _ in 0..2 {
+        assert_eq!(login(&app, None).await.status(), StatusCode::OK);
+    }
+
+    let refused = login(&app, None).await;
+    assert_eq!(refused.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(refused.headers()[header::RETRY_AFTER], "90");
+    assert_eq!(body_json(refused).await["error"]["code"], "rate_limited");
+}
+
+#[tokio::test]
+async fn behind_a_trusted_proxy_each_client_has_its_own_limit() {
+    let app = limited("10.0.0.1", [10, 0, 0, 1]);
+    for _ in 0..2 {
+        assert_eq!(
+            login(&app, Some("198.51.100.1")).await.status(),
+            StatusCode::OK
+        );
+    }
+    let refused = login(&app, Some("198.51.100.1")).await.status();
+    assert_eq!(refused, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        login(&app, Some("198.51.100.2")).await.status(),
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn a_client_cannot_dodge_the_limit_with_a_forged_header() {
+    let app = limited("", [203, 0, 113, 9]);
+    for n in 0..2 {
+        let forged = format!("198.51.100.{n}");
+        assert_eq!(login(&app, Some(&forged)).await.status(), StatusCode::OK);
+    }
+    let refused = login(&app, Some("198.51.100.9")).await.status();
+    assert_eq!(refused, StatusCode::TOO_MANY_REQUESTS);
 }
 
 #[tokio::test]
@@ -490,7 +661,7 @@ async fn sockets_past_the_limit_get_503_before_the_upgrade() {
 }
 
 #[tokio::test]
-async fn a_foreign_origin_is_refused() {
+async fn only_the_public_origin_can_open_a_socket() {
     let dir = TempDir::new().unwrap();
     let server = start_default(&dir).await;
 
@@ -507,21 +678,25 @@ async fn a_foreign_origin_is_refused() {
     headers.insert(header::HOST, "evil.example".parse().unwrap());
     assert_eq!(refused_status(rebound).await, StatusCode::FORBIDDEN);
 
-    // Loopback names work with any port.
-    let mut named = server.url("doc").into_client_request().unwrap();
-    let port = server.addr.port();
-    let headers = named.headers_mut();
-    let localhost = format!("localhost:{port}");
-    headers.insert(header::HOST, localhost.parse().unwrap());
-    let origin = format!("http://localhost:{port}");
-    headers.insert(header::ORIGIN, origin.parse().unwrap());
-    connect_async(named).await.expect("localhost is allowed");
-
-    let mut same = server.url("doc").into_client_request().unwrap();
+    // Matching `Host` no longer means anything.
+    let mut same_host = server.url("doc").into_client_request().unwrap();
     let origin = format!("http://{}", server.addr);
-    same.headers_mut()
+    same_host
+        .headers_mut()
         .insert(header::ORIGIN, origin.parse().unwrap());
-    connect_async(same).await.expect("same origin is allowed");
+    assert_eq!(refused_status(same_host).await, StatusCode::FORBIDDEN);
+
+    let mut public = server.url("doc").into_client_request().unwrap();
+    public
+        .headers_mut()
+        .insert(header::ORIGIN, PUBLIC_ORIGIN.parse().unwrap());
+    connect_async(public)
+        .await
+        .expect("the public origin is allowed");
+
+    connect_async(server.url("doc"))
+        .await
+        .expect("a client outside a browser sends no origin");
 
     server.stop().await;
 }

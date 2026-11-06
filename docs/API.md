@@ -1,6 +1,6 @@
 # API
 
-All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Only the WebSocket route marked "prototype" exists today. The rest is the target design.
+All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Only the WebSocket route marked "prototype" exists today, and any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
 
 ## Conventions
 
@@ -8,6 +8,7 @@ All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Onl
 - **CSRF**: mutating requests require the `X-CSRF-Token` header, whose value comes from `GET /session`.
 - **Ids**: UUIDv7 strings.
 - **Pagination**: `?limit=` (maximum 100) and an opaque `?cursor=`. Responses have the form `{ "items": [...], "next_cursor": "..." | null }`.
+- **Origin**: a request that sends an `Origin` other than the one of `CADOCS_PUBLIC_URL` gets `403` `forbidden`. Clients outside a browser send none.
 - **Hidden resources**: a resource the caller cannot read returns `404`, not `403`, so that its existence does not leak. `403` means the caller can read it but cannot do this action.
 
 Errors have one shape:
@@ -22,9 +23,10 @@ Errors have one shape:
 | 401 | `unauthenticated` |
 | 403 | `forbidden`, `csrf_failed` |
 | 404 | `not_found` |
+| 405 | `method_not_allowed` |
 | 409 | `conflict` |
 | 413 | `too_large` |
-| 429 | `rate_limited` |
+| 429 | `rate_limited`, with a `Retry-After` header in seconds |
 | 500 | `internal` (details go to the log only) |
 | 503 | `unavailable` (a limit is reached, or storage is failing) |
 
@@ -174,7 +176,7 @@ The URL matches what `y-websocket` builds: the server URL followed by `/` and th
 3. The page must exist and be readable, otherwise `404`.
 4. The resulting role sets the connection mode: read-write for `editor` and above, read-only otherwise. A `commenter` is read-only on the wire: comments go through REST.
 
-The prototype has no public URL or session. A browser's `Origin` must match the `Host` header, and that host must be `localhost`, `127.0.0.1` or `[::1]`, which also stops DNS rebinding. Otherwise the answer is `403`. Clients that send no `Origin` are accepted. A prototype `doc_id` is 1 to 64 letters, digits, `-` or `_`, otherwise `404`. At capacity or during shutdown, the answer is `503`.
+The prototype has no session. A browser's `Origin` must be the one of `CADOCS_PUBLIC_URL`, otherwise the answer is `403`. Clients that send no `Origin` are accepted. A prototype `doc_id` is 1 to 64 letters, digits, `-` or `_`, otherwise `404`. At capacity or during shutdown, the answer is `503`.
 
 Since browsers cannot read the status of a failed upgrade, the client confirms its session through REST after repeated failures.
 

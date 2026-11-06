@@ -12,8 +12,8 @@ Environment variables only, so no config file format has to be parsed or documen
 | --- | --- | --- |
 | `CADOCS_DATA_DIR` **P** | `./data` | Data folder, on a local disk |
 | `CADOCS_BIND` **P** | `127.0.0.1:3000` | Listen address |
-| `CADOCS_PUBLIC_URL` | none, required from the MVP | Public URL. Sets the allowed `Origin`, and the `Secure` cookie flag when it is `https`. Until then, a browser's `Origin` must match the `Host` header, on a loopback name |
-| `CADOCS_TRUSTED_PROXIES` | empty | Proxy addresses allowed to set `X-Forwarded-For` |
+| `CADOCS_PUBLIC_URL` **P** | none, required | Public URL: a scheme, a host and an optional port, with no path, as cadocs lives at the root of its host. Sets the allowed `Origin`, and the `Secure` cookie flag when it is `https`. `cadocs` refuses to start without it |
+| `CADOCS_TRUSTED_PROXIES` **P** | empty | Proxies allowed to set `X-Forwarded-For`, comma-separated: addresses or blocks such as `172.18.0.0/16`. The rightmost address no listed proxy covers is the client |
 | `CADOCS_LOG` **P** | `info` | Log filter |
 
 ### Collaboration
@@ -74,7 +74,7 @@ data/
 
 ## Security headers
 
-Sent on every HTML response. The embedded front end sends them on all its files.
+Sent on every response, unless a handler sets its own value.
 
 | Header | Value |
 | --- | --- |

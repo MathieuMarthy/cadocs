@@ -201,3 +201,56 @@ impl DocStore for SqliteStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tokio::time::timeout;
+
+    use super::*;
+
+    const SHORT: Duration = Duration::from_millis(200);
+
+    async fn open() -> (SqliteStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open(&dir.path().join("cadocs.db"))
+            .await
+            .unwrap();
+        (store, dir)
+    }
+
+    fn update() -> StoredUpdate {
+        StoredUpdate {
+            seq: 1,
+            data: vec![1],
+        }
+    }
+
+    #[tokio::test]
+    async fn writes_queue_on_one_connection_and_reads_do_not_wait() {
+        let (store, _dir) = open().await;
+        let held = store.writer.acquire().await.unwrap();
+
+        let updates = [update()];
+        assert!(
+            timeout(SHORT, store.append_updates("doc", &updates))
+                .await
+                .is_err()
+        );
+        timeout(SHORT, store.load("doc"))
+            .await
+            .expect("a read must not wait for the writer")
+            .unwrap();
+
+        drop(held);
+        store.append_updates("doc", &updates).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_read_pool_cannot_write() {
+        let (store, _dir) = open().await;
+        let refused = sqlx::query("DELETE FROM doc_updates")
+            .execute(&store.reader)
+            .await;
+        assert!(refused.is_err());
+    }
+}

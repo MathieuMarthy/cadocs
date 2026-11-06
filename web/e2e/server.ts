@@ -74,6 +74,7 @@ export class TestServer {
       env: {
         ...process.env,
         CADOCS_BIND: `127.0.0.1:${this.port}`,
+        CADOCS_PUBLIC_URL: this.url,
         CADOCS_DATA_DIR: this.dataDir,
         CADOCS_LOG: "info",
         ...this.env,

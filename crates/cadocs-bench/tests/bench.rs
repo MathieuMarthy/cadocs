@@ -7,7 +7,8 @@ use cadocs_bench::document::{EDITS, body_text, generate};
 use cadocs_bench::load::{LoadConfig, LoadReport, peers, run};
 use cadocs_bench::seed::{COMPACT_UPDATES, doc_id, seed};
 use cadocs_collab::{CollabConfig, DocRegistry, Permissive};
-use cadocs_server::config::SocketConfig;
+use cadocs_server::client_ip::TrustedProxies;
+use cadocs_server::config::{HttpConfig, PublicUrl, SocketConfig};
 use cadocs_server::{AppState, serve};
 use cadocs_store::{DocStore, SqliteStore};
 use rust_embed::Embed;
@@ -128,6 +129,10 @@ async fn start(dir: &TempDir) -> Server {
         store.clone(),
         Arc::new(Permissive),
         SocketConfig::default(),
+        HttpConfig {
+            public_url: PublicUrl::parse("http://127.0.0.1:3000").unwrap(),
+            trusted_proxies: TrustedProxies::default(),
+        },
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());

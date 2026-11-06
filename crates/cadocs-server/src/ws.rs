@@ -5,7 +5,7 @@ use std::time::Duration;
 use axum::body::Bytes;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use cadocs_collab::{
     Authorizer, CLOSE_FRAME_TOO_LARGE, CLOSE_PROTOCOL_ERROR, CLOSE_TOO_SLOW, Close, CollabError,
@@ -34,7 +34,7 @@ pub async fn upgrade<S: DocStore, A: Authorizer>(
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    if !same_origin(&headers) {
+    if !state.http.public_url.allows(&headers) {
         return StatusCode::FORBIDDEN.into_response();
     }
     if !valid_doc_id(&doc_id) {
@@ -66,34 +66,6 @@ pub async fn upgrade<S: DocStore, A: Authorizer>(
             run(socket, connection, config).await;
             drop(open_socket);
         })
-}
-
-/// Without accounts there is no public URL to compare with. The page must come from the host it
-/// connects to, which stops other websites, and that host must be a loopback name, which stops DNS
-/// rebinding, where a hostile name makes both headers agree. Clients outside a browser send no
-/// `Origin`. `CADOCS_PUBLIC_URL` replaces this in the MVP.
-fn same_origin(headers: &HeaderMap) -> bool {
-    let Some(origin) = headers.get(header::ORIGIN) else {
-        return true;
-    };
-    let host = headers
-        .get(header::HOST)
-        .and_then(|host| host.to_str().ok());
-    let origin_host = origin
-        .to_str()
-        .ok()
-        .and_then(|origin| origin.split_once("://"))
-        .map(|(_, host)| host);
-    matches!((origin_host, host), (Some(a), Some(b)) if a.eq_ignore_ascii_case(b) && is_loopback(b))
-}
-
-fn is_loopback(host: &str) -> bool {
-    let name = match host.rsplit_once(':') {
-        Some((name, port)) if port.bytes().all(|byte| byte.is_ascii_digit()) => name,
-        _ => host,
-    };
-    let name = name.to_ascii_lowercase();
-    matches!(name.as_str(), "localhost" | "127.0.0.1" | "[::1]")
 }
 
 fn valid_doc_id(doc_id: &str) -> bool {

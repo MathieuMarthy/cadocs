@@ -1,10 +1,17 @@
 //! HTTP and WebSocket layer. The only crate that knows about axum.
 
+pub mod api;
 pub mod assets;
+pub mod cli;
+pub mod client_ip;
 pub mod config;
+pub mod data_dir;
+pub mod rate_limit;
+pub mod security;
 mod ws;
 
 use std::future::{Future, IntoFuture};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,7 +19,8 @@ use anyhow::Context;
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::middleware::map_response;
+use axum::routing::{any, get};
 use cadocs_collab::{Authorizer, DocRegistry};
 use cadocs_store::DocStore;
 use rust_embed::RustEmbed;
@@ -20,7 +28,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{oneshot, watch};
 use tokio::time::timeout;
 
-use crate::config::SocketConfig;
+use crate::config::{HttpConfig, SocketConfig};
 
 /// How long shutdown waits for HTTP requests in progress.
 const HTTP_GRACE: Duration = Duration::from_secs(2);
@@ -32,6 +40,7 @@ pub struct AppState<S, A> {
     pub store: Arc<S>,
     pub authorizer: Arc<A>,
     pub socket: SocketConfig,
+    pub http: Arc<HttpConfig>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
     sockets: watch::Sender<()>,
 }
@@ -43,6 +52,7 @@ impl<S, A> Clone for AppState<S, A> {
             store: self.store.clone(),
             authorizer: self.authorizer.clone(),
             socket: self.socket,
+            http: self.http.clone(),
             sockets: self.sockets.clone(),
         }
     }
@@ -54,12 +64,14 @@ impl<S, A> AppState<S, A> {
         store: Arc<S>,
         authorizer: Arc<A>,
         socket: SocketConfig,
+        http: HttpConfig,
     ) -> Self {
         Self {
             registry,
             store,
             authorizer,
             socket,
+            http: Arc::new(http),
             sockets: watch::Sender::new(()),
         }
     }
@@ -69,7 +81,10 @@ pub fn router<S: DocStore, A: Authorizer, E: RustEmbed + 'static>(state: AppStat
     Router::new()
         .route("/health", get(health::<S, A>))
         .route("/ws/{doc}", get(ws::upgrade::<S, A>))
+        .nest("/api/v1", api::router(state.http.clone()))
+        .route("/api/v1/", any(api::not_found))
         .fallback_service(get(assets::serve::<E>))
+        .layer(map_response(security::add_headers))
         .with_state(state)
 }
 
@@ -90,7 +105,8 @@ pub async fn serve<S: DocStore, A: Authorizer, E: RustEmbed + 'static>(
     let registry = state.registry.clone();
     let sockets = state.sockets.clone();
     let (stop, stopped) = oneshot::channel::<()>();
-    let mut http = axum::serve(listener, router::<S, A, E>(state))
+    let app = router::<S, A, E>(state).into_make_service_with_connect_info::<SocketAddr>();
+    let mut http = axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = stopped.await;
         })

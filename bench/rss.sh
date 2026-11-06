@@ -42,6 +42,7 @@ start_server() {
     if [[ $allocator == glibc-arena2 ]]; then arena=(MALLOC_ARENA_MAX=2); fi
     # `-i`: the scenario uses default settings, whatever this shell exports.
     env -i "${arena[@]}" CADOCS_DATA_DIR="$DATA_DIR" CADOCS_BIND="127.0.0.1:$PORT" \
+        CADOCS_PUBLIC_URL="http://127.0.0.1:$PORT" \
         target/release/cadocs >>"$WORK/server.log" 2>&1 &
     SERVER_PID=$!
     for _ in $(seq 100); do
