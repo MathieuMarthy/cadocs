@@ -47,6 +47,35 @@ Scope:
 - A link to the source code in the interface (ADR 0010)
 - Docker image, `aarch64` and `x86_64` binaries, backup and restore commands, [OPERATIONS.md](OPERATIONS.md) complete
 
+Steps, one session each. Each step adds the migration for the tables it needs, and its REST routes come with tests of the permissions they use. A step that adds a dependency or a background task reports the idle RSS, so a drift shows before the final benchmark.
+
+- [ ] **Step 1:** HTTP foundation: `/api/v1` router, error shape, `CADOCS_PUBLIC_URL` and the `Origin` check, `CADOCS_TRUSTED_PROXIES`, rate limiter, security headers, read and write pools, data folder lock, `serve` subcommand. Done when each of these has a test and the prototype socket still works.
+- [ ] **Step 2:** Accounts and sessions: `users`, `sessions`, `workspaces`, `workspace_members`, `/auth/setup`, login, logout, `/session`, `/me`, session middleware, CSRF, Argon2 behind a semaphore. Done when first run, login, expiry, CSRF and rate limits are tested.
+- [ ] **Step 3:** Instance administration: `/admin/users`, `password_resets`, reset links, `cadocs reset-password`, the last instance admin check. Done when the instance actions of [PERMISSIONS.md](PERMISSIONS.md) pass over REST.
+- [ ] **Step 4:** Workspaces, members and invitations, with the last owner check. Done when the workspace actions pass over REST and an invited user can join with a link.
+- [ ] **Step 5:** Spaces and grants: routes, space trash, role resolution from database rows. Done when each rule of the resolution order passes over REST.
+- [ ] **Step 6:** Pages: `pages`, fractional index, tree, create, read, move, trash, restore, purge, recent pages. Done when the move and trash rules of [DATA_MODEL.md](DATA_MODEL.md#pages) pass over REST. The prototype socket stays as it is: its documents have no `pages` row.
+- [ ] **Step 7:** Page socket behind sessions: `/ws/pages/{id}` replaces `/ws/{doc}`, a real `Authorizer` replaces `Permissive`, `doc_id` becomes `page_id` with its foreign key, a flush copies the title to `pages`, the server can write to a room, and `PATCH /pages/{page}` uses that. `cadocs-bench`, its seed, `web/e2e/` and the prototype page all use the old route or columns, so they move in this step. Done when the end-to-end tests and a short benchmark run pass on the new route.
+- [ ] **Step 8:** Socket closes and collab hardening: every trigger of [Reacting to changes](PERMISSIONS.md#reacting-to-changes) on page sockets, awareness ownership, cursor shape validation, a per-room awareness cap, a way out for a dependency that never arrives. Done when revoking a role closes the user's page sockets with the right code, in a test.
+- [ ] **Step 9:** Events socket: `/ws/events`, workspace hub, `resync`, the same triggers on events sockets, a socket count shared with page sockets. Done when two clients see each other's tree changes and a lagging client gets `resync`.
+- [ ] **Step 10:** `cadocs-jobs` and the reader outside a room: `jobs`, worker, retries, purge of sessions, tokens and the trash, `CADOCS_DOC_READS`. Done when a crash during a job, retries and the read bound are tested.
+- [ ] **Step 11:** Svelte shell: routing, setup, login, invitation and reset pages, account, instance administration, light and dark themes, phone layout, the source code link, `4401`, `4403` and `4404` shown in the page. Done when Playwright goes from first run to an empty workspace.
+- [ ] **Step 12:** Navigation: spaces, lazy tree with drag and drop, trash, recent pages, live updates from the events socket. Done when two browsers see each other's tree changes.
+- [ ] **Step 13:** Administration screens: workspace settings, members, invitations, space settings and grants. Done when Playwright invites a user and changes their role, and the open page reacts.
+- [ ] **Step 14:** Editor, first blocks: page view in the shell, read-only mode from the role, slash menu, headings, lists, tasks, code with syntax highlighting, quotes, dividers, links, Markdown shortcuts. Done when each block works in Playwright with two browsers.
+- [ ] **Step 15:** Editor, other blocks: callouts, toggles, tables, links to pages, table of contents. Done when each block works in Playwright with two browsers.
+- [ ] **Step 16:** `cadocs-content`: `XmlFragment` to AST, renderers to text, HTML and Markdown, Markdown to AST to Yjs, and the test that compares the Rust and TipTap schemas (ADR 0008). Done when every node round-trips and HTML escaping and the URL allow-list are tested.
+- [ ] **Step 17:** Attachments: `cadocs-files`, streaming upload, download, limits and quota, reference tracking, orphan cleanup, image and file blocks. Done when the attachment rules of [DATA_MODEL.md](DATA_MODEL.md#attachments) pass, including a full disk.
+- [ ] **Step 18:** Search: `cadocs-search`, stemming, FTS5, the reindex job, the search route and screen. Done when results respect readable spaces and stemming is tested in English and French.
+- [ ] **Step 19:** Revisions: creation job, list, view, restore, thinning, screens. Done when a restore reaches connected clients as a normal edit and keeps the previous content as a revision.
+- [ ] **Step 20:** Markdown import and export for one page, with or without attachments, and the print stylesheet. Done when an export imports back with its content and attachments.
+- [ ] **Step 21:** Delivery: `cadocs backup` and `cadocs restore`, Docker image, `aarch64` and `x86_64` binaries, [OPERATIONS.md](OPERATIONS.md) complete. Done when a backup and restore round trip passes on a running server.
+- [ ] **Step 22:** Coverage: the whole permission matrix over REST and WebSocket, and a check of each scope item against its tests. Done when nothing in the scope lacks an automated test.
+- [ ] **Step 23:** MVP benchmark: idle, 30 active users, login peaks, 10,000 pages, and the value of `CADOCS_MAX_ROOMS`. Done when the results are recorded against the exit criteria, as measured.
+- [ ] **Step 24:** Security review of auth, uploads and rendered HTML. Done when its findings are fixed or recorded.
+
+The two weeks of daily use start after step 24.
+
 Exit criteria:
 
 - [ ] All of the scope is covered by automated tests, including the permission matrix over REST and WebSocket.
