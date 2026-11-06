@@ -2,6 +2,8 @@
 
 mod admin;
 pub mod auth;
+mod invitations;
+mod workspaces;
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -19,7 +21,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
 use cadocs_collab::Authorizer;
-use cadocs_store::{AccountStore, DocStore, StoreError};
+use cadocs_store::{AccountStore, DocStore, StoreError, WorkspaceStore};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -164,7 +166,17 @@ impl From<StoreError> for ApiError {
                 conflict.with_message("This account is the last instance admin")
             }
             StoreError::UserDisabled => conflict.with_message("This account is disabled"),
-            StoreError::UserNotFound => ApiError::new(ErrorCode::NotFound),
+            StoreError::AlreadyMember => conflict
+                .with_message("This email belongs to a member")
+                .with_field("email", "member"),
+            StoreError::NameMismatch => ApiError::new(ErrorCode::ValidationFailed)
+                .with_message("This is not the name of the workspace")
+                .with_field("name", "mismatch"),
+            StoreError::NotAllowed => ApiError::new(ErrorCode::Forbidden),
+            StoreError::UserNotFound
+            | StoreError::WorkspaceNotFound
+            | StoreError::MemberNotFound
+            | StoreError::InvitationNotFound => ApiError::new(ErrorCode::NotFound),
             error => {
                 tracing::error!(%error, "storage failed");
                 ApiError::new(ErrorCode::Unavailable)
@@ -205,14 +217,15 @@ fn body_refused(rejection: &JsonRejection) -> ApiError {
     }
 }
 
-/// The one parameter of a path, with its refusal in the error shape.
-pub struct PathParam(pub String);
+/// The parameters of a path, with their refusal in the error shape: a `String` for one, a tuple
+/// for more.
+pub struct PathParam<T = String>(pub T);
 
-impl<S: Send + Sync> FromRequestParts<S> for PathParam {
+impl<S: Send + Sync, T: DeserializeOwned + Send> FromRequestParts<S> for PathParam<T> {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, ApiError> {
-        match Path::<String>::from_request_parts(parts, state).await {
+        match Path::<T>::from_request_parts(parts, state).await {
             Ok(Path(value)) => Ok(Self(value)),
             Err(rejection) => {
                 Err(ApiError::new(ErrorCode::InvalidRequest).with_message(rejection.body_text()))
@@ -254,6 +267,23 @@ impl PageQuery {
             }
         }
         Ok(page)
+    }
+
+    /// How many rows to ask for: one more than the page says whether another one exists.
+    pub fn fetch(&self) -> u32 {
+        self.limit + 1
+    }
+
+    /// The page out of what `fetch` brought. The cursor of a row is what the next query starts
+    /// after.
+    pub fn cut<R, T: From<R>>(&self, mut rows: Vec<R>, cursor: impl Fn(&R) -> String) -> Page<T> {
+        let more = rows.len() > self.limit as usize;
+        rows.truncate(self.limit as usize);
+        let next_cursor = rows.last().filter(|_| more).map(cursor);
+        Page {
+            items: rows.into_iter().map(Into::into).collect(),
+            next_cursor,
+        }
     }
 }
 
@@ -306,7 +336,7 @@ impl IntoResponse for ApiError {
 
 pub fn router<S, A>(state: &AppState<S, A>) -> Router<AppState<S, A>>
 where
-    S: DocStore + AccountStore,
+    S: DocStore + AccountStore + WorkspaceStore,
     A: Authorizer,
 {
     // A nested fallback only sees paths below the root of the nest. `router` in `lib.rs` also
@@ -314,7 +344,9 @@ where
     let routes = Router::new()
         .route("/", any(not_found))
         .merge(auth::routes(state))
-        .merge(admin::routes(state));
+        .merge(admin::routes(state))
+        .merge(workspaces::routes(state))
+        .merge(invitations::routes(state));
     finish(routes, state.http.clone())
 }
 

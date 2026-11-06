@@ -2,7 +2,7 @@ use cadocs_core::permissions::{
     WorkspaceRole, would_remove_last_instance_admin, would_remove_last_owner,
 };
 use sqlx::sqlite::SqliteRow;
-use sqlx::{AssertSqlSafe, Row, SqliteConnection};
+use sqlx::{AssertSqlSafe, Row, SqliteConnection, SqliteExecutor};
 
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
@@ -10,7 +10,7 @@ use crate::{
     NewPasswordReset, NewSession, StoreError, UpdateBasis, User, UserChanges, UserRecord,
 };
 
-const INSERT_SESSION: &str =
+pub(super) const INSERT_SESSION: &str =
     "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at)
      VALUES (?1, ?2, ?3, ?3, ?4)";
 
@@ -34,6 +34,36 @@ fn record(row: &SqliteRow) -> UserRecord {
         disabled_at: row.get("disabled_at"),
         created_at: row.get("created_at"),
     }
+}
+
+pub(super) fn membership(row: &SqliteRow) -> Membership {
+    Membership {
+        workspace_id: row.get("id"),
+        slug: row.get("slug"),
+        name: row.get("name"),
+        role: row.get("role"),
+    }
+}
+
+/// At most `limit` workspaces of a user after the id `after`, -1 for all of them.
+pub(super) async fn select_memberships<'e>(
+    executor: impl SqliteExecutor<'e>,
+    user_id: &str,
+    after: Option<&str>,
+    limit: i64,
+) -> Result<Vec<Membership>, StoreError> {
+    let rows = sqlx::query(
+        "SELECT w.id, w.slug, w.name, m.role
+         FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
+         WHERE m.user_id = ?1 AND w.id > coalesce(?2, '')
+         ORDER BY w.id LIMIT ?3",
+    )
+    .bind(user_id)
+    .bind(after)
+    .bind(limit)
+    .fetch_all(executor)
+    .await?;
+    Ok(rows.iter().map(membership).collect())
 }
 
 /// Whether `user_id` is an enabled instance admin, and how many of those there are.
@@ -225,23 +255,7 @@ impl AccountStore for SqliteStore {
     }
 
     async fn memberships(&self, user_id: &str) -> Result<Vec<Membership>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT w.id, w.slug, w.name, m.role
-             FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
-             WHERE m.user_id = ?1 ORDER BY w.id",
-        )
-        .bind(user_id)
-        .fetch_all(&self.reader)
-        .await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| Membership {
-                workspace_id: row.get("id"),
-                slug: row.get("slug"),
-                name: row.get("name"),
-                role: row.get("role"),
-            })
-            .collect())
+        select_memberships(&self.reader, user_id, None, -1).await
     }
 
     async fn update_user(
@@ -409,6 +423,11 @@ impl AccountStore for SqliteStore {
         }
         if changes.disabled == Some(true) {
             revoke_access(&mut tx, user_id).await?;
+            // Like a reset link, an invitation is a way back in. Deleting a user cascades to them.
+            sqlx::query("DELETE FROM workspace_invitations WHERE invited_by = ?1")
+                .bind(user_id)
+                .execute(&mut *tx)
+                .await?;
         }
 
         let row = sqlx::query(AssertSqlSafe(format!("{SELECT_RECORD} WHERE id = ?1")))

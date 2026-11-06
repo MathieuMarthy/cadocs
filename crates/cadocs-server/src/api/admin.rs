@@ -72,18 +72,9 @@ async fn list_users<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
     page: PageQuery,
 ) -> Result<Json<Page<AdminUserBody>>, ApiError> {
-    // One more than asked says whether another page exists.
     let after = page.cursor.as_deref();
-    let mut users = state.store.list_users(after, page.limit + 1).await?;
-    let more = users.len() > page.limit as usize;
-    users.truncate(page.limit as usize);
-    let next_cursor = more
-        .then(|| users.last().map(|last| last.user.id.clone()))
-        .flatten();
-    Ok(Json(Page {
-        items: users.into_iter().map(Into::into).collect(),
-        next_cursor,
-    }))
+    let users = state.store.list_users(after, page.fetch()).await?;
+    Ok(Json(page.cut(users, |record| record.user.id.clone())))
 }
 
 #[derive(Deserialize)]

@@ -442,3 +442,15 @@ fn recompute_does_not_reveal_the_trash_to_a_revoked_user() {
         );
     }
 }
+
+#[test]
+fn a_workspace_role_reads_back_what_it_writes() {
+    for role in [
+        WorkspaceRole::Member,
+        WorkspaceRole::Admin,
+        WorkspaceRole::Owner,
+    ] {
+        assert_eq!(WorkspaceRole::parse(role.as_str()), Some(role));
+    }
+    assert_eq!(WorkspaceRole::parse("Owner"), None);
+}

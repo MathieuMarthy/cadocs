@@ -11,13 +11,6 @@ const OTHER: &str = "11111111-0000-7000-8000-000000000000";
 const NEW_PASSWORD: &str = "a whole new password";
 
 impl Api {
-    async fn add_and_login(&self, id: &str, email: &str) -> Login {
-        self.add_user(id, email).await;
-        let reply = self.login(email, PASSWORD).await;
-        assert_eq!(reply.status, 200, "{reply:?}");
-        Login::from(&reply)
-    }
-
     async fn patch_user(&self, by: &Login, id: &str, body: Value) -> common::Reply {
         let path = format!("/admin/users/{id}");
         self.send("PATCH", &path, &by.headers(), body).await

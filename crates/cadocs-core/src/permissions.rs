@@ -21,6 +21,22 @@ pub enum WorkspaceRole {
     Owner,
 }
 
+impl WorkspaceRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Member => "member",
+            Self::Admin => "admin",
+            Self::Owner => "owner",
+        }
+    }
+
+    pub fn parse(role: &str) -> Option<Self> {
+        [Self::Member, Self::Admin, Self::Owner]
+            .into_iter()
+            .find(|known| known.as_str() == role)
+    }
+}
+
 /// Ordered from least to most access.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SpaceRole {

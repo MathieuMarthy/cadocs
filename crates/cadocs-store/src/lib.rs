@@ -2,6 +2,7 @@
 
 mod accounts;
 mod sqlite;
+mod workspaces;
 
 use std::future::Future;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,6 +12,10 @@ pub use accounts::{
     NewPasswordReset, NewSession, UpdateBasis, User, UserChanges, UserRecord,
 };
 pub use sqlite::SqliteStore;
+pub use workspaces::{
+    Invitation, InvitationPreview, InvitedUser, MAX_SLUG_CHARS, Member, NewInvitation,
+    NewWorkspace, Workspace, WorkspaceChanges, WorkspaceStore,
+};
 
 /// The current time as stored: milliseconds since the Unix epoch.
 pub fn now_ms() -> i64 {
@@ -49,6 +54,18 @@ pub enum StoreError {
     UserNotFound,
     #[error("this account is disabled")]
     UserDisabled,
+    #[error("no such workspace")]
+    WorkspaceNotFound,
+    #[error("no such member")]
+    MemberNotFound,
+    #[error("no such invitation")]
+    InvitationNotFound,
+    #[error("this user may not do that")]
+    NotAllowed,
+    #[error("this is not the name of the workspace")]
+    NameMismatch,
+    #[error("this email belongs to a member")]
+    AlreadyMember,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

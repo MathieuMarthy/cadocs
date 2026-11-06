@@ -7,10 +7,12 @@ use axum::http::header::{COOKIE, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use cadocs_store::{AccountStore, NewPasswordReset, User, now_ms};
+use cadocs_core::permissions::WorkspaceRole;
+use cadocs_store::{AccountStore, ActiveSession, NewInvitation, NewPasswordReset, User, now_ms};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tokio::time::timeout;
+use uuid::Uuid;
 
 use crate::AppState;
 use crate::api::{ApiError, ErrorCode};
@@ -25,6 +27,8 @@ const TOUCH_WAIT: Duration = Duration::from_secs(1);
 const MAX_COOKIES: usize = 4;
 /// ADR 0013.
 const RESET_LIFETIME: Duration = Duration::from_secs(60 * 60);
+/// ADR 0013.
+const INVITATION_LIFETIME: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Handlers behind `require` read this from the request extensions.
 #[derive(Debug, Clone)]
@@ -67,6 +71,31 @@ pub fn new_password_reset(
     };
     let link = format!("{}/reset-password/{token}", public_url.origin());
     Ok((link, reset))
+}
+
+/// A link to hand over, and the row that makes it work, as for a password reset. The page behind
+/// the link reads `GET /invitations/{token}` and posts to `/invitations/{token}/accept`.
+pub fn new_invitation(
+    public_url: &PublicUrl,
+    workspace_id: &str,
+    email: String,
+    role: WorkspaceRole,
+    invited_by: &str,
+) -> Result<(String, NewInvitation), getrandom::Error> {
+    let token = new_token()?;
+    let now = now_ms();
+    let invitation = NewInvitation {
+        id: Uuid::now_v7().to_string(),
+        workspace_id: workspace_id.to_owned(),
+        email,
+        role,
+        token_hash: token_hash(&token),
+        invited_by: invited_by.to_owned(),
+        now,
+        expires_at: now + INVITATION_LIFETIME.as_millis() as i64,
+    };
+    let link = format!("{}/invite/{token}", public_url.origin());
+    Ok((link, invitation))
 }
 
 /// Derived from the token, so it needs no column, and it lasts as long as the session. Only a
@@ -130,6 +159,38 @@ fn csrf_matches(headers: &HeaderMap, token: &str) -> bool {
         .is_some_and(|sent| bool::from(sent.as_bytes().ct_eq(expected.as_bytes())))
 }
 
+/// The first valid session among the cookies of a request.
+async fn find<S: AccountStore, A>(
+    state: &AppState<S, A>,
+    headers: &HeaderMap,
+    now: i64,
+) -> Result<Option<(String, ActiveSession)>, ApiError> {
+    for token in tokens_of(headers) {
+        if let Some(session) = state.store.session(&token_hash(&token), now).await? {
+            return Ok(Some((token, session)));
+        }
+    }
+    Ok(None)
+}
+
+/// For a write on a route open to everyone, in the case that needs a user: what `require` does,
+/// from inside the handler.
+pub async fn require_in_handler<S: AccountStore, A>(
+    state: &AppState<S, A>,
+    headers: &HeaderMap,
+) -> Result<CurrentSession, ApiError> {
+    let Some((token, session)) = find(state, headers, now_ms()).await? else {
+        return Err(ApiError::new(ErrorCode::Unauthenticated));
+    };
+    if !csrf_matches(headers, &token) {
+        return Err(ApiError::new(ErrorCode::CsrfFailed));
+    }
+    Ok(CurrentSession {
+        user: session.user,
+        token,
+    })
+}
+
 /// Layer of every route that needs a user. It also checks CSRF, so that no such route can forget.
 pub async fn require<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
@@ -137,19 +198,10 @@ pub async fn require<S: AccountStore, A>(
     next: Next,
 ) -> Response {
     let now = now_ms();
-    let mut found = None;
-    for token in tokens_of(request.headers()) {
-        match state.store.session(&token_hash(&token), now).await {
-            Ok(Some(session)) => {
-                found = Some((token, session));
-                break;
-            }
-            Ok(None) => {}
-            Err(error) => return ApiError::from(error).into_response(),
-        }
-    }
-    let Some((token, session)) = found else {
-        return ApiError::new(ErrorCode::Unauthenticated).into_response();
+    let (token, session) = match find(&state, request.headers(), now).await {
+        Ok(Some(found)) => found,
+        Ok(None) => return ApiError::new(ErrorCode::Unauthenticated).into_response(),
+        Err(error) => return error.into_response(),
     };
 
     if !request.method().is_safe() && !csrf_matches(request.headers(), &token) {

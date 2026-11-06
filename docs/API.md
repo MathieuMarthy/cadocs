@@ -1,11 +1,11 @@
 # API
 
-All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today the WebSocket route marked "prototype", and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me` and `/admin/users`. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
+All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today the WebSocket route marked "prototype", and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members and invitations. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
 
 ## Conventions
 
 - **Authentication**: an `HttpOnly`, `Secure`, `SameSite=Lax` session cookie.
-- **CSRF**: mutating requests with a session require the `X-CSRF-Token` header, whose value comes from `GET /session`. It is derived from the session token, so it needs no storage and lasts as long as the session. Routes that run before a session exists (`/auth/setup`, `/auth/login`, `/auth/password-reset/{token}`) have no token to check: they rely on the `Origin` check and on requiring a JSON content type, which a cross-site form cannot send.
+- **CSRF**: mutating requests with a session require the `X-CSRF-Token` header, whose value comes from `GET /session`. It is derived from the session token, so it needs no storage and lasts as long as the session. Routes that run before a session exists (`/auth/setup`, `/auth/login`, `/auth/password-reset/{token}`, and `/invitations/{token}/accept` for a new account) have no token to check: they rely on the `Origin` check and on requiring a JSON content type, which a cross-site form cannot send.
 - **Ids**: UUIDv7 strings.
 - **Pagination**: `?limit=` (maximum 100) and an opaque `?cursor=`. Responses have the form `{ "items": [...], "next_cursor": "..." | null }`.
 - **Origin**: a request that sends an `Origin` other than the one of `CADOCS_PUBLIC_URL` gets `403` `forbidden`. Clients outside a browser send none.
@@ -62,7 +62,7 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 
 - `POST /auth/password-reset/{token}` takes `{ password }` and answers `204`, without opening a session. An unknown, used, replaced or expired token is a `404`. A refused password leaves the link usable.
 
-`/auth/setup`, `/auth/login`, `/auth/password-reset/{token}` and a `PATCH /me` that checks the current password share one limit per client: a burst of 10, then one every 15 seconds. A hash that waits over 10 seconds for its turn answers `503`.
+`/auth/setup`, `/auth/login`, `/auth/password-reset/{token}`, `/invitations/{token}/accept` and a `PATCH /me` that checks the current password share one limit per client: a burst of 10, then one every 15 seconds. A hash that waits over 10 seconds for its turn answers `503`.
 
 ### Instance administration
 
@@ -96,6 +96,19 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 | PATCH, DELETE | `/groups/{group}` | admin | Rename or delete a group (V1) |
 | PUT, DELETE | `/groups/{group}/members/{user}` | admin | Add or remove a member (V1) |
 | GET | `/workspaces/{ws}/recent` | member | Recently updated pages in readable spaces |
+
+- A workspace in a list is `{ id, slug, name, role }`, the caller's role included, as in `GET /session`. `GET /workspaces` is paginated, oldest first. Alone it also has `{ language, created_at, updated_at }`.
+- `POST /workspaces` takes `{ name }` and answers `201` with the workspace, owned by the caller. The slug comes from the name, gets a number if it is taken, and never changes.
+- `PATCH /workspaces/{ws}` takes `{ name?, language? }` and answers the workspace. `language` is one of `ar`, `da`, `de`, `el`, `en`, `es`, `fi`, `fr`, `hu`, `it`, `nl`, `no`, `pt`, `ro`, `ru`, `sv`, `ta`, `tr` (ADR 0007).
+- `DELETE /workspaces/{ws}` takes `{ name }`, which must match exactly, or it is a `400` with `name: mismatch`. It answers `204`.
+- A member is `{ id, email, name, role, disabled, created_at }`, where `id` is the user's. `GET /workspaces/{ws}/members` is paginated, by account age.
+- `PATCH /workspaces/{ws}/members/{user}` takes `{ role }` and answers the member. A change or a removal that leaves no enabled owner is a `409`, by the rule of [PERMISSIONS.md](PERMISSIONS.md#instance-actions). `DELETE` answers `204`.
+- An invitation is `{ id, email, role, invited_by, expires_at, created_at }`, where `role` is `admin` or `member`. A link ends with the right to make it: when its inviter drops below `admin`, leaves, is removed, disabled or deleted. `GET /workspaces/{ws}/invitations` is paginated, oldest first, and leaves out expired ones.
+- `POST /workspaces/{ws}/invitations` takes `{ email, role }` and answers `201` with the invitation and `link`, once, as `<CADOCS_PUBLIC_URL>/invite/<token>`, valid 7 days (ADR 0013). An email has one link per workspace: a new one replaces the last. The email of a member is a `409`, with `email: member`.
+- `DELETE /invitations/{id}` answers `204`, and `404` to anyone who is not an admin of its workspace.
+- `GET /invitations/{token}` answers `{ workspace_name, email, role, expires_at, has_account }`. `has_account` tells the page to ask for a login rather than a password.
+- `POST /invitations/{token}/accept` always takes a JSON body. `{ name, password }` makes the account of the invited email, and answers `201` with the session body and the cookie, or `409` with `email: taken` if that email has an account. `{}` joins with the current session, needs the CSRF token, and answers `200` with the session body: `401` with no session, `403` for an account with another email. A member keeps their role. A refused password leaves the link usable.
+- A link that is unknown, used, replaced, revoked or expired, or whose workspace is gone, is a `404`. Answers that hold a link or a session have `Cache-Control: no-store`.
 | GET | `/jobs/{id}` | the user who started it | Status of an import or export |
 
 ### Spaces

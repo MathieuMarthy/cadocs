@@ -210,6 +210,13 @@ impl Api {
         ))
         .await;
     }
+
+    pub async fn add_and_login(&self, id: &str, email: &str) -> Login {
+        self.add_user(id, email).await;
+        let reply = self.login(email, PASSWORD).await;
+        assert_eq!(reply.status, 200, "{reply:?}");
+        Login::from(&reply)
+    }
 }
 
 pub async fn logged_in() -> (Api, Login) {

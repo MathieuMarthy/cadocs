@@ -1,4 +1,5 @@
 mod accounts;
+mod workspaces;
 
 use std::path::Path;
 use std::time::Duration;

@@ -12,8 +12,8 @@ use axum::routing::{get, patch, post};
 use axum::{Extension, Json, Router};
 use cadocs_collab::Authorizer;
 use cadocs_store::{
-    AccountStore, DocStore, FirstUser, Membership, NewSession, UpdateBasis, User, UserChanges,
-    now_ms,
+    AccountStore, DocStore, FirstUser, MAX_SLUG_CHARS, Membership, NewSession, UpdateBasis, User,
+    UserChanges, now_ms,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -33,7 +33,6 @@ const MAX_NAME_CHARS: usize = 100;
 const MAX_EMAIL_BYTES: usize = 254;
 const MIN_PASSWORD_CHARS: usize = 8;
 const MAX_PASSWORD_CHARS: usize = 1024;
-const MAX_SLUG_CHARS: usize = 64;
 
 pub fn routes<S, A>(state: &AppState<S, A>) -> Router<AppState<S, A>>
 where
@@ -81,11 +80,22 @@ impl From<User> for UserBody {
 }
 
 #[derive(Serialize)]
-struct WorkspaceBody {
+pub(super) struct WorkspaceBody {
     id: String,
     slug: String,
     name: String,
     role: String,
+}
+
+impl From<Membership> for WorkspaceBody {
+    fn from(membership: Membership) -> Self {
+        Self {
+            id: membership.workspace_id,
+            slug: membership.slug,
+            name: membership.name,
+            role: membership.role,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -95,25 +105,32 @@ struct SessionBody {
     csrf_token: String,
 }
 
-fn session_body(user: User, workspaces: Vec<Membership>, token: &str) -> Response {
+pub(super) fn session_body(user: User, workspaces: Vec<Membership>, token: &str) -> Response {
     let body = SessionBody {
         user: user.into(),
-        workspaces: workspaces
-            .into_iter()
-            .map(|membership| WorkspaceBody {
-                id: membership.workspace_id,
-                slug: membership.slug,
-                name: membership.name,
-                role: membership.role,
-            })
-            .collect(),
+        workspaces: workspaces.into_iter().map(Into::into).collect(),
         csrf_token: csrf_token(token),
     };
     let no_store = [(CACHE_CONTROL, HeaderValue::from_static("no-store"))];
     (no_store, Json(body)).into_response()
 }
 
-fn new_session<S, A>(
+/// The answer of a route that makes an account: it is logged in from here on.
+pub(super) fn new_account_body<S, A>(
+    state: &AppState<S, A>,
+    user: User,
+    workspaces: Vec<Membership>,
+    token: &str,
+) -> Response {
+    let mut response = session_body(user, workspaces, token);
+    *response.status_mut() = StatusCode::CREATED;
+    response
+        .headers_mut()
+        .insert(SET_COOKIE, session::cookie(token, &state.http));
+    response
+}
+
+pub(super) fn new_session<S, A>(
     state: &AppState<S, A>,
     user_id: &str,
 ) -> Result<(String, NewSession), ApiError> {
@@ -177,12 +194,7 @@ async fn setup<S: AccountStore, A>(
         name: first.workspace_name,
         role: "owner".to_owned(),
     };
-    let mut response = session_body(user, vec![workspace], &token);
-    *response.status_mut() = StatusCode::CREATED;
-    response
-        .headers_mut()
-        .insert(SET_COOKIE, session::cookie(&token, &state.http));
-    Ok(response)
+    Ok(new_account_body(&state, user, vec![workspace], &token))
 }
 
 #[derive(Deserialize)]
@@ -356,10 +368,14 @@ async fn delete_me<S: AccountStore, A>(
 
 /// Collects every refused field, so that a form can show them all at once.
 #[derive(Default)]
-struct Fields(Option<ApiError>);
+pub(super) struct Fields(Option<ApiError>);
 
 impl Fields {
-    fn check<T: Default>(&mut self, field: &'static str, value: Result<T, &'static str>) -> T {
+    pub(super) fn check<T: Default>(
+        &mut self,
+        field: &'static str,
+        value: Result<T, &'static str>,
+    ) -> T {
         value.unwrap_or_else(|problem| {
             let error = self.0.take();
             let error = error.unwrap_or_else(|| ApiError::new(ErrorCode::ValidationFailed));
@@ -368,12 +384,12 @@ impl Fields {
         })
     }
 
-    fn finish(self) -> Result<(), ApiError> {
+    pub(super) fn finish(self) -> Result<(), ApiError> {
         self.0.map_or(Ok(()), Err)
     }
 }
 
-fn clean_name(name: &str) -> Result<String, &'static str> {
+pub(super) fn clean_name(name: &str) -> Result<String, &'static str> {
     let name = name.trim();
     if name.is_empty() {
         Err("required")
@@ -390,7 +406,7 @@ pub fn normalize_email(email: &str) -> String {
 }
 
 /// An email is an identifier only, nothing is sent to it (ADR 0013): this catches typing mistakes.
-fn clean_email(email: &str) -> Result<String, &'static str> {
+pub(super) fn clean_email(email: &str) -> Result<String, &'static str> {
     let email = normalize_email(email);
     if email.is_empty() {
         return Err("required");
@@ -408,7 +424,7 @@ fn clean_email(email: &str) -> Result<String, &'static str> {
     Ok(email)
 }
 
-fn check_password(password: &str) -> Result<(), &'static str> {
+pub(super) fn check_password(password: &str) -> Result<(), &'static str> {
     let length = password.chars().count();
     if length < MIN_PASSWORD_CHARS {
         Err("too_short")
@@ -420,7 +436,7 @@ fn check_password(password: &str) -> Result<(), &'static str> {
 }
 
 /// Runs of anything but ASCII letters and digits become one dash.
-fn slug(name: &str) -> String {
+pub(super) fn slug(name: &str) -> String {
     let lowered = name.to_ascii_lowercase();
     let words = lowered
         .split(|c: char| !c.is_ascii_alphanumeric())

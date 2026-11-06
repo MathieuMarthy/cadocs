@@ -12,7 +12,7 @@ use axum::http::{Method, Request, StatusCode, header};
 use axum::middleware::from_fn_with_state;
 use axum::routing::post;
 use cadocs_collab::{Authorizer, CollabConfig, DocRegistry, Permissive};
-use cadocs_core::permissions::SocketMode;
+use cadocs_core::permissions::{SocketMode, WorkspaceRole};
 use cadocs_server::api;
 use cadocs_server::client_ip::TrustedProxies;
 use cadocs_server::config::{HttpConfig, PublicUrl, SocketConfig};
@@ -20,9 +20,10 @@ use cadocs_server::rate_limit::RateLimiter;
 use cadocs_server::session::token_hash;
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
-    AccountStore, ActiveSession, AdminChanges, Credentials, DocStore, FirstUser, Membership,
-    NewPasswordReset, NewSession, Snapshot, SqliteStore, StoreError, StoredDoc, StoredUpdate,
-    UpdateBasis, UserChanges, UserRecord, now_ms,
+    AccountStore, ActiveSession, AdminChanges, Credentials, DocStore, FirstUser, Invitation,
+    InvitationPreview, InvitedUser, Member, Membership, NewInvitation, NewPasswordReset,
+    NewSession, NewWorkspace, Snapshot, SqliteStore, StoreError, StoredDoc, StoredUpdate,
+    UpdateBasis, UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -84,6 +85,117 @@ impl DocStore for FlakyStore {
 
     async fn compact(&self, doc_id: &str, snapshot: &Snapshot) -> Result<(), StoreError> {
         self.inner.compact(doc_id, snapshot).await
+    }
+}
+
+impl WorkspaceStore for FlakyStore {
+    async fn create_workspace(&self, workspace: &NewWorkspace) -> Result<Workspace, StoreError> {
+        self.inner.create_workspace(workspace).await
+    }
+
+    async fn list_workspaces(
+        &self,
+        user_id: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Membership>, StoreError> {
+        self.inner.list_workspaces(user_id, after, limit).await
+    }
+
+    async fn workspace(&self, id: &str, user_id: &str) -> Result<Option<Workspace>, StoreError> {
+        self.inner.workspace(id, user_id).await
+    }
+
+    async fn update_workspace(
+        &self,
+        id: &str,
+        actor: &str,
+        changes: &WorkspaceChanges,
+        now: i64,
+    ) -> Result<Workspace, StoreError> {
+        self.inner.update_workspace(id, actor, changes, now).await
+    }
+
+    async fn delete_workspace(
+        &self,
+        id: &str,
+        actor: &str,
+        confirmation: &str,
+    ) -> Result<(), StoreError> {
+        self.inner.delete_workspace(id, actor, confirmation).await
+    }
+
+    async fn list_members(
+        &self,
+        id: &str,
+        actor: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Member>, StoreError> {
+        self.inner.list_members(id, actor, after, limit).await
+    }
+
+    async fn set_member_role(
+        &self,
+        id: &str,
+        actor: &str,
+        user_id: &str,
+        role: WorkspaceRole,
+    ) -> Result<Member, StoreError> {
+        self.inner.set_member_role(id, actor, user_id, role).await
+    }
+
+    async fn remove_member(&self, id: &str, actor: &str, user_id: &str) -> Result<(), StoreError> {
+        self.inner.remove_member(id, actor, user_id).await
+    }
+
+    async fn create_invitation(&self, invitation: &NewInvitation) -> Result<(), StoreError> {
+        self.inner.create_invitation(invitation).await
+    }
+
+    async fn list_invitations(
+        &self,
+        id: &str,
+        actor: &str,
+        now: i64,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Invitation>, StoreError> {
+        self.inner
+            .list_invitations(id, actor, now, after, limit)
+            .await
+    }
+
+    async fn revoke_invitation(&self, id: &str, actor: &str) -> Result<(), StoreError> {
+        self.inner.revoke_invitation(id, actor).await
+    }
+
+    async fn invitation(
+        &self,
+        token_hash: &str,
+        now: i64,
+    ) -> Result<Option<InvitationPreview>, StoreError> {
+        self.inner.invitation(token_hash, now).await
+    }
+
+    async fn accept_as_new_user(
+        &self,
+        token_hash: &str,
+        user: &InvitedUser,
+        session: &NewSession,
+    ) -> Result<Vec<Membership>, StoreError> {
+        self.inner
+            .accept_as_new_user(token_hash, user, session)
+            .await
+    }
+
+    async fn accept_as_user(
+        &self,
+        token_hash: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<Vec<Membership>, StoreError> {
+        self.inner.accept_as_user(token_hash, user_id, now).await
     }
 }
 
