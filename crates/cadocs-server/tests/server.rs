@@ -20,11 +20,11 @@ use cadocs_server::rate_limit::RateLimiter;
 use cadocs_server::session::token_hash;
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
-    AccountStore, ActiveSession, AdminChanges, Credentials, DocStore, FirstUser, Grant, Invitation,
-    InvitationPreview, InvitedUser, Member, Membership, NewGrant, NewInvitation, NewPasswordReset,
-    NewSession, NewSpace, NewWorkspace, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore,
-    StoreError, StoredDoc, StoredUpdate, UpdateBasis, UserChanges, UserRecord, Workspace,
-    WorkspaceChanges, WorkspaceStore, now_ms,
+    AccountStore, ActiveSession, AdminChanges, Credentials, DateCursor, DocStore, FirstUser, Grant,
+    Invitation, InvitationPreview, InvitedUser, Member, Membership, NewGrant, NewInvitation,
+    NewPage, NewPasswordReset, NewSession, NewSpace, NewWorkspace, PageMove, PageRecord, PageStore,
+    Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate,
+    UpdateBasis, UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -86,6 +86,84 @@ impl DocStore for FlakyStore {
 
     async fn compact(&self, doc_id: &str, snapshot: &Snapshot) -> Result<(), StoreError> {
         self.inner.compact(doc_id, snapshot).await
+    }
+}
+
+impl PageStore for FlakyStore {
+    async fn create_page(&self, page: &NewPage) -> Result<PageRecord, StoreError> {
+        self.inner.create_page(page).await
+    }
+
+    async fn page(&self, page_id: &str, actor: &str) -> Result<Option<PageRecord>, StoreError> {
+        self.inner.page(page_id, actor).await
+    }
+
+    async fn page_by_slug(
+        &self,
+        workspace_id: &str,
+        slug: &str,
+        actor: &str,
+    ) -> Result<Option<PageRecord>, StoreError> {
+        self.inner.page_by_slug(workspace_id, slug, actor).await
+    }
+
+    async fn tree(
+        &self,
+        space_id: &str,
+        parent_id: Option<&str>,
+        actor: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<PageRecord>, StoreError> {
+        self.inner
+            .tree(space_id, parent_id, actor, after, limit)
+            .await
+    }
+
+    async fn move_page(
+        &self,
+        page_id: &str,
+        actor: &str,
+        destination: &PageMove,
+        now: i64,
+    ) -> Result<PageRecord, StoreError> {
+        self.inner.move_page(page_id, actor, destination, now).await
+    }
+
+    async fn trash_page(&self, page_id: &str, actor: &str, now: i64) -> Result<(), StoreError> {
+        self.inner.trash_page(page_id, actor, now).await
+    }
+
+    async fn restore_page(&self, page_id: &str, actor: &str) -> Result<PageRecord, StoreError> {
+        self.inner.restore_page(page_id, actor).await
+    }
+
+    async fn purge_page(&self, page_id: &str, actor: &str) -> Result<(), StoreError> {
+        self.inner.purge_page(page_id, actor).await
+    }
+
+    async fn list_trashed_pages(
+        &self,
+        space_id: &str,
+        actor: &str,
+        after: Option<&DateCursor>,
+        limit: u32,
+    ) -> Result<Vec<PageRecord>, StoreError> {
+        self.inner
+            .list_trashed_pages(space_id, actor, after, limit)
+            .await
+    }
+
+    async fn recent_pages(
+        &self,
+        workspace_id: &str,
+        actor: &str,
+        after: Option<&DateCursor>,
+        limit: u32,
+    ) -> Result<Vec<PageRecord>, StoreError> {
+        self.inner
+            .recent_pages(workspace_id, actor, after, limit)
+            .await
     }
 }
 

@@ -140,7 +140,7 @@ A member who leaves or is removed loses their grants and group memberships in th
 
 ## Pages
 
-The tree lives in SQL. `position` is a fractional index (a string that sorts between its neighbours), so reordering never rewrites siblings.
+The tree lives in SQL. `position` is a fractional index (a string that sorts between its neighbours), so reordering never rewrites siblings. The server computes it (`cadocs_core::position`), and `pages_sibling_keys` keeps a key unique among the children of a parent, trashed ones included: they keep theirs, so a restore has its place waiting. A tree has at most 100 levels: SQLite stops nested triggers at 1000, so a deeper chain could never be deleted, nor could its workspace.
 
 ```sql
 CREATE TABLE pages (
@@ -162,6 +162,8 @@ CREATE TABLE pages (
 CREATE INDEX pages_tree ON pages(space_id, parent_id, position);
 CREATE INDEX pages_parent ON pages(parent_id);
 CREATE INDEX pages_recent ON pages(workspace_id, updated_at);
+CREATE UNIQUE INDEX pages_sibling_keys ON pages(coalesce(parent_id, space_id), position);
+CREATE INDEX pages_trash ON pages(space_id, deleted_at) WHERE deleted_at IS NOT NULL;
 
 -- V2. Restrictions narrow access and never widen it (ADR 0009).
 CREATE TABLE page_restrictions (
@@ -189,9 +191,11 @@ CREATE TABLE page_shares (
 CREATE INDEX page_shares_page ON page_shares(page_id);
 ```
 
-**Moving.** A move within a space changes one row. A move to another space also rewrites `space_id` on every descendant, in the same transaction. The server refuses to move a page under itself or under one of its descendants, using a recursive query on `parent_id`. A move across workspaces is refused.
+**Moving.** A move within a space changes one row. A move to another space also rewrites `space_id` on every descendant, trashed ones included, in the same transaction. The server refuses to move a page under itself or under one of its descendants, using a recursive query on `parent_id`. A move across workspaces is refused.
 
-**Trash.** Trashing a page sets the same `deleted_at` on the page and on every descendant that is not already trashed, in one transaction, so `deleted_at IS NULL` is enough to filter any read. Restoring brings back the rows with that exact `deleted_at` in the subtree, so a page trashed separately earlier stays in the trash. If the parent of the restored page is still trashed, the page goes to the root of its space.
+**Trash.** Trashing a page sets the same `deleted_at` on the page and on every descendant that is not already trashed, in one transaction, so `deleted_at IS NULL` is enough to filter any read. Restoring brings back the rows with that exact `deleted_at` in the subtree, so a page trashed separately earlier stays in the trash. A trash date is later than any date already in the subtree, so two trashes in one millisecond stay apart. If the parent of the restored page is still trashed, the page goes last at the root of its space.
+
+**Purge.** Deleting a trashed page cascades to all that is under it, including pages trashed separately before it: they have no parent left to return to.
 
 A trashed space keeps its pages as they are, and access rules treat the whole space as absent ([PERMISSIONS.md](PERMISSIONS.md)).
 

@@ -1,6 +1,6 @@
 # API
 
-All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today the WebSocket route marked "prototype", and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces and grants, apart from `/spaces/{space}/trash`, `/spaces/{space}/tree` and the export. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
+All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today the WebSocket route marked "prototype", and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces, grants and pages, apart from `PATCH /pages/{page}`, `/duplicate`, the imports, the exports and the revisions. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
 
 ## Conventions
 
@@ -140,7 +140,7 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 | GET | `/pages/{page}` | viewer | Metadata, including the caller's effective `role` |
 | GET | `/workspaces/{ws}/pages/by-slug/{slug}` | viewer | Same, from a front-end URL |
 | PATCH | `/pages/{page}` | editor | Title |
-| POST | `/pages/{page}/move` | editor | New `parent_id` and `position`, possibly in another space, where `editor` is also required |
+| POST | `/pages/{page}/move` | editor | New parent and place among its siblings, possibly in another space, where `editor` is also required |
 | POST | `/pages/{page}/duplicate` | editor | Copy a page, optionally to another space (V1) |
 | DELETE | `/pages/{page}` | editor | Move to trash |
 | POST | `/pages/{page}/restore` | editor | Restore from trash |
@@ -150,6 +150,14 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 | GET | `/pages/{page}/revisions` | viewer | List revisions |
 | GET | `/pages/{page}/revisions/{n}` | viewer | Rendered content of a revision |
 | POST | `/pages/{page}/revisions/{n}/restore` | editor | Apply a revision as a new edit |
+
+- A page is `{ id, workspace_id, space_id, parent_id, position, slug, title, role, has_children, created_by, updated_by, deleted_at, deleted_by, created_at, updated_at }`. `role` is the caller's on the space, `has_children` says whether a live page sits under it, and `position` is an opaque key that sorts among its siblings. A trashed page answers `404` everywhere but the trash list, `restore` and `purge`.
+- `POST /spaces/{space}/pages` takes `{ parent_id?, after? }` and answers `201` with the page. A new page has an empty title, which its client writes through the page socket. `POST /pages/{page}/move` takes `{ space_id?, parent_id?, after? }` and answers the page. A missing or `null` `parent_id` is the root of the space, a missing `space_id` the current one.
+- `after` is the id of the live sibling to go after, `null` to go first, and when it is missing the page goes last. The server computes the key, so two concurrent moves to one place cannot collide.
+- A refusal names its field: `parent_id` is `unknown` (not a live page of the target space), `cycle` (the page itself or a descendant) or `too_deep`, `after` is `unknown`, `space_id` is `other_workspace`. A tree has at most 100 levels, as SQLite refuses to cascade a delete through more than 1000.
+- `GET /spaces/{space}/tree` is paginated, in tree order, without trashed pages. A missing `parent` is the root, and a `parent` that is not a live page of the space is a `404`.
+- `GET /spaces/{space}/trash` holds every trashed page of the space, its descendants too, the last trashed first. `GET /workspaces/{ws}/recent` holds the pages of readable spaces, the last changed first: a move counts as a change, a trash or a restore does not. Both are paginated, and a cursor the server did not give is a `400` with `cursor: invalid`.
+- `DELETE /pages/{page}` answers `204`. `POST /pages/{page}/restore` answers the page, or `403` for one that is not in the trash. `DELETE /pages/{page}/purge` answers `204`, or `403` for one that is not in the trash, and takes everything under the page, including what was trashed separately before it.
 
 The Yjs document holds the title, and the server copies it to `pages.title` when flushing. `PATCH` does not write that column: it applies a Yjs update through the room, like any other edit, so a later flush cannot overwrite it.
 

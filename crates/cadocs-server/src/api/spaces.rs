@@ -93,7 +93,7 @@ fn clean_default_role(role: Option<&str>) -> Result<Option<DefaultRole>, &'stati
 
 /// For a field where `null` is a value: it comes out as `Some(None)`, and a missing field as
 /// `None`, through `#[serde(default)]`.
-fn present<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+pub(super) fn present<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     T: Deserialize<'de>,
     D: Deserializer<'de>,

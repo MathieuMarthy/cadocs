@@ -1,6 +1,7 @@
 //! Store traits and their SQLite implementation (ADR 0002).
 
 mod accounts;
+mod pages;
 mod spaces;
 mod sqlite;
 mod workspaces;
@@ -12,6 +13,7 @@ pub use accounts::{
     AccountStore, ActiveSession, AdminChanges, Credentials, FirstUser, Membership,
     NewPasswordReset, NewSession, UpdateBasis, User, UserChanges, UserRecord,
 };
+pub use pages::{DateCursor, MAX_PAGE_DEPTH, NewPage, PageMove, PageRecord, PageStore, Placement};
 pub use spaces::{Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore};
 pub use sqlite::SqliteStore;
 pub use workspaces::{
@@ -68,6 +70,18 @@ pub enum StoreError {
     UnknownGrantTarget,
     #[error("two grants name the same user or group")]
     DuplicateGrant,
+    #[error("no such page")]
+    PageNotFound,
+    #[error("the parent is not a live page of the space")]
+    UnknownParent,
+    #[error("the sibling is not a live page beside this one")]
+    UnknownSibling,
+    #[error("a page cannot go under itself")]
+    PageCycle,
+    #[error("the tree would have too many levels")]
+    TooDeep,
+    #[error("the space belongs to another workspace")]
+    OtherWorkspace,
     #[error("this user may not do that")]
     NotAllowed,
     #[error("this is not the name of the workspace")]

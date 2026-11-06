@@ -3,6 +3,7 @@
 mod admin;
 pub mod auth;
 mod invitations;
+mod pages;
 mod spaces;
 mod workspaces;
 
@@ -22,7 +23,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
 use cadocs_collab::Authorizer;
-use cadocs_store::{AccountStore, DocStore, SpaceStore, StoreError, WorkspaceStore};
+use cadocs_store::{AccountStore, DocStore, PageStore, SpaceStore, StoreError, WorkspaceStore};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -154,6 +155,8 @@ impl ApiError {
 impl From<StoreError> for ApiError {
     fn from(error: StoreError) -> Self {
         let conflict = ApiError::new(ErrorCode::Conflict);
+        let invalid =
+            |field, problem| ApiError::new(ErrorCode::ValidationFailed).with_field(field, problem);
         match error {
             StoreError::AlreadySetUp => conflict.with_message("This instance is already set up"),
             StoreError::EmailTaken => conflict
@@ -179,12 +182,18 @@ impl From<StoreError> for ApiError {
             StoreError::DuplicateGrant => ApiError::new(ErrorCode::ValidationFailed)
                 .with_message("Two grants name the same user or group")
                 .with_field("grants", "duplicate"),
+            StoreError::UnknownParent => invalid("parent_id", "unknown"),
+            StoreError::PageCycle => invalid("parent_id", "cycle"),
+            StoreError::TooDeep => invalid("parent_id", "too_deep"),
+            StoreError::UnknownSibling => invalid("after", "unknown"),
+            StoreError::OtherWorkspace => invalid("space_id", "other_workspace"),
             StoreError::NotAllowed => ApiError::new(ErrorCode::Forbidden),
             StoreError::UserNotFound
             | StoreError::WorkspaceNotFound
             | StoreError::MemberNotFound
             | StoreError::InvitationNotFound
-            | StoreError::SpaceNotFound => ApiError::new(ErrorCode::NotFound),
+            | StoreError::SpaceNotFound
+            | StoreError::PageNotFound => ApiError::new(ErrorCode::NotFound),
             error => {
                 tracing::error!(%error, "storage failed");
                 ApiError::new(ErrorCode::Unavailable)
@@ -344,7 +353,7 @@ impl IntoResponse for ApiError {
 
 pub fn router<S, A>(state: &AppState<S, A>) -> Router<AppState<S, A>>
 where
-    S: DocStore + AccountStore + WorkspaceStore + SpaceStore,
+    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore,
     A: Authorizer,
 {
     // A nested fallback only sees paths below the root of the nest. `router` in `lib.rs` also
@@ -355,7 +364,8 @@ where
         .merge(admin::routes(state))
         .merge(workspaces::routes(state))
         .merge(invitations::routes(state))
-        .merge(spaces::routes(state));
+        .merge(spaces::routes(state))
+        .merge(pages::routes(state));
     finish(routes, state.http.clone())
 }
 

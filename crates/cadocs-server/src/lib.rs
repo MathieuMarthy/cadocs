@@ -24,7 +24,7 @@ use axum::http::StatusCode;
 use axum::middleware::map_response;
 use axum::routing::{any, get};
 use cadocs_collab::{Authorizer, DocRegistry};
-use cadocs_store::{AccountStore, DocStore, SpaceStore, WorkspaceStore};
+use cadocs_store::{AccountStore, DocStore, PageStore, SpaceStore, WorkspaceStore};
 use rust_embed::RustEmbed;
 use tokio::net::TcpListener;
 use tokio::sync::{oneshot, watch};
@@ -93,7 +93,7 @@ impl<S, A> AppState<S, A> {
 
 pub fn router<S, A, E>(state: AppState<S, A>) -> Router
 where
-    S: DocStore + AccountStore + WorkspaceStore + SpaceStore,
+    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore,
     A: Authorizer,
     E: RustEmbed + 'static,
 {
@@ -117,7 +117,7 @@ async fn health<S: DocStore, A: Authorizer>(State(state): State<AppState<S, A>>)
 
 /// Serves until `shutdown` resolves, then closes every socket and flushes every room.
 pub async fn serve<
-    S: DocStore + AccountStore + WorkspaceStore + SpaceStore,
+    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore,
     A: Authorizer,
     E: RustEmbed + 'static,
 >(

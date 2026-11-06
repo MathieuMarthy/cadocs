@@ -11,26 +11,36 @@ use super::workspaces::{authorize as authorize_workspace, numbered_slug};
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore, StoreError};
 
-/// A space with all that resolution needs to know about the user `?1`.
-const SELECT_SPACE: &str = "SELECT s.id, s.workspace_id, s.slug, s.name, s.description,
-         s.default_role, s.deleted_at, s.created_at, s.updated_at,
+/// What resolution needs to know about the user `?1` and the space `s`.
+macro_rules! space_access {
+    () => {
+        "s.default_role, s.deleted_at AS space_deleted_at,
          EXISTS (SELECT 1 FROM users u WHERE u.id = ?1 AND u.disabled_at IS NULL) AS active,
          (SELECT m.role FROM workspace_members m
           WHERE m.workspace_id = s.workspace_id AND m.user_id = ?1) AS workspace_role,
          (SELECT group_concat(g.role) FROM space_grants g
           WHERE g.space_id = s.id AND (g.user_id = ?1 OR g.group_id IN
-              (SELECT gm.group_id FROM group_members gm WHERE gm.user_id = ?1))) AS grants
-     FROM spaces s";
+              (SELECT gm.group_id FROM group_members gm WHERE gm.user_id = ?1))) AS grants"
+    };
+}
+pub(super) use space_access;
+
+const SELECT_SPACE: &str = concat!(
+    "SELECT s.id, s.workspace_id, s.slug, s.name, s.description, s.deleted_at, s.created_at,
+         s.updated_at, ",
+    space_access!(),
+    " FROM spaces s"
+);
 
 /// Exactly the spaces `space_role` gives a role in, as any grant does, so that `LIMIT` is right.
-const HAS_ROLE: &str =
+pub(super) const HAS_ROLE: &str =
     "(workspace_role IN ('owner', 'admin') OR grants IS NOT NULL OR s.default_role IS NOT NULL)";
 
 /// `default_role` never gives `admin`.
 const IS_ADMIN: &str =
     "(workspace_role IN ('owner', 'admin') OR ',' || grants || ',' LIKE '%,admin,%')";
 
-fn scope(row: &SqliteRow) -> Scope {
+pub(super) fn scope(row: &SqliteRow) -> Scope {
     let workspace_role: Option<String> = row.get("workspace_role");
     let default_role: Option<String> = row.get("default_role");
     let grants: Option<String> = row.get("grants");
@@ -47,7 +57,7 @@ fn scope(row: &SqliteRow) -> Scope {
     };
     Scope {
         role: space_role(&access),
-        space_trashed: row.get::<Option<i64>, _>("deleted_at").is_some(),
+        space_trashed: row.get::<Option<i64>, _>("space_deleted_at").is_some(),
         page_trashed: false,
     }
 }
