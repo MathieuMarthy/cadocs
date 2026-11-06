@@ -12,7 +12,6 @@ import * as Y from "yjs";
 import { freeSlot, newUser, renderAvatars, renderCaret, renderSelection } from "./presence";
 import { bindTitle } from "./title";
 
-const DEFAULT_DOC = "welcome";
 const CLOSE_MALFORMED = 1002;
 const CLOSE_TOO_LARGE = 1009;
 const CLOSE_STORAGE_FAILING = 1013;
@@ -23,19 +22,18 @@ function element<T extends HTMLElement>(id: string) {
   return document.getElementById(id) as T;
 }
 
-/** The prototype has no page list: `?doc=<id>` picks the document. */
-function docId() {
-  const id = new URLSearchParams(location.search).get("doc");
-  return id && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : DEFAULT_DOC;
+/** The prototype has no page list: `?page=<id>` picks the page, and login happens through REST. */
+const page = new URLSearchParams(location.search).get("page");
+if (!page) {
+  element("status").textContent = "no page: add ?page=<id> to the address";
+  throw new Error("no page to open");
 }
-
-const doc = docId();
-element("doc-name").textContent = doc;
+element("doc-name").textContent = page;
 
 const ydoc = new Y.Doc();
 const scheme = location.protocol === "https:" ? "wss" : "ws";
 // Tabs go through the server like any other client, instead of a BroadcastChannel shortcut.
-const provider = new WebsocketProvider(`${scheme}://${location.host}/ws`, doc, ydoc, {
+const provider = new WebsocketProvider(`${scheme}://${location.host}/ws/pages`, page, ydoc, {
   disableBc: true,
   // By default it gives up on all of 4400 to 4499, which includes 4408 and 4409.
   shouldReconnect: (event) => !CLOSES_FINAL.includes(event.code),

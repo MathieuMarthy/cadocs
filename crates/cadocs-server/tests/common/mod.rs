@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use cadocs_collab::{DocRegistry, Permissive};
+use cadocs_collab::{DocRegistry, PageAuthorizer};
 use cadocs_server::config::Config;
 use cadocs_server::{AppState, serve};
 use cadocs_store::SqliteStore;
@@ -89,7 +89,7 @@ pub async fn start_with(public_url: &str, proxies: &str) -> Api {
     let state = AppState::new(
         registry,
         store.clone(),
-        Arc::new(Permissive),
+        Arc::new(PageAuthorizer::new(store.clone())),
         config.socket,
         config.http,
     );

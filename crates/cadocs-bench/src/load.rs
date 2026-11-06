@@ -9,6 +9,9 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio::time::{Instant, interval_at, sleep, timeout};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::handshake::client::Request;
+use tokio_tungstenite::tungstenite::http::header::COOKIE;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use yrs::sync::{Awareness, Message, SyncMessage};
 use yrs::types::xml::XmlOut;
@@ -18,7 +21,7 @@ use yrs::{Doc, Options, ReadTxn, Text, Transact, Update, XmlFragment, XmlFragmen
 
 use crate::document::{BODY, client_id};
 use crate::rng::Rng;
-use crate::seed::doc_id;
+use crate::seed::{SESSION_TOKEN, doc_id};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -81,6 +84,14 @@ impl LoadReport {
     }
 }
 
+/// The upgrade of a client on the session of the seed.
+fn page_request(url: &str, doc: &str) -> anyhow::Result<Request> {
+    let mut request = format!("{url}/ws/pages/{doc}").into_client_request()?;
+    let cookie = format!("session={SESSION_TOKEN}").parse()?;
+    request.headers_mut().insert(COOKIE, cookie);
+    Ok(request)
+}
+
 /// Apart from the seeds of the documents, or a client would continue its author's clock.
 const CLIENT_SEEDS: u64 = 1 << 32;
 
@@ -106,7 +117,7 @@ impl Client {
     /// Connects and finishes the handshake of `docs/API.md`, so the document is fully loaded.
     async fn connect(url: &str, doc: usize, index: u64) -> anyhow::Result<Self> {
         let name = format!("{}#{index}", doc_id(doc));
-        let (socket, _) = connect_async(format!("{url}/ws/{}", doc_id(doc)))
+        let (socket, _) = connect_async(page_request(url, &doc_id(doc))?)
             .await
             .with_context(|| format!("{name} cannot connect"))?;
         let doc = Doc::with_options(Options {
@@ -325,7 +336,7 @@ pub async fn run<F: Future<Output = anyhow::Result<()>>>(
 
 /// The awareness states a new client of `doc` receives on connecting.
 pub async fn peers(url: &str, doc: &str) -> anyhow::Result<usize> {
-    let (mut socket, _) = connect_async(format!("{url}/ws/{doc}")).await?;
+    let (mut socket, _) = connect_async(page_request(url, doc)?).await?;
     let count = timeout(HANDSHAKE_TIMEOUT, async {
         while let Some(frame) = socket.next().await {
             if let WsMessage::Binary(frame) = frame?

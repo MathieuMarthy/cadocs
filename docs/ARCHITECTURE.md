@@ -52,7 +52,7 @@ Page metadata (title, tree position, permissions) lives in SQL tables. Page cont
 
 ### WebSocket
 
-1. `GET /ws/pages/{id}` carries the session cookie. The server checks `Origin`, resolves the session, and computes the role **before** the upgrade. A failure is a plain HTTP 401 or 403.
+1. `GET /ws/pages/{id}` carries the session cookie. The server checks `Origin`, resolves the session, and computes the role **before** the upgrade. A failure is a plain HTTP 401, 403 or 404.
 2. The registry returns the room, loading it if needed: latest snapshot, then every later row of `doc_updates`.
 3. Both sides run the y-sync handshake (SyncStep1, SyncStep2), then exchange updates and awareness.
 4. An update from a client with write access is applied to the `Doc`, broadcast to the other clients and queued for persistence. An update from a read-only client is dropped and answered with an auth message.
@@ -84,6 +84,7 @@ update ─► Room queue ─► flush every ~500 ms ─► INSERT INTO doc_updat
 - Power loss or an OS crash can lose more. With `synchronous=NORMAL` (ADR 0002), WAL commits reach the disk at the next checkpoint, so the most recent transactions may roll back. The database stays consistent, and connected clients resend their edits as above. Edits from clients that have gone since the last checkpoint are lost.
 - A graceful shutdown flushes every room before exiting, retrying a failed flush three times before giving up.
 - If a flush fails, updates stay queued and the flush retries with backoff. When the room queue is full while a flush is failing, a frame with new blocks makes the room close its write sockets with `1013` instead of dropping edits. On working storage the limit is one frame higher, since the next flush drains the queue, so a large offline edit closes nobody. Clients keep them and resend after reconnecting ([OPERATIONS.md](OPERATIONS.md#failure-behaviour)).
+- A flush that finds the page gone drops what the room holds and closes its sockets with `4404`. Retrying could not help, and the page's document went with it.
 
 ### Room lifecycle
 

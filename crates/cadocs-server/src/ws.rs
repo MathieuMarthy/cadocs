@@ -2,10 +2,11 @@
 
 use std::time::Duration;
 
+use axum::Extension;
 use axum::body::Bytes;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use cadocs_collab::{
     Authorizer, CLOSE_FRAME_TOO_LARGE, CLOSE_PROTOCOL_ERROR, CLOSE_TOO_SLOW, Close, CollabError,
@@ -16,8 +17,7 @@ use tokio::time::{Instant, MissedTickBehavior, interval_at, timeout};
 
 use crate::AppState;
 use crate::config::SocketConfig;
-
-const MAX_DOC_ID_LEN: usize = 64;
+use crate::session::CurrentSession;
 
 /// tungstenite defaults to 128 KiB each way, per socket, and most frames are a few hundred bytes.
 /// These are starting sizes, not limits: the write buffer keeps the capacity of the largest frame
@@ -28,28 +28,29 @@ const WRITE_BUFFER_BYTES: usize = 4 * 1024;
 /// How long a closing socket may wait for the client's side of the close handshake.
 const CLOSE_GRACE: Duration = Duration::from_secs(1);
 
+/// Behind `api::check_origin` and `session::require`, so a request that gets here has a user.
 pub async fn upgrade<S: DocStore, A: Authorizer>(
-    Path(doc_id): Path<String>,
+    Path(page_id): Path<String>,
     State(state): State<AppState<S, A>>,
-    headers: HeaderMap,
+    Extension(session): Extension<CurrentSession>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    if !state.http.public_url.allows(&headers) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    if !valid_doc_id(&doc_id) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    let Some(mode) = state.authorizer.authorize(&doc_id).await else {
-        return StatusCode::NOT_FOUND.into_response();
+    let user_id = &session.user.id;
+    let mode = match state.authorizer.authorize(&page_id, user_id).await {
+        Ok(Some(mode)) => mode,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => {
+            tracing::error!(page_id, %error, "cannot resolve a role");
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        }
     };
-    let connection = match state.registry.connect(&doc_id, mode).await {
+    let connection = match state.registry.connect(&page_id, mode, user_id).await {
         Ok(connection) => connection,
         Err(CollabError::AtCapacity | CollabError::ShuttingDown) => {
             return StatusCode::SERVICE_UNAVAILABLE.into_response();
         }
         Err(error) => {
-            tracing::error!(doc_id, %error, "cannot open the document");
+            tracing::error!(page_id, %error, "cannot open the document");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -66,13 +67,6 @@ pub async fn upgrade<S: DocStore, A: Authorizer>(
             run(socket, connection, config).await;
             drop(open_socket);
         })
-}
-
-fn valid_doc_id(doc_id: &str) -> bool {
-    (1..=MAX_DOC_ID_LEN).contains(&doc_id.len())
-        && doc_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
 async fn run(mut socket: WebSocket, mut connection: Connection, config: SocketConfig) {

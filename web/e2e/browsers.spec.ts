@@ -35,12 +35,19 @@ function collectErrors(page: Page) {
   return errors;
 }
 
+/** Opens the shared page in this browser, logged in. */
+async function open(page: Page, server: TestServer) {
+  const { token } = await server.session();
+  await page.context().addCookies([{ name: "session", value: token, url: server.url }]);
+  await page.goto(`${server.url}/?page=${await server.page(DOC)}`);
+}
+
 async function withPage(browser: Browser, server: TestServer, use: (page: Page) => Promise<void>) {
   let errors: Error[] = [];
   try {
     const page = await browser.newPage();
     errors = collectErrors(page);
-    await page.goto(`${server.url}/?doc=${DOC}`);
+    await open(page, server);
     await use(page);
   } finally {
     await browser.close();
@@ -141,7 +148,7 @@ test("presence follows a third person coming and going", async ({
   try {
     const third = await browser.newPage();
     const errors = collectErrors(third);
-    await third.goto(`${server.url}/?doc=${DOC}`);
+    await open(third, server);
 
     await expectOnline(left, 3);
     await expect(left.locator(".avatar")).toHaveCount(3);
@@ -206,11 +213,27 @@ test("content comes back from the disk with no browser left to resend it", async
 
   const page = await browser.newPage();
   const errors = collectErrors(page);
-  await page.goto(`${server.url}/?doc=${DOC}`);
+  await open(page, server);
   await expectOnline(page, 1);
   await expectBody(page, ["first", "second"]);
   await expect(title(page)).toHaveValue("On disk");
   expect(errors).toEqual([]);
+});
+
+test("a title typed in a browser reaches the page, and a rename reaches the browser", async ({
+  left,
+  right,
+  server,
+}) => {
+  await expectOnline(left, 2);
+  await title(left).fill("Typed");
+  await expect.poll(async () => (await server.pageRow(DOC)).title).toBe("Typed");
+
+  await server.rename(DOC, "Renamed");
+
+  await expect(title(left)).toHaveValue("Renamed");
+  await expect(title(right)).toHaveValue("Renamed");
+  await expect.poll(async () => (await server.pageRow(DOC)).title).toBe("Renamed");
 });
 
 test.describe("with a send queue of one frame", () => {
@@ -222,7 +245,10 @@ test.describe("with a send queue of one frame", () => {
     left.once("websocket", () => (reconnected = true));
 
     const doc = new Y.Doc();
-    const writer = new WebsocketProvider(server.wsUrl, DOC, doc, { disableBc: true });
+    const writer = new WebsocketProvider(server.wsUrl, await server.page(DOC), doc, {
+      disableBc: true,
+      WebSocketPolyfill: await server.webSocketClass(),
+    });
     try {
       await expect.poll(() => writer.synced).toBe(true);
       const filler = "x".repeat(2_000);

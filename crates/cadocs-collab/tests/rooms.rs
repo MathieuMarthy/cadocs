@@ -5,18 +5,19 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use cadocs_collab::{
-    Authorizer, CLOSE_FRAME_TOO_LARGE, CLOSE_GOING_AWAY, CLOSE_PROTOCOL_ERROR,
+    CLOSE_FRAME_TOO_LARGE, CLOSE_GOING_AWAY, CLOSE_PAGE_GONE, CLOSE_PROTOCOL_ERROR,
     CLOSE_STORAGE_FAILING, CLOSE_TOO_SLOW, Close, CollabConfig, CollabError, DocRegistry, Outbound,
-    Permissive,
 };
 use cadocs_core::permissions::SocketMode::{ReadOnly, ReadWrite};
-use cadocs_store::{DocStore, SqliteStore};
-use common::{DOC, MemStore, Peer, config, frame, rebuild, state_vector, title};
+use cadocs_store::{DocEdit, DocStore, MAX_TITLE_CHARS, SqliteStore};
+use common::{AUTHOR, DOC, MemStore, Peer, config, frame, rebuild, state_vector, title};
+use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteConnectOptions;
 use tokio::time::sleep;
 use yrs::sync::awareness::AwarenessUpdateEntry;
 use yrs::sync::{Awareness, AwarenessUpdate, Message, SyncMessage};
 use yrs::updates::decoder::Decode;
-use yrs::{Doc, ReadTxn, Text, Transact};
+use yrs::{Array, Doc, ReadTxn, Text, Transact, XmlFragment, XmlTextPrelim};
 
 const FLUSH: Duration = Duration::from_millis(600);
 const IDLE: Duration = Duration::from_secs(61);
@@ -64,7 +65,7 @@ async fn offline_edits_arrive_through_sync_step2() {
     let registry = registry(&store);
     let mut alice = Peer::join(&registry, ReadWrite).await;
 
-    let conn = registry.connect(DOC, ReadWrite).await.unwrap();
+    let conn = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
     let mut bob = Peer::new(conn);
     bob.edit("offline");
     bob.sync().await;
@@ -95,12 +96,193 @@ async fn a_repeated_update_is_neither_stored_nor_broadcast() {
     assert_eq!(store.stored(DOC).updates.len(), 1);
 }
 
+// Persistence and replay
+
 #[tokio::test(start_paused = true)]
-async fn the_permissive_authorizer_grants_write_access() {
-    assert_eq!(Permissive.authorize(DOC).await, Some(ReadWrite));
+async fn a_flush_copies_the_title_and_the_last_writer() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let ada = Peer::new(registry.connect(DOC, ReadWrite, "ada").await.unwrap());
+    let mut bob = Peer::new(registry.connect(DOC, ReadWrite, "bob").await.unwrap());
+
+    ada.write("Plans").unwrap();
+    sleep(FLUSH).await;
+    bob.pump().await;
+    bob.write(" for 2027").unwrap();
+    sleep(FLUSH).await;
+
+    let edits = store.edits();
+    assert_eq!(edits[0].title.as_deref(), Some("Plans"));
+    assert_eq!(edits[0].author.as_deref(), Some("ada"));
+    assert_eq!(edits[1].title.as_deref(), Some("Plans for 2027"));
+    assert_eq!(edits[1].author.as_deref(), Some("bob"));
 }
 
-// Persistence and replay
+#[tokio::test(start_paused = true)]
+async fn a_document_without_a_title_copies_none() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let peer = Peer::join(&registry, ReadWrite).await;
+    let body = peer.doc.get_or_insert_xml_fragment("default");
+    let update = {
+        let mut txn = peer.doc.transact_mut();
+        body.push_back(&mut txn, XmlTextPrelim::new("text"));
+        txn.encode_update_v1()
+    };
+
+    peer.send(Message::Sync(SyncMessage::Update(update)))
+        .unwrap();
+    sleep(FLUSH).await;
+
+    assert_eq!(store.edits()[0].title, None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_long_title_is_clipped_in_the_copy_only() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let peer = Peer::join(&registry, ReadWrite).await;
+    let long = "x".repeat(MAX_TITLE_CHARS + 10);
+
+    peer.write(&long).unwrap();
+    sleep(FLUSH).await;
+
+    let copied = store.edits()[0].title.clone().unwrap();
+    assert_eq!(copied.chars().count(), MAX_TITLE_CHARS);
+    assert_eq!(title(&rebuild(&store.stored(DOC))), long);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_flush_keeps_its_author_for_the_retry() {
+    let store = MemStore::new();
+    store.fail_next_appends.store(1, Ordering::SeqCst);
+    let registry = registry(&store);
+    let peer = Peer::join(&registry, ReadWrite).await;
+
+    peer.write("kept").unwrap();
+    sleep(FLUSH * 4).await;
+
+    let edits = store.edits();
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].author.as_deref(), Some(AUTHOR));
+    assert_eq!(edits[0].title.as_deref(), Some("kept"));
+}
+
+// Writes from the server
+
+#[tokio::test(start_paused = true)]
+async fn the_server_writes_a_title_like_any_other_edit() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut peer = Peer::join(&registry, ReadWrite).await;
+    peer.write("Old 🐢 title").unwrap();
+
+    registry.set_title(DOC, "Nouveau été", "bob").await.unwrap();
+    peer.pump().await;
+    sleep(FLUSH).await;
+
+    assert_eq!(title(&peer.doc), "Nouveau été");
+    assert_eq!(title(&rebuild(&store.stored(DOC))), "Nouveau été");
+    let edit = store.edits().pop().unwrap();
+    assert_eq!(edit.title.as_deref(), Some("Nouveau été"));
+    assert_eq!(edit.author.as_deref(), Some("bob"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_server_writes_to_a_document_nobody_has_open() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+
+    registry.set_title(DOC, "Written", "bob").await.unwrap();
+
+    assert_eq!(registry.loaded_rooms(), 1);
+    sleep(IDLE).await;
+    assert_eq!(registry.loaded_rooms(), 0, "the room unloads as usual");
+    assert_eq!(title(&rebuild(&store.stored(DOC))), "Written");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_same_title_writes_nothing() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    registry.set_title(DOC, "Same", "ada").await.unwrap();
+    sleep(FLUSH).await;
+
+    registry.set_title(DOC, "Same", "bob").await.unwrap();
+    sleep(FLUSH).await;
+
+    assert_eq!(store.edits().len(), 1);
+}
+
+/// yrs counts these items in the length but only removes text, and panics halfway through.
+#[tokio::test(start_paused = true)]
+async fn a_title_with_more_than_text_is_left_as_it_is() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut peer = Peer::join(&registry, ReadWrite).await;
+    peer.write("kept").unwrap();
+    let array = peer.doc.get_or_insert_array("title");
+    let update = {
+        let mut txn = peer.doc.transact_mut();
+        array.push_back(&mut txn, 1);
+        txn.encode_update_v1()
+    };
+    peer.send(Message::Sync(SyncMessage::Update(update)))
+        .unwrap();
+
+    let refused = registry.set_title(DOC, "Replaced", "ada").await;
+
+    assert!(matches!(refused, Err(CollabError::CorruptDocument { .. })));
+    sleep(FLUSH).await;
+    peer.pump().await;
+    assert_eq!(peer.updates, 0, "nothing was deleted");
+    assert_eq!(title(&rebuild(&store.stored(DOC))), "kept");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_server_write_is_refused_while_the_queue_is_full_of_failed_flushes() {
+    let store = MemStore::new();
+    store.fail_append.store(true, Ordering::SeqCst);
+    let registry = DocRegistry::new(
+        store.clone(),
+        CollabConfig {
+            room_queue_bytes: 16,
+            ..config()
+        },
+    );
+    let peer = Peer::join(&registry, ReadWrite).await;
+    peer.write(&"x".repeat(64)).unwrap();
+    sleep(FLUSH).await;
+
+    let refused = registry.set_title(DOC, "Refused", "ada").await;
+
+    assert!(matches!(refused, Err(CollabError::StorageFailing)));
+}
+
+// A page deleted under its room
+
+#[tokio::test(start_paused = true)]
+async fn a_flush_on_a_deleted_page_closes_the_room_and_stays_healthy() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut alice = Peer::join(&registry, ReadWrite).await;
+    let mut bob = Peer::join(&registry, ReadOnly).await;
+    store.page_gone.store(true, Ordering::SeqCst);
+
+    alice.write("lost").unwrap();
+    sleep(FLUSH).await;
+    alice.pump().await;
+    bob.pump().await;
+
+    assert_eq!(alice.closed, Some(CLOSE_PAGE_GONE));
+    assert_eq!(bob.closed, Some(CLOSE_PAGE_GONE));
+    assert!(registry.healthy());
+    let appends = store.appends();
+    drop((alice, bob));
+    sleep(IDLE).await;
+    assert_eq!(registry.loaded_rooms(), 0);
+    assert_eq!(store.appends(), appends, "nothing is left to retry");
+}
 
 #[tokio::test(start_paused = true)]
 async fn updates_are_flushed_in_one_batch() {
@@ -198,6 +380,21 @@ async fn sqlite_keeps_a_document_across_registries() {
     };
 
     let store = Arc::new(SqliteStore::open(&path).await.unwrap());
+    let pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(&path))
+        .await
+        .unwrap();
+    sqlx::raw_sql(
+        "INSERT INTO workspaces (id, slug, name, created_at, updated_at)
+             VALUES ('ws', 'ws', 'Workspace', 1, 1);
+         INSERT INTO spaces (id, workspace_id, slug, name, created_at, updated_at)
+             VALUES ('space', 'ws', 'space', 'Space', 1, 1);
+         INSERT INTO pages (id, workspace_id, space_id, position, slug, created_at, updated_at)
+             VALUES ('doc', 'ws', 'space', 'a', 'doc', 1, 1);",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
     let first = DocRegistry::new(store, fast.clone());
     let alice = Peer::join(&first, ReadWrite).await;
     for word in ["a", "b", "c", "d", "e"] {
@@ -419,7 +616,7 @@ async fn a_room_nobody_joined_still_unloads() {
     store.load_gate.hold();
     let waiting = {
         let registry = registry.clone();
-        tokio::spawn(async move { registry.connect(DOC, ReadWrite).await.map(drop) })
+        tokio::spawn(async move { registry.connect(DOC, ReadWrite, AUTHOR).await.map(drop) })
     };
     store.load_gate.entered().await;
     waiting.abort();
@@ -442,7 +639,7 @@ async fn concurrent_clients_share_one_load() {
     for _ in 0..5 {
         let registry = registry.clone();
         joins.push(tokio::spawn(async move {
-            registry.connect(DOC, ReadWrite).await.is_ok()
+            registry.connect(DOC, ReadWrite, AUTHOR).await.is_ok()
         }));
     }
     store.load_gate.entered().await;
@@ -486,12 +683,12 @@ async fn a_failed_load_is_reported_and_can_be_retried() {
     let registry = registry(&store);
     store.fail_load.store(true, Ordering::SeqCst);
 
-    let refused = registry.connect(DOC, ReadWrite).await;
+    let refused = registry.connect(DOC, ReadWrite, AUTHOR).await;
     assert!(matches!(refused, Err(CollabError::Store(_))));
     assert_eq!(registry.loaded_rooms(), 0);
 
     store.fail_load.store(false, Ordering::SeqCst);
-    assert!(registry.connect(DOC, ReadWrite).await.is_ok());
+    assert!(registry.connect(DOC, ReadWrite, AUTHOR).await.is_ok());
 }
 
 #[tokio::test(start_paused = true)]
@@ -504,12 +701,13 @@ async fn a_corrupt_document_is_refused() {
                 seq: 1,
                 data: vec![0xff, 0xff],
             }],
+            &DocEdit::default(),
         )
         .await
         .unwrap();
     let registry = registry(&store);
 
-    let refused = registry.connect(DOC, ReadWrite).await;
+    let refused = registry.connect(DOC, ReadWrite, AUTHOR).await;
 
     assert!(matches!(refused, Err(CollabError::CorruptDocument { .. })));
     assert_eq!(registry.loaded_rooms(), 0);
@@ -541,7 +739,7 @@ async fn a_read_only_update_is_dropped_and_answered_once() {
 async fn a_read_only_client_is_told_why() {
     let store = MemStore::new();
     let registry = registry(&store);
-    let conn = registry.connect(DOC, ReadOnly).await.unwrap();
+    let conn = registry.connect(DOC, ReadOnly, AUTHOR).await.unwrap();
     let mut reader = Peer::new(conn);
 
     reader.write("a").unwrap();
@@ -690,23 +888,23 @@ fn capped(store: &Arc<MemStore>, max_rooms: usize) -> DocRegistry<MemStore> {
 async fn at_the_cap_with_only_live_rooms_a_connection_is_refused() {
     let store = MemStore::new();
     let registry = capped(&store, 2);
-    let _a = registry.connect("a", ReadWrite).await.unwrap();
-    let _b = registry.connect("b", ReadWrite).await.unwrap();
+    let _a = registry.connect("a", ReadWrite, AUTHOR).await.unwrap();
+    let _b = registry.connect("b", ReadWrite, AUTHOR).await.unwrap();
 
-    let refused = registry.connect("c", ReadWrite).await;
+    let refused = registry.connect("c", ReadWrite, AUTHOR).await;
 
     assert!(matches!(refused, Err(CollabError::AtCapacity)));
     assert_eq!(registry.loaded_rooms(), 2);
-    assert!(registry.connect("a", ReadWrite).await.is_ok());
+    assert!(registry.connect("a", ReadWrite, AUTHOR).await.is_ok());
 }
 
 #[tokio::test(start_paused = true)]
 async fn at_the_cap_the_oldest_idle_room_unloads_first() {
     let store = MemStore::new();
     let registry = capped(&store, 3);
-    let older = registry.connect("older", ReadWrite).await.unwrap();
-    let newer = registry.connect("newer", ReadWrite).await.unwrap();
-    let _live = registry.connect("live", ReadWrite).await.unwrap();
+    let older = registry.connect("older", ReadWrite, AUTHOR).await.unwrap();
+    let newer = registry.connect("newer", ReadWrite, AUTHOR).await.unwrap();
+    let _live = registry.connect("live", ReadWrite, AUTHOR).await.unwrap();
     let edit = Peer::new(older);
     edit.write("kept").unwrap();
     drop(edit);
@@ -714,12 +912,12 @@ async fn at_the_cap_the_oldest_idle_room_unloads_first() {
     drop(newer);
     sleep(Duration::from_secs(1)).await;
 
-    let _extra = registry.connect("extra", ReadWrite).await.unwrap();
+    let _extra = registry.connect("extra", ReadWrite, AUTHOR).await.unwrap();
 
     assert_eq!(registry.loaded_rooms(), 3);
     assert_eq!(title(&rebuild(&store.stored("older"))), "kept");
     let reloads = store.loads();
-    let _newer = registry.connect("newer", ReadWrite).await.unwrap();
+    let _newer = registry.connect("newer", ReadWrite, AUTHOR).await.unwrap();
     assert_eq!(store.loads(), reloads, "the newer idle room stayed loaded");
 }
 
@@ -727,13 +925,13 @@ async fn at_the_cap_the_oldest_idle_room_unloads_first() {
 async fn a_room_failing_to_flush_is_not_evicted() {
     let store = MemStore::new();
     let registry = capped(&store, 1);
-    let edit = Peer::new(registry.connect("a", ReadWrite).await.unwrap());
+    let edit = Peer::new(registry.connect("a", ReadWrite, AUTHOR).await.unwrap());
     store.fail_append.store(true, Ordering::SeqCst);
     edit.write("kept").unwrap();
     drop(edit);
     sleep(FLUSH).await;
 
-    let refused = registry.connect("b", ReadWrite).await;
+    let refused = registry.connect("b", ReadWrite, AUTHOR).await;
 
     assert!(matches!(refused, Err(CollabError::AtCapacity)));
     store.fail_append.store(false, Ordering::SeqCst);
@@ -749,13 +947,13 @@ async fn past_the_socket_cap_a_connection_is_refused() {
         ..config()
     };
     let registry = DocRegistry::new(store.clone(), config);
-    let first = registry.connect(DOC, ReadWrite).await.unwrap();
+    let first = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
 
-    let refused = registry.connect(DOC, ReadWrite).await;
+    let refused = registry.connect(DOC, ReadWrite, AUTHOR).await;
     assert!(matches!(refused, Err(CollabError::AtCapacity)));
 
     drop(first);
-    assert!(registry.connect(DOC, ReadWrite).await.is_ok());
+    assert!(registry.connect(DOC, ReadWrite, AUTHOR).await.is_ok());
 }
 
 // Flush failure
@@ -828,7 +1026,7 @@ async fn a_full_queue_closes_write_sockets_and_refuses_the_edit() {
     store.fail_append.store(false, Ordering::SeqCst);
     sleep(Duration::from_secs(31)).await;
 
-    let mut back = Peer::new(registry.connect(DOC, ReadWrite).await.unwrap());
+    let mut back = Peer::new(registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap());
     back.doc = writer.doc.clone();
     back.sync().await;
     sleep(FLUSH).await;
@@ -897,8 +1095,8 @@ async fn a_failed_compaction_does_not_block_an_unload() {
 async fn shutdown_flushes_every_room_and_closes_its_sockets() {
     let store = MemStore::new();
     let registry = registry(&store);
-    let mut alice = Peer::new(registry.connect("a", ReadWrite).await.unwrap());
-    let bob = Peer::new(registry.connect("b", ReadWrite).await.unwrap());
+    let mut alice = Peer::new(registry.connect("a", ReadWrite, AUTHOR).await.unwrap());
+    let bob = Peer::new(registry.connect("b", ReadWrite, AUTHOR).await.unwrap());
     alice.write("one").unwrap();
     bob.write("two").unwrap();
 
@@ -910,7 +1108,7 @@ async fn shutdown_flushes_every_room_and_closes_its_sockets() {
     assert_eq!(title(&rebuild(&store.stored("b"))), "two");
     assert_eq!(registry.loaded_rooms(), 0);
     assert!(matches!(
-        registry.connect("a", ReadWrite).await,
+        registry.connect("a", ReadWrite, AUTHOR).await,
         Err(CollabError::ShuttingDown)
     ));
 }
@@ -982,7 +1180,7 @@ async fn malformed_frames_close_the_socket_but_not_the_room() {
         &[0, 2, 3, 255, 255, 255],
     ];
     for bad in frames {
-        let conn = registry.connect(DOC, ReadWrite).await.unwrap();
+        let conn = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
         let refused = conn.receive(bad).map_err(|close| close.0);
         assert_eq!(refused, Err(CLOSE_PROTOCOL_ERROR), "frame {bad:?}");
     }
@@ -998,7 +1196,7 @@ async fn malformed_frames_close_the_socket_but_not_the_room() {
 async fn mutated_frames_do_not_break_the_room() {
     let store = MemStore::new();
     let registry = registry(&store);
-    let conn = registry.connect(DOC, ReadWrite).await.unwrap();
+    let conn = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
     let mut source = Peer::with_doc(conn, Doc::with_client_id(7));
     source.sync().await;
     source.write("hello").unwrap();
@@ -1028,7 +1226,7 @@ async fn mutated_frames_do_not_break_the_room() {
         if next() % 4 == 0 {
             bytes.truncate(next() % bytes.len());
         }
-        let conn = registry.connect(DOC, ReadWrite).await.unwrap();
+        let conn = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
         let _ = conn.receive(&bytes);
     }
 
@@ -1071,7 +1269,7 @@ async fn a_client_that_stops_reading_is_closed() {
 async fn outbound_stays_closed_after_a_close() {
     let store = MemStore::new();
     let registry = registry(&store);
-    let mut conn = registry.connect(DOC, ReadWrite).await.unwrap();
+    let mut conn = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
     registry.shutdown().await.unwrap();
 
     assert!(matches!(
@@ -1099,7 +1297,7 @@ fn peak_rss_kb() -> usize {
 async fn a_tiny_frame_cannot_declare_a_huge_count() {
     let store = MemStore::new();
     let registry = registry(&store);
-    let conn = registry.connect(DOC, ReadOnly).await.unwrap();
+    let conn = registry.connect(DOC, ReadOnly, AUTHOR).await.unwrap();
     let count = [0x80, 0x80, 0x80, 0x80, 0x02]; // 1 << 29
     let frames: [Vec<u8>; 3] = [
         [&[0, 0, 5][..], &count].concat(),
@@ -1127,7 +1325,7 @@ async fn a_snapshot_that_cannot_be_applied_is_refused() {
     store.compact(DOC, &snapshot).await.unwrap();
     let registry = registry(&store);
 
-    let refused = registry.connect(DOC, ReadWrite).await;
+    let refused = registry.connect(DOC, ReadWrite, AUTHOR).await;
 
     assert!(matches!(refused, Err(CollabError::CorruptDocument { .. })));
 }
@@ -1137,7 +1335,10 @@ async fn a_skipped_row_keeps_the_log_from_being_compacted() {
     let store = MemStore::new();
     let (base, bad) = common::inapplicable_update();
     let rows = [(1, base), (2, bad)].map(|(seq, data)| cadocs_store::StoredUpdate { seq, data });
-    store.append_updates(DOC, &rows).await.unwrap();
+    store
+        .append_updates(DOC, &rows, &DocEdit::default())
+        .await
+        .unwrap();
     let registry = registry(&store);
     let alice = Peer::join(&registry, ReadWrite).await;
     assert!(title(&alice.doc).starts_with('a'));
@@ -1161,7 +1362,7 @@ async fn a_client_requesting_the_document_without_reading_is_closed() {
     let registry = DocRegistry::new(store.clone(), config);
     let alice = Peer::join(&registry, ReadWrite).await;
     alice.write(&"a".repeat(600)).unwrap();
-    let mut reader = Peer::new(registry.connect(DOC, ReadOnly).await.unwrap());
+    let mut reader = Peer::new(registry.connect(DOC, ReadOnly, AUTHOR).await.unwrap());
 
     for _ in 0..4 {
         let empty = yrs::StateVector::default();
@@ -1262,7 +1463,7 @@ async fn a_failed_load_is_not_a_failed_shutdown() {
     store.load_gate.hold();
     let loading = {
         let registry = registry.clone();
-        tokio::spawn(async move { registry.connect(DOC, ReadWrite).await.map(drop) })
+        tokio::spawn(async move { registry.connect(DOC, ReadWrite, AUTHOR).await.map(drop) })
     };
     store.load_gate.entered().await;
     let stopping = {
@@ -1518,7 +1719,7 @@ async fn a_large_document_reaches_a_client_with_a_small_frame_queued() {
         alice.write(&"a".repeat(400)).unwrap();
     }
 
-    let mut bob = Peer::new(registry.connect(DOC, ReadWrite).await.unwrap());
+    let mut bob = Peer::new(registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap());
     bob.sync().await;
 
     assert_eq!(bob.closed, None);

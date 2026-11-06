@@ -1,5 +1,6 @@
 //! Pages and their tree. A page the caller cannot read answers `404`, and so does a trashed one,
-//! outside the trash. The title lives in the Yjs document, so no route here writes it.
+//! outside the trash. The title lives in the Yjs document, so a route here changes it through the
+//! room, and `pages.title` follows at the next flush.
 
 use axum::extract::{DefaultBodyLimit, RawQuery, State};
 use axum::http::StatusCode;
@@ -9,7 +10,8 @@ use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
 use cadocs_collab::Authorizer;
 use cadocs_store::{
-    AccountStore, DateCursor, DocStore, NewPage, PageMove, PageRecord, PageStore, Placement, now_ms,
+    AccountStore, DateCursor, DocStore, MAX_TITLE_CHARS, NewPage, PageMove, PageRecord, PageStore,
+    Placement, now_ms,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -33,7 +35,7 @@ where
         .route("/spaces/{space}/pages", post(create))
         .route("/spaces/{space}/tree", get(tree))
         .route("/spaces/{space}/trash", get(list_trash))
-        .route("/pages/{page}", get(read).delete(trash))
+        .route("/pages/{page}", get(read).patch(update).delete(trash))
         .route("/pages/{page}/move", post(move_page))
         .route("/pages/{page}/restore", post(restore))
         .route("/pages/{page}/purge", delete(purge))
@@ -160,6 +162,33 @@ async fn read<S: PageStore, A>(
     let found = state.store.page(&page, &current.user.id).await?;
     let page = found.ok_or_else(|| ApiError::new(ErrorCode::NotFound))?;
     Ok(Json(page.into()))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateRequest {
+    title: String,
+}
+
+/// The answer has the new title, which `pages.title` only gets at the next flush.
+async fn update<S: DocStore + PageStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    PathParam(page): PathParam,
+    JsonBody(body): JsonBody<UpdateRequest>,
+) -> Result<Json<PageBody>, ApiError> {
+    let title = body.title.trim();
+    if title.chars().count() > MAX_TITLE_CHARS {
+        return Err(ApiError::new(ErrorCode::ValidationFailed).with_field("title", "too_long"));
+    }
+    let user = &current.user.id;
+    // First so that a refused user cannot load rooms, then again because a load can take long.
+    state.store.page_to_edit(&page, user).await?;
+    state.registry.open(&page).await?;
+    let mut record = state.store.page_to_edit(&page, user).await?;
+    state.registry.set_title(&page, title, user).await?;
+    record.title = title.to_owned();
+    Ok(Json(record.into()))
 }
 
 async fn read_by_slug<S: PageStore, A>(

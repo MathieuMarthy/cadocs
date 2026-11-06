@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use cadocs_core::permissions::SocketMode;
-use cadocs_store::{Snapshot, StoredDoc, StoredUpdate};
+use cadocs_store::{DocEdit, Snapshot, StoredDoc, StoredUpdate};
 use serde::de::IgnoredAny;
 use tokio::sync::{Notify, OwnedSemaphorePermit, mpsc, oneshot, watch};
 use tokio::time::Instant;
@@ -13,11 +13,12 @@ use tracing::warn;
 use yrs::sync::awareness::AwarenessUpdateEntry;
 use yrs::sync::{Awareness, AwarenessUpdate, Message, SyncMessage};
 use yrs::updates::encoder::Encode;
-use yrs::{ClientID, Doc, IdSet, ReadTxn, StateVector, Transact, Update};
+use yrs::{ClientID, Doc, GetString, IdSet, ReadTxn, StateVector, Text, Transact, Update};
 
 use crate::connection::{Close, Connection, decode_untrusted};
 use crate::{
-    CLOSE_PROTOCOL_ERROR, CLOSE_STORAGE_FAILING, CLOSE_TOO_SLOW, CollabConfig, CollabError,
+    CLOSE_PAGE_GONE, CLOSE_PROTOCOL_ERROR, CLOSE_STORAGE_FAILING, CLOSE_TOO_SLOW, CollabConfig,
+    CollabError,
 };
 
 /// `None` until a load or an unload ends.
@@ -30,6 +31,8 @@ const MAX_ANNOUNCED_IDS: usize = 16;
 /// Largest awareness state: a name, a colour and a cursor take well under 1 KiB.
 const MAX_AWARENESS_STATE_BYTES: usize = 64 * 1024;
 const NULL_STATE: &str = "null";
+/// The root type that holds the title (`docs/DATA_MODEL.md`).
+const TITLE: &str = "title";
 
 /// Poisoning is ignored: the critical sections keep no invariant a panic could break that matters
 /// more than keeping the room's unflushed edits reachable.
@@ -39,6 +42,8 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 struct Client {
     mode: SocketMode,
+    /// The user behind this socket, shared by the edits it makes.
+    user: Arc<str>,
     frames: mpsc::Sender<Arc<[u8]>>,
     /// Bytes waiting in `frames`. A frame count alone would let a client that requests the whole
     /// document and never reads pin `send_queue` copies of it.
@@ -85,6 +90,8 @@ pub(crate) struct RoomState {
     next_client: u64,
     /// Updates the room task has not picked up yet.
     pub(crate) queue: Vec<StoredUpdate>,
+    /// Who wrote the last of `queue`.
+    author: Option<Arc<str>>,
     /// Bytes not stored yet, in `queue` or in the room task's batch.
     pub(crate) unflushed_bytes: usize,
     next_seq: i64,
@@ -150,6 +157,21 @@ impl RoomState {
             .doc()
             .transact()
             .encode_state_as_update_v1(&StateVector::default())
+    }
+
+    /// `None` for a document with no title yet. The panic guard is for the room task, which must
+    /// survive to flush.
+    fn title(&self) -> Option<String> {
+        let doc = self.awareness.doc();
+        catch_unwind(AssertUnwindSafe(|| {
+            let txn = doc.transact();
+            let text = txn.get_text(TITLE)?;
+            Some(DocEdit::clip_title(text.get_string(&txn)))
+        }))
+        .unwrap_or_else(|_| {
+            warn!("cannot read the title of a document");
+            None
+        })
     }
 
     pub(crate) fn has_clients(&self) -> bool {
@@ -221,6 +243,7 @@ impl Room {
                 clients: HashMap::new(),
                 next_client: 0,
                 queue: Vec::new(),
+                author: None,
                 unflushed_bytes: 0,
                 next_seq: last_seq + 1,
                 flushed_seq: last_seq,
@@ -255,6 +278,7 @@ impl Room {
     pub(crate) fn join(
         self: &Arc<Self>,
         mode: SocketMode,
+        user: &str,
         permit: OwnedSemaphorePermit,
     ) -> Connection {
         // The handshake alone takes two frames.
@@ -269,6 +293,7 @@ impl Room {
             id,
             Client {
                 mode,
+                user: user.into(),
                 frames,
                 queued_bytes: queued_bytes.clone(),
                 max_queued_bytes: self.config.max_frame_bytes,
@@ -404,18 +429,63 @@ impl Room {
                 _ => unreachable!("built just above"),
             }
         });
+        let author = state.clients.get(&id).map(|client| client.user.clone());
         // Both can exist: `applied` may hold older updates that this one released, which the frame
         // does not contain.
         for data in applied.into_iter().chain(raw) {
-            let seq = state.next_seq;
-            state.next_seq += 1;
-            state.unflushed_bytes += data.len();
-            if state.queue.is_empty() {
-                self.wake.notify_one();
-            }
-            state.queue.push(StoredUpdate { seq, data });
+            self.enqueue(state, data, author.clone());
         }
         valid.then_some(()).ok_or(Close(CLOSE_PROTOCOL_ERROR))
+    }
+
+    fn enqueue(&self, state: &mut RoomState, data: Vec<u8>, author: Option<Arc<str>>) {
+        let seq = state.next_seq;
+        state.next_seq += 1;
+        state.unflushed_bytes += data.len();
+        if state.queue.is_empty() {
+            self.wake.notify_one();
+        }
+        state.queue.push(StoredUpdate { seq, data });
+        state.author = author;
+    }
+
+    /// Replaces the title, as an edit every client receives. The registry calls this under its
+    /// lock, so the room cannot start unloading at the same time.
+    pub(crate) fn set_title(&self, title: &str, author: &str) -> Result<(), CollabError> {
+        let mut state = self.state();
+        if state.queue_refuses(title.len(), &self.config) {
+            return Err(CollabError::StorageFailing);
+        }
+        let doc = state.awareness.doc();
+        // The observer runs as this transaction drops, and a stored document can make yrs panic.
+        let replaced = catch_unwind(AssertUnwindSafe(|| {
+            let text = doc.get_or_insert_text(TITLE);
+            let mut txn = doc.transact_mut();
+            let current = text.get_string(&txn);
+            let length = text.len(&txn);
+            // A client can put more than text in this root. yrs counts it, but cannot remove it:
+            // it would panic after deleting the text.
+            let plain = current.len() == length as usize;
+            if plain && current != title {
+                text.remove_range(&mut txn, 0, length);
+                text.insert(&mut txn, 0, title);
+            }
+            plain
+        }));
+        let applied = lock(&state.applied).take();
+        if let Some(update) = applied {
+            let message = Message::Sync(SyncMessage::Update(update));
+            state.broadcast_all(&message);
+            if let Message::Sync(SyncMessage::Update(update)) = message {
+                self.enqueue(&mut state, update, Some(author.into()));
+            }
+        }
+        match replaced {
+            Ok(true) => Ok(()),
+            _ => Err(CollabError::CorruptDocument {
+                doc_id: self.doc_id.clone(),
+            }),
+        }
     }
 
     /// Removes a client and the awareness states it owned, so no ghost cursor stays.
@@ -468,9 +538,26 @@ impl Room {
         }
     }
 
-    /// Takes the queue for a flush.
-    pub(crate) fn take_queue(&self) -> Vec<StoredUpdate> {
-        mem::take(&mut self.state().queue)
+    /// Takes the queue for a flush, with what the row of the page must get. The title may include
+    /// edits queued after this, which a later flush stores: it is only a copy.
+    pub(crate) fn take_queue(&self) -> (Vec<StoredUpdate>, DocEdit) {
+        let mut state = self.state();
+        let queue = mem::take(&mut state.queue);
+        let edit = DocEdit {
+            title: (!queue.is_empty()).then(|| state.title()).flatten(),
+            author: state.author.take().map(|author| author.to_string()),
+        };
+        (queue, edit)
+    }
+
+    /// Forgets what was not stored and closes every socket: the page is gone, and so are its edits.
+    pub(crate) fn abandon(&self) {
+        let mut state = self.state();
+        state.queue.clear();
+        state.author = None;
+        state.unflushed_bytes = 0;
+        state.stored_updates = 0;
+        state.kick_all(CLOSE_PAGE_GONE);
     }
 }
 

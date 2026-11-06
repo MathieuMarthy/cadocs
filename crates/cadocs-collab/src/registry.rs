@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cadocs_core::permissions::SocketMode;
-use cadocs_store::{DocStore, StoreError, StoredUpdate};
-use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, watch};
+use cadocs_store::{DocEdit, DocStore, StoreError, StoredUpdate};
+use tokio::sync::{Notify, Semaphore, watch};
 use tokio::time::{Instant, sleep, sleep_until};
 use tracing::warn;
 
@@ -41,8 +41,9 @@ struct Inner<S> {
     unloaded: Notify,
 }
 
-enum Attempt {
-    Joined(Connection),
+enum Attempt<T> {
+    /// The room was live, and this is what the caller did with it.
+    Entered(T),
     /// The room is loading: its failure is the caller's failure.
     WaitLoad(watch::Receiver<Transition>),
     /// The room is unloading. Whatever the outcome, the next attempt finds it live or absent.
@@ -82,7 +83,12 @@ impl<S: DocStore> DocRegistry<S> {
 
     /// Joins a document's room, loading it if needed. Cancelling this future is safe: a load in
     /// progress runs in its own task, and the room unloads if nobody joins it.
-    pub async fn connect(&self, doc_id: &str, mode: SocketMode) -> Result<Connection, CollabError> {
+    pub async fn connect(
+        &self,
+        doc_id: &str,
+        mode: SocketMode,
+        user_id: &str,
+    ) -> Result<Connection, CollabError> {
         let mut permit = Some(
             self.inner
                 .sockets
@@ -90,9 +96,40 @@ impl<S: DocStore> DocRegistry<S> {
                 .try_acquire_owned()
                 .map_err(|_| CollabError::AtCapacity)?,
         );
+        self.enter(doc_id, |room| {
+            let permit = permit.take().expect("a connection joins only once");
+            room.join(mode, user_id, permit)
+        })
+        .await
+    }
+
+    /// Waits until a document's room is live, loading it if needed. A check that decides a write
+    /// comes after this, so the wait for a load does not sit between the two.
+    pub async fn open(&self, doc_id: &str) -> Result<(), CollabError> {
+        self.enter(doc_id, |_| ()).await
+    }
+
+    /// Replaces a document's title through its room, loading it if needed: an edit like any other,
+    /// so a client cannot miss it and a flush cannot undo it. An empty room unloads as usual.
+    pub async fn set_title(
+        &self,
+        doc_id: &str,
+        title: &str,
+        user_id: &str,
+    ) -> Result<(), CollabError> {
+        self.enter(doc_id, |room| room.set_title(title, user_id))
+            .await?
+    }
+
+    /// Runs `action` once on the live room of a document, under the lock that keeps it live.
+    async fn enter<T>(
+        &self,
+        doc_id: &str,
+        mut action: impl FnMut(&Arc<Room>) -> T,
+    ) -> Result<T, CollabError> {
         loop {
-            match self.inner.attempt(doc_id, mode, &mut permit)? {
-                Attempt::Joined(connection) => return Ok(connection),
+            match self.inner.attempt(doc_id, &mut action)? {
+                Attempt::Entered(result) => return Ok(result),
                 Attempt::WaitLoad(transition) => outcome(transition).await?,
                 Attempt::WaitUnload(transition) => {
                     if let Err(CollabError::ShuttingDown) = outcome(transition).await {
@@ -191,21 +228,17 @@ fn begin_unload(rooms: &mut Rooms, room: &Arc<Room>) -> watch::Receiver<Transiti
 }
 
 impl<S: DocStore> Inner<S> {
-    fn attempt(
+    fn attempt<T>(
         self: &Arc<Self>,
         doc_id: &str,
-        mode: SocketMode,
-        permit: &mut Option<OwnedSemaphorePermit>,
-    ) -> Result<Attempt, CollabError> {
+        action: &mut impl FnMut(&Arc<Room>) -> T,
+    ) -> Result<Attempt<T>, CollabError> {
         let mut rooms = lock(&self.rooms);
         if rooms.closing {
             return Err(CollabError::ShuttingDown);
         }
         match rooms.slots.get(doc_id) {
-            Some(Slot::Live(room)) => {
-                let permit = permit.take().expect("a connection joins only once");
-                return Ok(Attempt::Joined(room.join(mode, permit)));
-            }
+            Some(Slot::Live(room)) => return Ok(Attempt::Entered(action(room))),
             Some(Slot::Loading(transition)) => return Ok(Attempt::WaitLoad(transition.clone())),
             Some(Slot::Unloading(transition)) => {
                 return Ok(Attempt::WaitUnload(transition.clone()));
@@ -307,6 +340,8 @@ struct RoomTask<S> {
     /// Updates taken from the queue and not stored yet. A retry resends them with the same `seq`,
     /// which the store accepts after a lost commit.
     batch: Vec<StoredUpdate>,
+    /// What the row of the page gets with `batch`.
+    edit: DocEdit,
     retry_delay: Duration,
     /// Set after a failed compaction, which encodes the whole document under the room lock.
     next_compact: Option<Instant>,
@@ -319,6 +354,7 @@ impl<S: DocStore> RoomTask<S> {
             inner,
             room,
             batch: Vec::new(),
+            edit: DocEdit::default(),
             retry_delay,
             next_compact: None,
         }
@@ -366,7 +402,10 @@ impl<S: DocStore> RoomTask<S> {
     }
 
     async fn flush(&mut self) -> Result<(), StoreError> {
-        self.batch.append(&mut self.room.take_queue());
+        let (mut queue, edit) = self.room.take_queue();
+        self.batch.append(&mut queue);
+        self.edit.title = edit.title.or(self.edit.title.take());
+        self.edit.author = edit.author.or(self.edit.author.take());
         let Some(last) = self.batch.last() else {
             return Ok(());
         };
@@ -374,16 +413,30 @@ impl<S: DocStore> RoomTask<S> {
         match self
             .inner
             .store
-            .append_updates(&self.room.doc_id, &self.batch)
+            .append_updates(&self.room.doc_id, &self.batch, &self.edit)
             .await
         {
             Ok(()) => {
                 let batch = mem::take(&mut self.batch);
+                self.edit = DocEdit::default();
                 let bytes: usize = batch.iter().map(|update| update.data.len()).sum();
                 let mut state = self.room.state();
                 state.unflushed_bytes -= bytes;
                 state.flushed_seq = last_seq;
                 state.stored_updates += batch.len();
+                if mem::replace(&mut state.failing, false) {
+                    self.inner.failing_rooms.fetch_sub(1, Ordering::SeqCst);
+                }
+                self.retry_delay = self.inner.config.flush_interval;
+                Ok(())
+            }
+            // Retrying could not help, and no client may go on editing a page that is gone.
+            Err(StoreError::PageNotFound) => {
+                warn!(doc_id = %self.room.doc_id, "the page of this room is gone");
+                self.batch.clear();
+                self.edit = DocEdit::default();
+                self.room.abandon();
+                let mut state = self.room.state();
                 if mem::replace(&mut state.failing, false) {
                     self.inner.failing_rooms.fetch_sub(1, Ordering::SeqCst);
                 }

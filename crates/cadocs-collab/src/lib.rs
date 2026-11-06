@@ -11,8 +11,8 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use cadocs_core::permissions::SocketMode;
-use cadocs_store::StoreError;
+use cadocs_core::permissions::{CLOSE_NOT_FOUND, Scope, SocketMode, page_socket_mode};
+use cadocs_store::{PageStore, StoreError};
 
 pub use connection::{Close, Connection, Outbound};
 pub use registry::DocRegistry;
@@ -25,6 +25,8 @@ pub const CLOSE_PROTOCOL_ERROR: u16 = 1002;
 pub const CLOSE_FRAME_TOO_LARGE: u16 = 1009;
 /// The room queue is full because storage is failing.
 pub const CLOSE_STORAGE_FAILING: u16 = 1013;
+/// The page was deleted under the room.
+pub const CLOSE_PAGE_GONE: u16 = CLOSE_NOT_FOUND;
 /// The client stopped reading.
 pub const CLOSE_TOO_SLOW: u16 = 4408;
 
@@ -72,6 +74,9 @@ pub enum CollabError {
     AtCapacity,
     #[error("the server is shutting down")]
     ShuttingDown,
+    /// The room holds all it may while its flushes fail.
+    #[error("the storage of this document is failing")]
+    StorageFailing,
 }
 
 impl From<StoreError> for CollabError {
@@ -82,15 +87,33 @@ impl From<StoreError> for CollabError {
 
 /// Decides the mode of a page socket before the upgrade. `None` refuses it.
 pub trait Authorizer: Send + Sync + 'static {
-    fn authorize(&self, doc_id: &str) -> impl Future<Output = Option<SocketMode>> + Send;
+    fn authorize(
+        &self,
+        page_id: &str,
+        user_id: &str,
+    ) -> impl Future<Output = Result<Option<SocketMode>, StoreError>> + Send;
 }
 
-/// The prototype's authorizer, which has no accounts to check. Do not expose it.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Permissive;
+/// Resolves the role of a user from the database, as REST does.
+#[derive(Debug)]
+pub struct PageAuthorizer<S> {
+    store: Arc<S>,
+}
 
-impl Authorizer for Permissive {
-    async fn authorize(&self, _doc_id: &str) -> Option<SocketMode> {
-        Some(SocketMode::ReadWrite)
+impl<S> PageAuthorizer<S> {
+    pub fn new(store: Arc<S>) -> Self {
+        Self { store }
+    }
+}
+
+impl<S: PageStore> Authorizer for PageAuthorizer<S> {
+    async fn authorize(
+        &self,
+        page_id: &str,
+        user_id: &str,
+    ) -> Result<Option<SocketMode>, StoreError> {
+        let page = self.store.page(page_id, user_id).await?;
+        // `page` hides what is trashed, so a page it returns is live.
+        Ok(page.and_then(|page| page_socket_mode(Scope::live(Some(page.role)))))
     }
 }

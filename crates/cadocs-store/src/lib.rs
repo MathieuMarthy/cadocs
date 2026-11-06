@@ -13,7 +13,10 @@ pub use accounts::{
     AccountStore, ActiveSession, AdminChanges, Credentials, FirstUser, Membership,
     NewPasswordReset, NewSession, UpdateBasis, User, UserChanges, UserRecord,
 };
-pub use pages::{DateCursor, MAX_PAGE_DEPTH, NewPage, PageMove, PageRecord, PageStore, Placement};
+pub use pages::{
+    DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, NewPage, PageMove, PageRecord, PageStore,
+    Placement,
+};
 pub use spaces::{Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore};
 pub use sqlite::SqliteStore;
 pub use workspaces::{
@@ -105,6 +108,24 @@ pub struct StoredUpdate {
     pub data: Vec<u8>,
 }
 
+/// What a flush copies to the row of the page, besides the time. `None` keeps what the row holds.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DocEdit {
+    pub title: Option<String>,
+    /// The last user who wrote. An account deleted since writes as nobody.
+    pub author: Option<String>,
+}
+
+impl DocEdit {
+    /// A client can put any length in the Yjs title, and this copy is read with every page.
+    pub fn clip_title(mut title: String) -> String {
+        if let Some((end, _)) = title.char_indices().nth(MAX_TITLE_CHARS) {
+            title.truncate(end);
+        }
+        title
+    }
+}
+
 /// Everything needed to rebuild a document: apply `snapshot`, then `updates` in order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StoredDoc {
@@ -132,16 +153,19 @@ pub trait DocStore: Send + Sync + 'static {
     /// Appends a batch in one transaction: either every update is stored, or none is. Replaying
     /// a batch that was already stored succeeds, so a flush can retry after a lost commit. A `seq`
     /// below 1, covered by the snapshot, or stored with other data is a `SeqConflict`: `load`
-    /// would never return that update, so it must not pass for durable.
+    /// would never return that update, so it must not pass for durable. The same transaction
+    /// applies `edit` to the page. A document whose page is gone is a `PageNotFound`.
     fn append_updates(
         &self,
         doc_id: &str,
         updates: &[StoredUpdate],
+        edit: &DocEdit,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// Writes the snapshot and deletes the updates it covers, in one transaction. Updates after
     /// `snapshot.upto_seq` stay. A snapshot older than the stored one is refused, because the
-    /// updates it would need are already gone.
+    /// updates it would need are already gone, and so is a document whose page is gone, with
+    /// `PageNotFound`.
     fn compact(
         &self,
         doc_id: &str,

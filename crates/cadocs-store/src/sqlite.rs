@@ -12,7 +12,7 @@ use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
 
-use crate::{DocStore, Snapshot, StoreError, StoredDoc, StoredUpdate, now_ms};
+use crate::{DocEdit, DocStore, Snapshot, StoreError, StoredDoc, StoredUpdate, now_ms};
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations/sqlite");
 
@@ -99,7 +99,7 @@ impl DocStore for SqliteStore {
     async fn load(&self, doc_id: &str) -> Result<StoredDoc, StoreError> {
         let mut tx = self.reader.begin().await?;
 
-        let snapshot = sqlx::query("SELECT state, upto_seq FROM doc_snapshots WHERE doc_id = ?1")
+        let snapshot = sqlx::query("SELECT state, upto_seq FROM doc_snapshots WHERE page_id = ?1")
             .bind(doc_id)
             .fetch_optional(&mut *tx)
             .await?
@@ -110,7 +110,7 @@ impl DocStore for SqliteStore {
 
         let after = snapshot.as_ref().map_or(0, |s| s.upto_seq);
         let updates = sqlx::query(
-            "SELECT seq, data FROM doc_updates WHERE doc_id = ?1 AND seq > ?2 ORDER BY seq",
+            "SELECT seq, data FROM doc_updates WHERE page_id = ?1 AND seq > ?2 ORDER BY seq",
         )
         .bind(doc_id)
         .bind(after)
@@ -131,6 +131,7 @@ impl DocStore for SqliteStore {
         &self,
         doc_id: &str,
         updates: &[StoredUpdate],
+        edit: &DocEdit,
     ) -> Result<(), StoreError> {
         if updates.is_empty() {
             return Ok(());
@@ -138,8 +139,26 @@ impl DocStore for SqliteStore {
 
         let created_at = now_ms();
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        // Reading the author from `users`: a foreign key error here would fail every retry.
+        let page = sqlx::query(
+            "UPDATE pages SET
+                 title = coalesce(?2, title),
+                 updated_by = coalesce((SELECT id FROM users WHERE id = ?3), updated_by),
+                 updated_at = ?4
+             WHERE id = ?1",
+        )
+        .bind(doc_id)
+        .bind(&edit.title)
+        .bind(&edit.author)
+        .bind(created_at)
+        .execute(&mut *tx)
+        .await?;
+        if page.rows_affected() == 0 {
+            return Err(StoreError::PageNotFound);
+        }
+
         let covered: i64 =
-            sqlx::query_scalar("SELECT upto_seq FROM doc_snapshots WHERE doc_id = ?1")
+            sqlx::query_scalar("SELECT upto_seq FROM doc_snapshots WHERE page_id = ?1")
                 .bind(doc_id)
                 .fetch_optional(&mut *tx)
                 .await?
@@ -155,9 +174,9 @@ impl DocStore for SqliteStore {
             }
 
             let inserted = sqlx::query(
-                "INSERT INTO doc_updates (doc_id, seq, data, created_at)
+                "INSERT INTO doc_updates (page_id, seq, data, created_at)
                  VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT (doc_id, seq) DO NOTHING",
+                 ON CONFLICT (page_id, seq) DO NOTHING",
             )
             .bind(doc_id)
             .bind(update.seq)
@@ -169,7 +188,7 @@ impl DocStore for SqliteStore {
 
             if inserted == 0 {
                 let stored: Vec<u8> = sqlx::query_scalar(
-                    "SELECT data FROM doc_updates WHERE doc_id = ?1 AND seq = ?2",
+                    "SELECT data FROM doc_updates WHERE page_id = ?1 AND seq = ?2",
                 )
                 .bind(doc_id)
                 .bind(update.seq)
@@ -187,8 +206,17 @@ impl DocStore for SqliteStore {
     async fn compact(&self, doc_id: &str, snapshot: &Snapshot) -> Result<(), StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
 
+        let page_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pages WHERE id = ?1)")
+                .bind(doc_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if !page_exists {
+            return Err(StoreError::PageNotFound);
+        }
+
         let stored: Option<i64> =
-            sqlx::query_scalar("SELECT upto_seq FROM doc_snapshots WHERE doc_id = ?1")
+            sqlx::query_scalar("SELECT upto_seq FROM doc_snapshots WHERE page_id = ?1")
                 .bind(doc_id)
                 .fetch_optional(&mut *tx)
                 .await?;
@@ -201,9 +229,9 @@ impl DocStore for SqliteStore {
         }
 
         sqlx::query(
-            "INSERT INTO doc_snapshots (doc_id, state, upto_seq, updated_at)
+            "INSERT INTO doc_snapshots (page_id, state, upto_seq, updated_at)
              VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT (doc_id) DO UPDATE SET
+             ON CONFLICT (page_id) DO UPDATE SET
                  state = excluded.state,
                  upto_seq = excluded.upto_seq,
                  updated_at = excluded.updated_at",
@@ -215,7 +243,7 @@ impl DocStore for SqliteStore {
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query("DELETE FROM doc_updates WHERE doc_id = ?1 AND seq <= ?2")
+        sqlx::query("DELETE FROM doc_updates WHERE page_id = ?1 AND seq <= ?2")
             .bind(doc_id)
             .bind(snapshot.upto_seq)
             .execute(&mut *tx)
@@ -239,6 +267,17 @@ mod tests {
         let store = SqliteStore::open(&dir.path().join("cadocs.db"))
             .await
             .unwrap();
+        sqlx::raw_sql(
+            "INSERT INTO workspaces (id, slug, name, created_at, updated_at)
+                 VALUES ('ws', 'ws', 'Workspace', 1, 1);
+             INSERT INTO spaces (id, workspace_id, slug, name, created_at, updated_at)
+                 VALUES ('space', 'ws', 'space', 'Space', 1, 1);
+             INSERT INTO pages (id, workspace_id, space_id, position, slug, created_at, updated_at)
+                 VALUES ('doc', 'ws', 'space', 'a', 'doc', 1, 1);",
+        )
+        .execute(&store.writer)
+        .await
+        .unwrap();
         (store, dir)
     }
 
@@ -256,9 +295,12 @@ mod tests {
 
         let updates = [update()];
         assert!(
-            timeout(SHORT, store.append_updates("doc", &updates))
-                .await
-                .is_err()
+            timeout(
+                SHORT,
+                store.append_updates("doc", &updates, &DocEdit::default())
+            )
+            .await
+            .is_err()
         );
         timeout(SHORT, store.load("doc"))
             .await
@@ -266,7 +308,10 @@ mod tests {
             .unwrap();
 
         drop(held);
-        store.append_updates("doc", &updates).await.unwrap();
+        store
+            .append_updates("doc", &updates, &DocEdit::default())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

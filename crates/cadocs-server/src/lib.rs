@@ -21,7 +21,7 @@ use anyhow::Context;
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::middleware::map_response;
+use axum::middleware::{from_fn_with_state, map_response};
 use axum::routing::{any, get};
 use cadocs_collab::{Authorizer, DocRegistry};
 use cadocs_store::{AccountStore, DocStore, PageStore, SpaceStore, WorkspaceStore};
@@ -99,7 +99,12 @@ where
 {
     Router::new()
         .route("/health", get(health::<S, A>))
-        .route("/ws/{doc}", get(ws::upgrade::<S, A>))
+        .route(
+            "/ws/pages/{page}",
+            get(ws::upgrade::<S, A>)
+                .route_layer(from_fn_with_state(state.clone(), session::require::<S, A>))
+                .route_layer(from_fn_with_state(state.http.clone(), api::check_origin)),
+        )
         .nest("/api/v1", api::router(&state))
         .route("/api/v1/", any(api::not_found))
         .fallback_service(get(assets::serve::<E>))

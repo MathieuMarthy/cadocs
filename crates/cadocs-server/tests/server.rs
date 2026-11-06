@@ -1,6 +1,7 @@
 //! The server over real sockets, with `yrs` standing in for the client. The real `yjs` client is
 //! tested in step 4.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -11,31 +12,35 @@ use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{Method, Request, StatusCode, header};
 use axum::middleware::from_fn_with_state;
 use axum::routing::post;
-use cadocs_collab::{Authorizer, CollabConfig, DocRegistry, Permissive};
+use cadocs_collab::{Authorizer, CollabConfig, DocRegistry};
 use cadocs_core::permissions::{SocketMode, WorkspaceRole};
 use cadocs_server::api;
 use cadocs_server::client_ip::TrustedProxies;
 use cadocs_server::config::{HttpConfig, PublicUrl, SocketConfig};
 use cadocs_server::rate_limit::RateLimiter;
-use cadocs_server::session::token_hash;
+use cadocs_server::session::{csrf_token, token_hash};
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
-    AccountStore, ActiveSession, AdminChanges, Credentials, DateCursor, DocStore, FirstUser, Grant,
-    Invitation, InvitationPreview, InvitedUser, Member, Membership, NewGrant, NewInvitation,
-    NewPage, NewPasswordReset, NewSession, NewSpace, NewWorkspace, PageMove, PageRecord, PageStore,
-    Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate,
-    UpdateBasis, UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceStore, now_ms,
+    AccountStore, ActiveSession, AdminChanges, Credentials, DateCursor, DocEdit, DocStore,
+    FirstUser, Grant, Invitation, InvitationPreview, InvitedUser, Member, Membership, NewGrant,
+    NewInvitation, NewPage, NewPasswordReset, NewSession, NewSpace, NewWorkspace, PageMove,
+    PageRecord, PageStore, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore, StoreError,
+    StoredDoc, StoredUpdate, UpdateBasis, UserChanges, UserRecord, Workspace, WorkspaceChanges,
+    WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
 use serde_json::{Value, json};
+use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteConnectOptions;
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::handshake::client::Request as WsRequest;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
@@ -48,6 +53,7 @@ use yrs::{Doc, GetString, ReadTxn, StateVector, Text, Transact, Update};
 type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 const PUBLIC_ORIGIN: &str = "https://wiki.example.org";
+const TOKEN: &str = "token";
 
 #[derive(Embed)]
 #[folder = "tests/fixtures"]
@@ -59,6 +65,10 @@ struct FlakyStore {
     inner: SqliteStore,
     fail_writes: Arc<AtomicBool>,
     fail_ping: Arc<AtomicBool>,
+    /// Pauses the next loads until `release_load`, after telling `load_entered`.
+    hold_load: Arc<AtomicBool>,
+    load_entered: Arc<Notify>,
+    release_load: Arc<Notify>,
 }
 
 impl DocStore for FlakyStore {
@@ -70,6 +80,11 @@ impl DocStore for FlakyStore {
     }
 
     async fn load(&self, doc_id: &str) -> Result<StoredDoc, StoreError> {
+        if self.hold_load.load(Ordering::SeqCst) {
+            let released = self.release_load.notified();
+            self.load_entered.notify_one();
+            released.await;
+        }
         self.inner.load(doc_id).await
     }
 
@@ -77,11 +92,12 @@ impl DocStore for FlakyStore {
         &self,
         doc_id: &str,
         updates: &[StoredUpdate],
+        edit: &DocEdit,
     ) -> Result<(), StoreError> {
         if self.fail_writes.load(Ordering::SeqCst) {
             return Err(sqlx::Error::PoolTimedOut.into());
         }
-        self.inner.append_updates(doc_id, updates).await
+        self.inner.append_updates(doc_id, updates, edit).await
     }
 
     async fn compact(&self, doc_id: &str, snapshot: &Snapshot) -> Result<(), StoreError> {
@@ -96,6 +112,10 @@ impl PageStore for FlakyStore {
 
     async fn page(&self, page_id: &str, actor: &str) -> Result<Option<PageRecord>, StoreError> {
         self.inner.page(page_id, actor).await
+    }
+
+    async fn page_to_edit(&self, page_id: &str, actor: &str) -> Result<PageRecord, StoreError> {
+        self.inner.page_to_edit(page_id, actor).await
     }
 
     async fn page_by_slug(
@@ -470,9 +490,16 @@ impl AccountStore for FlakyStore {
 #[derive(Clone, Copy)]
 struct Fixed(Option<SocketMode>);
 
+/// Gives every user write access, for tests about something else.
+const WRITER: Fixed = Fixed(Some(SocketMode::ReadWrite));
+
 impl Authorizer for Fixed {
-    async fn authorize(&self, _doc_id: &str) -> Option<SocketMode> {
-        self.0
+    async fn authorize(
+        &self,
+        _page_id: &str,
+        _user_id: &str,
+    ) -> Result<Option<SocketMode>, StoreError> {
+        Ok(self.0)
     }
 }
 
@@ -491,19 +518,58 @@ fn http() -> HttpConfig {
     }
 }
 
+/// The user behind every socket of these tests, and the page they open. A restart finds them.
+async fn seed(store: &SqliteStore, path: &Path) {
+    if store.has_users().await.unwrap() {
+        return;
+    }
+    let user = FirstUser {
+        id: "user".to_owned(),
+        email: "ada@example.org".to_owned(),
+        name: "Ada".to_owned(),
+        password_hash: "unused".to_owned(),
+        workspace_id: "workspace".to_owned(),
+        workspace_slug: "workspace".to_owned(),
+        workspace_name: "Workspace".to_owned(),
+    };
+    let session = NewSession {
+        token_hash: token_hash(TOKEN),
+        user_id: user.id.clone(),
+        now: now_ms(),
+        expires_at: i64::MAX,
+    };
+    store.create_first_user(&user, &session).await.unwrap();
+    let pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(path))
+        .await
+        .unwrap();
+    sqlx::raw_sql(
+        "INSERT INTO spaces (id, workspace_id, slug, name, created_at, updated_at)
+             VALUES ('space', 'workspace', 'space', 'Space', 1, 1);
+         INSERT INTO pages (id, workspace_id, space_id, position, slug, created_at, updated_at)
+             VALUES ('doc', 'workspace', 'space', 'a', 'doc', 1, 1);",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+}
+
 async fn state<A: Authorizer>(
     dir: &TempDir,
     collab: CollabConfig,
     socket: SocketConfig,
     authorizer: A,
 ) -> AppState<FlakyStore, A> {
-    let inner = SqliteStore::open(&dir.path().join("cadocs.db"))
-        .await
-        .unwrap();
+    let path = dir.path().join("cadocs.db");
+    let inner = SqliteStore::open(&path).await.unwrap();
+    seed(&inner, &path).await;
     let store = Arc::new(FlakyStore {
         inner,
         fail_writes: Arc::default(),
         fail_ping: Arc::default(),
+        hold_load: Arc::default(),
+        load_entered: Arc::default(),
+        release_load: Arc::default(),
     });
     let registry = DocRegistry::new(store.clone(), collab);
     AppState::new(registry, store, Arc::new(authorizer), socket, http())
@@ -516,12 +582,17 @@ struct Running {
 }
 
 impl Running {
-    fn url(&self, doc: &str) -> String {
-        format!("ws://{}/ws/{doc}", self.addr)
+    /// The request of a logged-in client.
+    fn request(&self, doc: &str) -> WsRequest {
+        let url = format!("ws://{}/ws/pages/{doc}", self.addr);
+        let mut request = url.into_client_request().unwrap();
+        let cookie = format!("session={TOKEN}").parse().unwrap();
+        request.headers_mut().insert(header::COOKIE, cookie);
+        request
     }
 
     async fn client(&self, doc: &str) -> Client {
-        connect_async(self.url(doc)).await.unwrap().0
+        connect_async(self.request(doc)).await.unwrap().0
     }
 
     async fn stop(self) {
@@ -545,7 +616,7 @@ async fn start<A: Authorizer>(state: AppState<FlakyStore, A>) -> Running {
 }
 
 async fn start_default(dir: &TempDir) -> Running {
-    start(state(dir, collab(), SocketConfig::default(), Permissive).await).await
+    start(state(dir, collab(), SocketConfig::default(), WRITER).await).await
 }
 
 async fn get<A: Authorizer>(
@@ -628,14 +699,14 @@ async fn refused_status(request: impl IntoClientRequest + Unpin) -> StatusCode {
 #[tokio::test]
 async fn health_is_ok_on_a_working_server() {
     let dir = TempDir::new().unwrap();
-    let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
     assert_eq!(get(state, "/health").await.status(), StatusCode::OK);
 }
 
 #[tokio::test]
 async fn health_fails_when_the_database_does_not_answer() {
     let dir = TempDir::new().unwrap();
-    let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
     state.store.fail_ping.store(true, Ordering::SeqCst);
     assert_eq!(
         get(state, "/health").await.status(),
@@ -644,34 +715,24 @@ async fn health_fails_when_the_database_does_not_answer() {
 }
 
 /// A session in the database of `state`, and the cookie that opens it.
-async fn open_session(state: &AppState<FlakyStore, Permissive>, last_seen_at: i64) -> String {
-    let user = FirstUser {
-        id: "user".to_owned(),
-        email: "ada@example.org".to_owned(),
-        name: "Ada".to_owned(),
-        password_hash: "unused".to_owned(),
-        workspace_id: "workspace".to_owned(),
-        workspace_slug: "workspace".to_owned(),
-        workspace_name: "Workspace".to_owned(),
-    };
+async fn open_session(state: &AppState<FlakyStore, Fixed>, last_seen_at: i64) -> String {
     let session = NewSession {
-        token_hash: token_hash("token"),
-        user_id: user.id.clone(),
+        token_hash: token_hash("other"),
+        user_id: "user".to_owned(),
         now: last_seen_at,
         expires_at: i64::MAX,
     };
-    state
-        .store
-        .create_first_user(&user, &session)
-        .await
-        .unwrap();
-    "session=token".to_owned()
+    assert!(
+        state
+            .store
+            .create_session(&session, "unused")
+            .await
+            .unwrap()
+    );
+    "session=other".to_owned()
 }
 
-async fn get_session(
-    state: AppState<FlakyStore, Permissive>,
-    cookie: &str,
-) -> axum::response::Response {
+async fn get_session(state: AppState<FlakyStore, Fixed>, cookie: &str) -> axum::response::Response {
     let request = Request::get("/api/v1/session")
         .header(header::COOKIE, cookie)
         .body(Body::empty())
@@ -685,7 +746,7 @@ async fn get_session(
 #[tokio::test]
 async fn a_failing_database_is_not_a_logout() {
     let dir = TempDir::new().unwrap();
-    let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
     let cookie = open_session(&state, now_ms()).await;
     state.store.fail_ping.store(true, Ordering::SeqCst);
 
@@ -697,7 +758,7 @@ async fn a_failing_database_is_not_a_logout() {
 #[tokio::test]
 async fn a_session_that_cannot_be_extended_still_works() {
     let dir = TempDir::new().unwrap();
-    let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
     let cookie = open_session(&state, 0).await;
     state.store.fail_writes.store(true, Ordering::SeqCst);
 
@@ -727,7 +788,7 @@ async fn sqlite_ping_reads_the_database() {
 #[tokio::test]
 async fn health_fails_while_flushes_fail() {
     let dir = TempDir::new().unwrap();
-    let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
     state.store.fail_writes.store(true, Ordering::SeqCst);
     let server = start(state.clone()).await;
     let mut client = server.client("doc").await;
@@ -754,7 +815,7 @@ async fn health_fails_while_flushes_fail() {
 #[tokio::test]
 async fn the_root_serves_the_page_with_its_security_headers() {
     let dir = TempDir::new().unwrap();
-    let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
     let response = get(state, "/").await;
     assert_eq!(response.status(), StatusCode::OK);
     let headers = response.headers();
@@ -772,8 +833,14 @@ async fn the_root_serves_the_page_with_its_security_headers() {
 #[tokio::test]
 async fn every_kind_of_response_has_the_security_headers() {
     let dir = TempDir::new().unwrap();
-    for path in ["/", "/missing.js", "/health", "/api/v1/missing", "/ws/doc"] {
-        let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+    for path in [
+        "/",
+        "/missing.js",
+        "/health",
+        "/api/v1/missing",
+        "/ws/pages/doc",
+    ] {
+        let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
         let response = get(state, path).await;
         let headers = response.headers();
         assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{path}");
@@ -813,7 +880,7 @@ async fn a_handler_keeps_its_own_security_policy() {
 async fn unknown_api_routes_answer_in_the_error_shape() {
     let dir = TempDir::new().unwrap();
     for path in ["/api/v1/missing", "/api/v1/a/b", "/api/v1/", "/api/v1"] {
-        let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+        let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
         let response = get(state, path).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
         assert_eq!(
@@ -833,7 +900,7 @@ async fn unknown_api_routes_answer_in_the_error_shape() {
 async fn a_foreign_origin_gets_a_403_from_the_api() {
     let dir = TempDir::new().unwrap();
     let app =
-        router::<_, _, Fixtures>(state(&dir, collab(), SocketConfig::default(), Permissive).await);
+        router::<_, _, Fixtures>(state(&dir, collab(), SocketConfig::default(), WRITER).await);
     let request = |origin: &str| {
         Request::post("/api/v1/missing")
             .header(header::ORIGIN, origin)
@@ -921,7 +988,7 @@ async fn a_client_cannot_dodge_the_limit_with_a_forged_header() {
 #[tokio::test]
 async fn hashed_assets_are_cached_for_good() {
     let dir = TempDir::new().unwrap();
-    let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
 
     let script = get(state.clone(), "/assets/app-abc123.js").await;
     assert_eq!(script.status(), StatusCode::OK);
@@ -941,7 +1008,7 @@ async fn hashed_assets_are_cached_for_good() {
 #[tokio::test]
 async fn unknown_paths_and_methods_are_refused() {
     let dir = TempDir::new().unwrap();
-    let state = state(&dir, collab(), SocketConfig::default(), Permissive).await;
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
     assert_eq!(
         get(state.clone(), "/missing.js").await.status(),
         StatusCode::NOT_FOUND
@@ -977,7 +1044,7 @@ async fn edits_survive_a_server_restart() {
         flush_interval: Duration::from_secs(3600),
         ..collab()
     };
-    let server = start(state(&dir, collab, SocketConfig::default(), Permissive).await).await;
+    let server = start(state(&dir, collab, SocketConfig::default(), WRITER).await).await;
     let mut client = server.client("doc").await;
     client
         .send(Message::binary(update_frame("kept")))
@@ -1079,7 +1146,7 @@ async fn a_frame_over_the_limit_closes_the_socket_with_1009() {
         max_frame_bytes: 1024,
         ..collab()
     };
-    let server = start(state(&dir, collab, SocketConfig::default(), Permissive).await).await;
+    let server = start(state(&dir, collab, SocketConfig::default(), WRITER).await).await;
 
     // Just past the limit, and far past it: both must end the same way.
     for size in [1025, 1024 * 1024] {
@@ -1101,10 +1168,10 @@ async fn sockets_past_the_limit_get_503_before_the_upgrade() {
         max_sockets: 1,
         ..collab()
     };
-    let server = start(state(&dir, collab, SocketConfig::default(), Permissive).await).await;
+    let server = start(state(&dir, collab, SocketConfig::default(), WRITER).await).await;
     let _client = server.client("doc").await;
     assert_eq!(
-        refused_status(server.url("doc")).await,
+        refused_status(server.request("doc")).await,
         StatusCode::SERVICE_UNAVAILABLE
     );
     server.stop().await;
@@ -1115,28 +1182,28 @@ async fn only_the_public_origin_can_open_a_socket() {
     let dir = TempDir::new().unwrap();
     let server = start_default(&dir).await;
 
-    let mut foreign = server.url("doc").into_client_request().unwrap();
+    let mut foreign = server.request("doc");
     foreign
         .headers_mut()
         .insert(header::ORIGIN, "https://evil.example".parse().unwrap());
     assert_eq!(refused_status(foreign).await, StatusCode::FORBIDDEN);
 
     // DNS rebinding: a hostile name pointed at this server, so Origin and Host agree.
-    let mut rebound = server.url("doc").into_client_request().unwrap();
+    let mut rebound = server.request("doc");
     let headers = rebound.headers_mut();
     headers.insert(header::ORIGIN, "http://evil.example".parse().unwrap());
     headers.insert(header::HOST, "evil.example".parse().unwrap());
     assert_eq!(refused_status(rebound).await, StatusCode::FORBIDDEN);
 
     // Matching `Host` no longer means anything.
-    let mut same_host = server.url("doc").into_client_request().unwrap();
+    let mut same_host = server.request("doc");
     let origin = format!("http://{}", server.addr);
     same_host
         .headers_mut()
         .insert(header::ORIGIN, origin.parse().unwrap());
     assert_eq!(refused_status(same_host).await, StatusCode::FORBIDDEN);
 
-    let mut public = server.url("doc").into_client_request().unwrap();
+    let mut public = server.request("doc");
     public
         .headers_mut()
         .insert(header::ORIGIN, PUBLIC_ORIGIN.parse().unwrap());
@@ -1144,26 +1211,42 @@ async fn only_the_public_origin_can_open_a_socket() {
         .await
         .expect("the public origin is allowed");
 
-    connect_async(server.url("doc"))
+    connect_async(server.request("doc"))
         .await
         .expect("a client outside a browser sends no origin");
 
     server.stop().await;
 }
 
+/// Opening a room can take long: what the role allowed before must not decide after.
 #[tokio::test]
-async fn an_invalid_document_id_is_not_found() {
+async fn a_rename_that_waits_for_its_room_checks_the_role_again() {
     let dir = TempDir::new().unwrap();
-    let server = start_default(&dir).await;
-    let long = "a".repeat(65);
-    for doc in ["bad%20id", "bad.id", long.as_str()] {
-        assert_eq!(
-            refused_status(server.url(doc)).await,
-            StatusCode::NOT_FOUND,
-            "{doc}"
-        );
-    }
-    server.stop().await;
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
+    let store = state.store.clone();
+    let registry = state.registry.clone();
+    store.hold_load.store(true, Ordering::SeqCst);
+    let request = Request::patch("/api/v1/pages/doc")
+        .header(header::COOKIE, format!("session={TOKEN}"))
+        .header("x-csrf-token", csrf_token(TOKEN))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"title":"Too late"}"#))
+        .unwrap();
+    let rename = tokio::spawn(router::<_, _, Fixtures>(state).oneshot(request));
+
+    store.load_entered.notified().await;
+    store
+        .inner
+        .trash_page("doc", "user", now_ms())
+        .await
+        .unwrap();
+    store.hold_load.store(false, Ordering::SeqCst);
+    store.release_load.notify_one();
+
+    let response = rename.await.unwrap().unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    registry.shutdown().await.unwrap();
+    assert!(store.inner.load("doc").await.unwrap().updates.is_empty());
 }
 
 #[tokio::test]
@@ -1172,7 +1255,7 @@ async fn a_refused_document_is_not_found() {
     let state = state(&dir, collab(), SocketConfig::default(), Fixed(None)).await;
     let server = start(state).await;
     assert_eq!(
-        refused_status(server.url("doc")).await,
+        refused_status(server.request("doc")).await,
         StatusCode::NOT_FOUND
     );
     server.stop().await;
@@ -1210,7 +1293,7 @@ async fn the_server_pings_and_a_silent_client_is_closed() {
         ping: Duration::from_millis(50),
         ping_timeout: Duration::from_millis(200),
     };
-    let server = start(state(&dir, collab(), socket, Permissive).await).await;
+    let server = start(state(&dir, collab(), socket, WRITER).await).await;
     let mut client = server.client("doc").await;
 
     // Not polling the client means no pong goes out, so the server hears silence.
@@ -1241,7 +1324,7 @@ async fn a_client_that_answers_pings_stays_connected() {
         ping: Duration::from_millis(20),
         ping_timeout: Duration::from_millis(100),
     };
-    let server = start(state(&dir, collab(), socket, Permissive).await).await;
+    let server = start(state(&dir, collab(), socket, WRITER).await).await;
     let mut client = server.client("doc").await;
 
     // Reading is what makes tungstenite answer the pings.

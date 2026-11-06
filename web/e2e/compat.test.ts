@@ -14,9 +14,9 @@ const Y_WEBSOCKET_SILENCE_MS = 30_000;
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-async function until(check: () => boolean, what: string, ms = 8_000) {
+async function until(check: () => boolean | Promise<boolean>, what: string, ms = 8_000) {
   const deadline = Date.now() + ms;
-  while (!check()) {
+  while (!(await check())) {
     if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
     await sleep(10);
   }
@@ -28,9 +28,12 @@ async function startServer(t: TestContext, env: Record<string, string> = {}) {
   return server;
 }
 
-function connect(t: TestContext, server: TestServer, room: string) {
+async function connect(t: TestContext, server: TestServer, room: string) {
   const doc = new Y.Doc();
-  const provider = new WebsocketProvider(server.wsUrl, room, doc, { disableBc: true });
+  const provider = new WebsocketProvider(server.wsUrl, await server.page(room), doc, {
+    disableBc: true,
+    WebSocketPolyfill: await server.webSocketClass(),
+  });
   t.after(() => {
     provider.destroy();
     doc.destroy();
@@ -39,7 +42,7 @@ function connect(t: TestContext, server: TestServer, room: string) {
 }
 
 async function connected(t: TestContext, server: TestServer, room: string) {
-  const client = connect(t, server, room);
+  const client = await connect(t, server, room);
   await until(() => client.provider.synced, "the first sync");
   return client;
 }
@@ -78,6 +81,37 @@ describe("yjs and y-websocket compatibility", { concurrency: true }, () => {
       content(left.doc).body,
       '<paragraph align="left">from right</paragraph>',
     );
+  });
+
+  test("a rename reaches yjs intact, whatever the title holds", async (t) => {
+    const server = await startServer(t, { CADOCS_FLUSH_INTERVAL_MS: "20" });
+    const left = await connected(t, server, "accents");
+    const right = await connected(t, server, "accents");
+    const title = left.doc.getText("title");
+    const read = (client: { doc: Y.Doc }) => client.doc.getText("title").toString();
+
+    // Two UTF-16 units for the emoji, one for `é`, and more bytes than either in the server.
+    title.insert(0, "été 🐢 🚀");
+    await until(() => read(right) === "été 🐢 🚀", "the first title");
+
+    await server.rename("accents", "Nouvel été 🌻");
+    await until(() => read(left) === "Nouvel été 🌻", "the rename, on one side");
+    await until(() => read(right) === "Nouvel été 🌻", "the rename, on the other");
+
+    // Offsets after the rename must still mean the same thing on both sides.
+    title.insert(title.length, " fin");
+    right.doc.getText("title").insert(6, " bel");
+    await until(() => sameContent(left.doc, right.doc), "both edits");
+    assert.equal(read(left), "Nouvel bel été 🌻 fin");
+
+    await server.rename("accents", "ñ");
+    await until(() => read(right) === "ñ", "a shorter title");
+    await until(
+      async () => (await server.pageRow("accents")).title === "ñ",
+      "the copy in the page",
+    );
+    const late = await connected(t, server, "accents");
+    assert.equal(read(late), "ñ");
   });
 
   test("rooms do not leak into each other", async (t) => {
@@ -181,7 +215,7 @@ describe("yjs and y-websocket compatibility", { concurrency: true }, () => {
     writer.doc.getXmlFragment("default").insert(0, [paragraph("kept")]);
     // Seen by another client means it is in the room, and the long interval means it is not flushed.
     await until(() => sameContent(writer.doc, witness.doc), "the relay");
-    assert.equal(storedRows(server, "clean-stop").updates, 0);
+    assert.equal((await storedRows(server, "clean-stop")).updates, 0);
 
     await server.stop("SIGTERM");
     // Otherwise they would hand the document back, and the disk would prove nothing.
@@ -214,7 +248,7 @@ describe("yjs and y-websocket compatibility", { concurrency: true }, () => {
     const witness = await connected(t, server, "crash");
     writer.doc.getText("title").insert(0, "never flushed");
     await until(() => sameContent(writer.doc, witness.doc), "the relay");
-    assert.equal(storedRows(server, "crash").updates, 0);
+    assert.equal((await storedRows(server, "crash")).updates, 0);
 
     await server.restart("SIGKILL");
 
@@ -228,7 +262,7 @@ describe("yjs and y-websocket compatibility", { concurrency: true }, () => {
     const server = await startServer(t, { CADOCS_FLUSH_INTERVAL_MS: "20" });
     const writer = await connected(t, server, "flushed");
     writer.doc.getText("title").insert(0, "on disk");
-    await until(() => storedRows(server, "flushed").updates > 0, "the flush");
+    await until(async () => (await storedRows(server, "flushed")).updates > 0, "the flush");
     writer.provider.destroy();
 
     await server.restart("SIGKILL");
@@ -252,14 +286,14 @@ describe("yjs and y-websocket compatibility", { concurrency: true }, () => {
       if (index % 3 === 2) body.delete(0);
       await sleep(40);
     }
-    await until(() => storedRows(server, "compacted").snapshots === 1, "the compaction");
+    await until(async () => (await storedRows(server, "compacted")).snapshots === 1, "the compaction");
     title.insert(0, "last ");
-    await until(() => storedRows(server, "compacted").updates > 0, "the last flush");
+    await until(async () => (await storedRows(server, "compacted")).updates > 0, "the last flush");
     const expected = content(writer.doc);
     writer.provider.destroy();
 
     // Unloading compacts, and nothing else would with no edit coming.
-    await until(() => storedRows(server, "compacted").updates === 0, "the unload");
+    await until(async () => (await storedRows(server, "compacted")).updates === 0, "the unload");
     const reloaded = await connected(t, server, "compacted");
     assert.deepEqual(content(reloaded.doc), expected);
     reloaded.provider.destroy();
@@ -270,11 +304,12 @@ describe("yjs and y-websocket compatibility", { concurrency: true }, () => {
   });
 });
 
-function storedRows(server: TestServer, doc: string) {
+async function storedRows(server: TestServer, name: string) {
+  const page = await server.page(name);
   const database = new DatabaseSync(server.database, { readOnly: true });
   try {
     const count = (table: string) =>
-      database.prepare(`SELECT count(*) AS rows FROM ${table} WHERE doc_id = ?`).get(doc)
+      database.prepare(`SELECT count(*) AS rows FROM ${table} WHERE page_id = ?`).get(page)
         ?.rows as number;
     return { updates: count("doc_updates"), snapshots: count("doc_snapshots") };
   } finally {

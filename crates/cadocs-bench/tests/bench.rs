@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use cadocs_bench::document::{EDITS, body_text, generate};
 use cadocs_bench::load::{LoadConfig, LoadReport, peers, run};
-use cadocs_bench::seed::{COMPACT_UPDATES, doc_id, seed};
-use cadocs_collab::{CollabConfig, DocRegistry, Permissive};
+use cadocs_bench::seed::{COMPACT_UPDATES, SESSION_TOKEN, SESSION_TOKEN_HASH, doc_id, seed};
+use cadocs_collab::{CollabConfig, DocRegistry, PageAuthorizer};
 use cadocs_server::client_ip::TrustedProxies;
 use cadocs_server::config::{HttpConfig, PublicUrl, SocketConfig};
+use cadocs_server::session::token_hash;
 use cadocs_server::{AppState, serve};
 use cadocs_store::{DocStore, SqliteStore};
 use rust_embed::Embed;
@@ -127,7 +128,7 @@ async fn start(dir: &TempDir) -> Server {
     let state = AppState::new(
         registry,
         store.clone(),
-        Arc::new(Permissive),
+        Arc::new(PageAuthorizer::new(store.clone())),
         SocketConfig::default(),
         HttpConfig {
             public_url: PublicUrl::parse("http://127.0.0.1:3000").unwrap(),
@@ -279,6 +280,11 @@ fn a_run_short_of_the_scenario_is_refused() {
         ..full
     };
     assert!(few.check(&config).is_err(), "a client is missing");
+}
+
+#[test]
+fn the_seeded_session_opens_with_its_token() {
+    assert_eq!(token_hash(SESSION_TOKEN), SESSION_TOKEN_HASH);
 }
 
 #[test]

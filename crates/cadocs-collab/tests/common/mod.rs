@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use cadocs_collab::{CollabConfig, Connection, DocRegistry, Outbound};
 use cadocs_core::permissions::SocketMode;
-use cadocs_store::{DocStore, Snapshot, StoreError, StoredDoc, StoredUpdate};
+use cadocs_store::{DocEdit, DocStore, Snapshot, StoreError, StoredDoc, StoredUpdate};
 use tokio::sync::Notify;
 use tokio::time::timeout;
 use yrs::sync::{Awareness, Message, SyncMessage};
@@ -18,6 +18,7 @@ use yrs::updates::encoder::Encode;
 use yrs::{Doc, GetString, Map, ReadTxn, StateVector, Text, TextPrelim, Transact, Update};
 
 pub const DOC: &str = "doc";
+pub const AUTHOR: &str = "ada";
 
 /// Pauses a store call until it is released, so a test can act in the middle of it.
 #[derive(Default)]
@@ -60,7 +61,11 @@ pub struct Stats {
 #[derive(Default)]
 pub struct MemStore {
     docs: Mutex<HashMap<String, StoredDoc>>,
+    /// The edit of each flush that stored something, in order.
+    edits: Mutex<Vec<DocEdit>>,
     stats: Mutex<Stats>,
+    /// The page of every document is gone.
+    pub page_gone: AtomicBool,
     pub fail_load: AtomicBool,
     pub fail_append: AtomicBool,
     /// Appends that fail before the store recovers.
@@ -87,6 +92,10 @@ impl MemStore {
             .get(doc_id)
             .cloned()
             .unwrap_or_default()
+    }
+
+    pub fn edits(&self) -> Vec<DocEdit> {
+        self.edits.lock().unwrap().clone()
     }
 
     pub fn loads(&self) -> usize {
@@ -120,9 +129,13 @@ impl DocStore for MemStore {
         &self,
         doc_id: &str,
         updates: &[StoredUpdate],
+        edit: &DocEdit,
     ) -> Result<(), StoreError> {
         self.stats.lock().unwrap().appends += 1;
         self.append_gate.pass().await;
+        if self.page_gone.load(Ordering::SeqCst) {
+            return Err(StoreError::PageNotFound);
+        }
         let once = self
             .fail_next_appends
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
@@ -144,12 +157,16 @@ impl DocStore for MemStore {
                 doc.updates.push(update.clone());
             }
         }
+        self.edits.lock().unwrap().push(edit.clone());
         Ok(())
     }
 
     async fn compact(&self, doc_id: &str, snapshot: &Snapshot) -> Result<(), StoreError> {
         self.stats.lock().unwrap().compacts += 1;
         self.compact_gate.pass().await;
+        if self.page_gone.load(Ordering::SeqCst) {
+            return Err(StoreError::PageNotFound);
+        }
         if self.fail_compact.load(Ordering::SeqCst) {
             return Err(failure());
         }
@@ -258,7 +275,7 @@ impl Peer {
 
     /// Joins and completes the y-sync handshake.
     pub async fn join<S: DocStore>(registry: &DocRegistry<S>, mode: SocketMode) -> Self {
-        let conn = registry.connect(DOC, mode).await.unwrap();
+        let conn = registry.connect(DOC, mode, AUTHOR).await.unwrap();
         let mut peer = Self::new(conn);
         peer.sync().await;
         peer

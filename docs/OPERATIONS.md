@@ -105,6 +105,7 @@ Restoring on a stopped server replaces the data folder. Browsers still open on o
 | --- | --- |
 | Flush fails (disk full, I/O error) | Updates stay in the room queue and the flush retries with backoff. `/health` returns `503`. See below |
 | Room queue full while flushes fail | The room stops accepting updates and closes its write sockets with `1013`. Clients keep their edits and resend them when they reconnect |
+| Page deleted under a live room | The next flush drops the room's edits and closes its sockets with `4404`. `/health` stays `200` |
 | Upload hits a full disk | The upload fails with `500`, its temporary file is removed, and nothing is recorded |
 | Job fails | Retried with backoff, then kept as `failed` for inspection |
 | Second instance on the same folder | Refuses to start, because of the lock |

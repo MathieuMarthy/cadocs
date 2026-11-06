@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 
 const STARTUP_MS = 10_000;
 const STOP_MS = 15_000;
+const PASSWORD = "correct horse battery";
 
 function binary() {
   const path = process.env.CADOCS_BIN
@@ -32,6 +33,12 @@ function freePort() {
   });
 }
 
+interface Login {
+  token: string;
+  csrf: string;
+  spaceId: string;
+}
+
 /** The real binary on its own data folder and port. */
 export class TestServer {
   readonly dataDir: string;
@@ -39,6 +46,9 @@ export class TestServer {
   private readonly env: Record<string, string>;
   private child: ChildProcess | null = null;
   private log = "";
+  private login: Promise<Login> | null = null;
+  /** Page ids by the names the tests use. */
+  private readonly pages = new Map<string, Promise<string>>();
 
   private constructor(port: number, env: Record<string, string>) {
     this.port = port;
@@ -62,11 +72,96 @@ export class TestServer {
   }
 
   get wsUrl() {
-    return `ws://127.0.0.1:${this.port}/ws`;
+    return `ws://127.0.0.1:${this.port}/ws/pages`;
   }
 
   get database() {
     return join(this.dataDir, "cadocs.db");
+  }
+
+  private async post(path: string, body: unknown, headers: Record<string, string> = {}) {
+    const response = await fetch(`${this.url}/api/v1${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
+    return response;
+  }
+
+  /** First run, then a space to put pages in. Every client of a test uses this one account. */
+  private async setUp(): Promise<Login> {
+    const response = await this.post("/auth/setup", {
+      email: "ada@example.org",
+      name: "Ada",
+      password: PASSWORD,
+      workspace_name: "Tests",
+    });
+    const token = /^session=([^;]*)/.exec(response.headers.getSetCookie()[0] ?? "")?.[1];
+    if (!token) throw new Error("no session cookie");
+    const session = await response.json();
+    const headers = { cookie: `session=${token}`, "x-csrf-token": session.csrf_token };
+    const path = `/workspaces/${session.workspaces[0].id}/spaces`;
+    const space = await this.post(path, { name: "Pages" }, headers);
+    return { token, csrf: session.csrf_token, spaceId: (await space.json()).id };
+  }
+
+  async session() {
+    this.login ??= this.setUp();
+    return this.login;
+  }
+
+  private async createPage() {
+    const { token, csrf, spaceId } = await this.session();
+    const headers = { cookie: `session=${token}`, "x-csrf-token": csrf };
+    const response = await this.post(`/spaces/${spaceId}/pages`, {}, headers);
+    return (await response.json()).id as string;
+  }
+
+  /** The id of the page a test calls `name`, created the first time. */
+  async page(name: string) {
+    let id = this.pages.get(name);
+    if (!id) {
+      id = this.createPage();
+      this.pages.set(name, id);
+    }
+    return id;
+  }
+
+  /** The `WebSocket` of a logged-in client outside a browser: a browser sends the cookie itself. */
+  async webSocketClass(): Promise<typeof WebSocket> {
+    const { token } = await this.session();
+    return class extends WebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        const options = { protocols, headers: { cookie: `session=${token}` } };
+        super(url, options as unknown as string[]);
+      }
+    };
+  }
+
+  /** Reads a page over REST. */
+  async pageRow(name: string) {
+    const { token } = await this.session();
+    const response = await fetch(`${this.url}/api/v1/pages/${await this.page(name)}`, {
+      headers: { cookie: `session=${token}` },
+    });
+    if (!response.ok) throw new Error(`page ${name}: ${response.status}`);
+    return response.json();
+  }
+
+  /** Changes a page's title over REST. */
+  async rename(name: string, title: string) {
+    const { token, csrf } = await this.session();
+    const response = await fetch(`${this.url}/api/v1/pages/${await this.page(name)}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        cookie: `session=${token}`,
+        "x-csrf-token": csrf,
+      },
+      body: JSON.stringify({ title }),
+    });
+    if (!response.ok) throw new Error(`rename ${name}: ${response.status}`);
   }
 
   async run() {

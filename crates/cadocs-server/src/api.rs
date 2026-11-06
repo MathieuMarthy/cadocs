@@ -22,7 +22,7 @@ use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
-use cadocs_collab::Authorizer;
+use cadocs_collab::{Authorizer, CollabError};
 use cadocs_store::{AccountStore, DocStore, PageStore, SpaceStore, StoreError, WorkspaceStore};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -149,6 +149,21 @@ impl ApiError {
     pub fn internal(cause: impl Display) -> Self {
         tracing::error!(%cause, "request failed");
         Self::new(ErrorCode::Internal)
+    }
+}
+
+impl From<CollabError> for ApiError {
+    fn from(error: CollabError) -> Self {
+        match error {
+            CollabError::CorruptDocument { .. } => {
+                tracing::error!(%error, "cannot open a document");
+                ApiError::new(ErrorCode::Internal)
+            }
+            CollabError::Store(_)
+            | CollabError::AtCapacity
+            | CollabError::ShuttingDown
+            | CollabError::StorageFailing => ApiError::new(ErrorCode::Unavailable),
+        }
     }
 }
 
@@ -388,7 +403,7 @@ async fn method_not_allowed() -> ApiError {
     ApiError::new(ErrorCode::MethodNotAllowed)
 }
 
-async fn check_origin(
+pub(crate) async fn check_origin(
     State(http): State<Arc<HttpConfig>>,
     request: Request,
     next: Next,

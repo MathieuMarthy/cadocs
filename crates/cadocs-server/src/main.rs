@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use cadocs_collab::{DocRegistry, Permissive};
+use cadocs_collab::{DocRegistry, PageAuthorizer};
 use cadocs_server::api::auth::normalize_email;
 use cadocs_server::assets::WebAssets;
 use cadocs_server::cli::{self, Command};
@@ -80,8 +80,8 @@ async fn run(config: Config) -> anyhow::Result<()> {
     let registry = DocRegistry::new(store.clone(), config.collab.clone());
     let state = AppState::new(
         registry.clone(),
-        store,
-        Arc::new(Permissive),
+        store.clone(),
+        Arc::new(PageAuthorizer::new(store)),
         config.socket,
         config.http,
     );
