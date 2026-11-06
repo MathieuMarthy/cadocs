@@ -23,8 +23,9 @@ Starting a session:
 
 Ending a session:
 1. Tests and clippy pass, or the failure is reported as is.
-2. Check the step in `docs/ROADMAP.md`. Anything learned that changes the design goes into `docs/` or an ADR. Anything later steps must know goes into Notes below.
-3. Summarize what was done and what comes next, then stop.
+2. Get an independent review of the step's code, from a reviewer that did not write it and starts without the session's context (the `code-review` skill or a fresh subagent). Fix what it confirms, with a failing test first, and report what is left open.
+3. Check the step in `docs/ROADMAP.md`. Anything learned that changes the design goes into `docs/` or an ADR. Anything later steps must know goes into Notes below.
+4. Summarize what was done and what comes next, then stop.
 
 Other rules:
 - **Tests first.** Write the failing test, watch it fail, implement, watch it pass.
@@ -47,4 +48,7 @@ Other rules:
 - **yrs 0.28:** `yrs::sync` has `Awareness`, `Message`, `SyncMessage`, `MessageReader`, `DefaultProtocol` and the `Protocol` trait. Filter around `Protocol::handle_message` to reject `SyncStep2` and `Update` in read-only mode. `Doc` is `Send + Sync`. Enable the `sync` feature if the async or observer APIs require it.
 - **y-websocket** appends `/<room>` to the server URL, and reconnects whatever the close code.
 - **Yjs document layout:** root types `title` (`Y.Text`) and `default` (`XmlFragment`, TipTap's default field). See `docs/DATA_MODEL.md`.
+- **Store:** `DocStore` (`cadocs-store`) uses native `impl Future + Send` methods, so collab is generic over it instead of using `dyn`. The room assigns `seq`, starting from `StoredDoc::last_seq() + 1`. `compact` refuses a snapshot older than the stored one with `StoreError::StaleSnapshot`. `append_updates` can be replayed after a lost commit, and returns `StoreError::SeqConflict` for a `seq` the snapshot covers or that holds other data. A room must flush its queue before it compacts. `SqliteStore::open` takes the database file path, and its parent folder must exist. There is no in-memory store or `close()` yet. `StoreError` wraps `sqlx::Error`, so a failure-injecting test store can return `sqlx::Error::PoolTimedOut`.
+- **Permissions:** `cadocs-core::permissions` covers the matrix, the special cases and the recompute of page sockets. The `4401` closes and the recompute of events sockets are not there yet: they come with sessions in the MVP. `would_remove_last_instance_admin` is a separate check, so MVP handlers must call it before disabling, deleting or demoting a user, or fold it into the actions as `last_owner` is. `Authorizer` does not exist yet, it belongs to step 2.
+- **Store load:** `load` holds a document's whole update log in memory. Step 5 measures this peak before anything changes (streaming would alter the `DocStore` trait).
 - **Benchmark:** the scenario and go or no-go rule in `docs/ARCHITECTURE.md` are fixed. Do not change them to make a number pass.

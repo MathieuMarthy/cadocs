@@ -1,0 +1,79 @@
+//! Store traits and their SQLite implementation (ADR 0002).
+
+mod sqlite;
+
+use std::future::Future;
+
+pub use sqlite::SqliteStore;
+
+#[derive(Debug, thiserror::Error)]
+pub enum StoreError {
+    #[error("database error: {0}")]
+    Database(#[from] sqlx::Error),
+    #[error("migration error: {0}")]
+    Migration(#[from] sqlx::migrate::MigrateError),
+    #[error("seq {seq} of {doc_id} is covered by a snapshot, or holds other data")]
+    SeqConflict { doc_id: String, seq: i64 },
+    #[error("snapshot of {doc_id} covers seq {stored}, refusing an older one at {offered}")]
+    StaleSnapshot {
+        doc_id: String,
+        stored: i64,
+        offered: i64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Snapshot {
+    /// Yjs update v1 holding the full document.
+    pub state: Vec<u8>,
+    /// Last `seq` this state includes.
+    pub upto_seq: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredUpdate {
+    pub seq: i64,
+    /// Yjs update v1.
+    pub data: Vec<u8>,
+}
+
+/// Everything needed to rebuild a document: apply `snapshot`, then `updates` in order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StoredDoc {
+    pub snapshot: Option<Snapshot>,
+    /// Only the updates the snapshot does not cover, by ascending `seq`.
+    pub updates: Vec<StoredUpdate>,
+}
+
+impl StoredDoc {
+    /// The highest `seq` in use, 0 for an empty document. It keeps growing after compaction.
+    pub fn last_seq(&self) -> i64 {
+        let compacted = self.snapshot.as_ref().map_or(0, |s| s.upto_seq);
+        self.updates.last().map_or(compacted, |u| u.seq)
+    }
+}
+
+/// Persistence of Yjs documents. `cadocs-collab` only knows this trait.
+pub trait DocStore: Send + Sync + 'static {
+    /// Reads a document as of one point in time, so a concurrent compaction cannot hide updates.
+    fn load(&self, doc_id: &str) -> impl Future<Output = Result<StoredDoc, StoreError>> + Send;
+
+    /// Appends a batch in one transaction: either every update is stored, or none is. Replaying
+    /// a batch that was already stored succeeds, so a flush can retry after a lost commit. A `seq`
+    /// below 1, covered by the snapshot, or stored with other data is a `SeqConflict`: `load`
+    /// would never return that update, so it must not pass for durable.
+    fn append_updates(
+        &self,
+        doc_id: &str,
+        updates: &[StoredUpdate],
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Writes the snapshot and deletes the updates it covers, in one transaction. Updates after
+    /// `snapshot.upto_seq` stay. A snapshot older than the stored one is refused, because the
+    /// updates it would need are already gone.
+    fn compact(
+        &self,
+        doc_id: &str,
+        snapshot: &Snapshot,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+}

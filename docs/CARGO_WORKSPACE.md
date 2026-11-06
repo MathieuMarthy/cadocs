@@ -35,7 +35,7 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `tokio` | Async runtime, required by axum and sqlx. Features limited to what is used | Low, set by worker count | Medium |
 | `axum` (`ws` feature, `multipart` from the MVP) | Same stack as uptime-monitoring. Thin layer over hyper | Low | Medium |
 | `yrs` | Yjs port, the core of ADR 0003. Includes sync and awareness | Scales with loaded documents | Medium |
-| `sqlx` (`sqlite`, `runtime-tokio`, `migrate`) | Async SQLite with embedded migrations, path to PostgreSQL | Each connection has a thread and a page cache, bounded by pool size | Medium, bundled SQLite included |
+| `sqlx` (`sqlite`, `runtime-tokio`, `migrate`, `macros` for `migrate!`, no default features) | Async SQLite with embedded migrations, path to PostgreSQL | Each connection has a thread and a page cache, bounded by pool size | Medium, bundled SQLite included |
 | `rust-embed` | Static front end in the binary, as in uptime-monitoring | None until served (file-backed) | Size of the assets |
 | `tracing`, `tracing-subscriber` (`env-filter`) | Structured logs | Low | Low |
 | `thiserror` | Typed errors in the library crates | None | None |
