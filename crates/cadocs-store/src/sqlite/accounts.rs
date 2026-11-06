@@ -1,18 +1,68 @@
 use cadocs_core::permissions::{
     WorkspaceRole, would_remove_last_instance_admin, would_remove_last_owner,
 };
-use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
+use sqlx::{AssertSqlSafe, Row, SqliteConnection};
 
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
-    AccountStore, ActiveSession, Credentials, FirstUser, Membership, NewSession, StoreError,
-    UpdateBasis, User, UserChanges,
+    AccountStore, ActiveSession, AdminChanges, Credentials, FirstUser, Membership,
+    NewPasswordReset, NewSession, StoreError, UpdateBasis, User, UserChanges, UserRecord,
 };
 
 const INSERT_SESSION: &str =
     "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at)
      VALUES (?1, ?2, ?3, ?3, ?4)";
+
+const DELETE_RESETS: &str = "DELETE FROM password_resets WHERE user_id = ?1";
+
+/// The links an admin made outlive neither their role nor their account: each one can take over
+/// another account, possibly another admin's.
+const DELETE_RESETS_MADE_BY: &str = "DELETE FROM password_resets WHERE created_by = ?1";
+
+/// A link that can be used now, and its user.
+const USABLE_RESET: &str = "SELECT r.user_id FROM password_resets r
+     JOIN users u ON u.id = r.user_id
+     WHERE r.token_hash = ?1 AND r.expires_at > ?2 AND u.disabled_at IS NULL";
+
+const SELECT_RECORD: &str =
+    "SELECT id, email, name, is_instance_admin, disabled_at, created_at FROM users";
+
+fn record(row: &SqliteRow) -> UserRecord {
+    UserRecord {
+        user: user(row),
+        disabled_at: row.get("disabled_at"),
+        created_at: row.get("created_at"),
+    }
+}
+
+/// Whether `user_id` is an enabled instance admin, and how many of those there are.
+async fn enabled_admins(
+    tx: &mut SqliteConnection,
+    user_id: &str,
+) -> Result<(bool, usize), StoreError> {
+    let (is_enabled_admin, count): (bool, i64) = sqlx::query_as(
+        "SELECT coalesce(sum(id = ?1), 0) > 0, count(*) FROM users
+         WHERE is_instance_admin = 1 AND disabled_at IS NULL",
+    )
+    .bind(user_id)
+    .fetch_one(tx)
+    .await?;
+    Ok((is_enabled_admin, count as usize))
+}
+
+/// Ends everything that lets a user in: their sessions and their reset link.
+async fn revoke_access(tx: &mut SqliteConnection, user_id: &str) -> Result<(), StoreError> {
+    sqlx::query("DELETE FROM sessions WHERE user_id = ?1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(DELETE_RESETS)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    Ok(())
+}
 
 fn user(row: &SqliteRow) -> User {
     User {
@@ -248,6 +298,10 @@ impl AccountStore for SqliteStore {
                 .bind(basis.session)
                 .execute(&mut *tx)
                 .await?;
+            sqlx::query(DELETE_RESETS)
+                .bind(user_id)
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit().await?;
         Ok(())
@@ -256,38 +310,180 @@ impl AccountStore for SqliteStore {
     async fn delete_user(&self, user_id: &str) -> Result<(), StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
 
-        let owners_of_each_workspace: Vec<i64> = sqlx::query_scalar(
+        // The owners who would stay. A disabled one cannot act, so they do not count, and this
+        // user goes whether or not they are enabled.
+        let owners_left_in_each_workspace: Vec<i64> = sqlx::query_scalar(
             "SELECT (SELECT count(*) FROM workspace_members o JOIN users u ON u.id = o.user_id
                      WHERE o.workspace_id = m.workspace_id AND o.role = 'owner'
-                       AND u.disabled_at IS NULL)
+                       AND u.disabled_at IS NULL AND u.id <> ?1)
              FROM workspace_members m WHERE m.user_id = ?1 AND m.role = 'owner'",
         )
         .bind(user_id)
         .fetch_all(&mut *tx)
         .await?;
-        let last_owner = owners_of_each_workspace
+        let last_owner = owners_left_in_each_workspace
             .into_iter()
-            .any(|owners| would_remove_last_owner(WorkspaceRole::Owner, None, owners as usize));
+            .any(|left| would_remove_last_owner(WorkspaceRole::Owner, None, left as usize + 1));
         if last_owner {
             return Err(StoreError::LastOwner);
         }
 
-        let (is_enabled_admin, enabled_admins): (bool, i64) = sqlx::query_as(
-            "SELECT coalesce(sum(id = ?1), 0) > 0, count(*) FROM users
-             WHERE is_instance_admin = 1 AND disabled_at IS NULL",
-        )
-        .bind(user_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if would_remove_last_instance_admin(is_enabled_admin, enabled_admins as usize) {
+        let (is_enabled_admin, admins) = enabled_admins(&mut tx, user_id).await?;
+        if would_remove_last_instance_admin(is_enabled_admin, admins) {
             return Err(StoreError::LastInstanceAdmin);
         }
 
-        sqlx::query("DELETE FROM users WHERE id = ?1")
+        sqlx::query(DELETE_RESETS_MADE_BY)
             .bind(user_id)
             .execute(&mut *tx)
             .await?;
+        let deleted = sqlx::query("DELETE FROM users WHERE id = ?1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        if deleted == 0 {
+            return Err(StoreError::UserNotFound);
+        }
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn list_users(
+        &self,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<UserRecord>, StoreError> {
+        let rows = sqlx::query(AssertSqlSafe(format!(
+            "{SELECT_RECORD} WHERE id > coalesce(?1, '') ORDER BY id LIMIT ?2"
+        )))
+        .bind(after)
+        .bind(limit)
+        .fetch_all(&self.reader)
+        .await?;
+        Ok(rows.iter().map(record).collect())
+    }
+
+    async fn administer_user(
+        &self,
+        user_id: &str,
+        changes: AdminChanges,
+        now: i64,
+    ) -> Result<UserRecord, StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+
+        let loses_admin =
+            changes.disabled == Some(true) || changes.is_instance_admin == Some(false);
+        if loses_admin {
+            let (is_enabled_admin, admins) = enabled_admins(&mut tx, user_id).await?;
+            if would_remove_last_instance_admin(is_enabled_admin, admins) {
+                return Err(StoreError::LastInstanceAdmin);
+            }
+        }
+
+        let updated = sqlx::query(
+            "UPDATE users SET
+                 disabled_at = CASE ?2 WHEN 1 THEN coalesce(disabled_at, ?4)
+                                       WHEN 0 THEN NULL
+                                       ELSE disabled_at END,
+                 is_instance_admin = coalesce(?3, is_instance_admin),
+                 updated_at = ?4
+             WHERE id = ?1",
+        )
+        .bind(user_id)
+        .bind(changes.disabled)
+        .bind(changes.is_instance_admin)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if updated == 0 {
+            return Err(StoreError::UserNotFound);
+        }
+
+        if loses_admin {
+            sqlx::query(DELETE_RESETS_MADE_BY)
+                .bind(user_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        if changes.disabled == Some(true) {
+            revoke_access(&mut tx, user_id).await?;
+        }
+
+        let row = sqlx::query(AssertSqlSafe(format!("{SELECT_RECORD} WHERE id = ?1")))
+            .bind(user_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(record(&row))
+    }
+
+    async fn create_password_reset(&self, reset: &NewPasswordReset) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        let disabled_at: Option<Option<i64>> =
+            sqlx::query_scalar("SELECT disabled_at FROM users WHERE id = ?1")
+                .bind(&reset.user_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        match disabled_at {
+            None => return Err(StoreError::UserNotFound),
+            Some(Some(_)) => return Err(StoreError::UserDisabled),
+            Some(None) => {}
+        }
+
+        sqlx::query(DELETE_RESETS)
+            .bind(&reset.user_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO password_resets (token_hash, user_id, created_by, expires_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind(&reset.token_hash)
+        .bind(&reset.user_id)
+        .bind(&reset.created_by)
+        .bind(reset.expires_at)
+        .bind(reset.now)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn password_reset_usable(&self, token_hash: &str, now: i64) -> Result<bool, StoreError> {
+        let user_id: Option<String> = sqlx::query_scalar(USABLE_RESET)
+            .bind(token_hash)
+            .bind(now)
+            .fetch_optional(&self.reader)
+            .await?;
+        Ok(user_id.is_some())
+    }
+
+    async fn use_password_reset(
+        &self,
+        token_hash: &str,
+        password_hash: &str,
+        now: i64,
+    ) -> Result<bool, StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        let user_id: Option<String> = sqlx::query_scalar(USABLE_RESET)
+            .bind(token_hash)
+            .bind(now)
+            .fetch_optional(&mut *tx)
+            .await?;
+        let Some(user_id) = user_id else {
+            return Ok(false);
+        };
+
+        sqlx::query("UPDATE users SET password_hash = ?2, updated_at = ?3 WHERE id = ?1")
+            .bind(&user_id)
+            .bind(password_hash)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        revoke_access(&mut tx, &user_id).await?;
+        tx.commit().await?;
+        Ok(true)
     }
 }

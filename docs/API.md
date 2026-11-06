@@ -1,11 +1,11 @@
 # API
 
-All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today the WebSocket route marked "prototype", and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/session` and `/me`. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
+All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today the WebSocket route marked "prototype", and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me` and `/admin/users`. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
 
 ## Conventions
 
 - **Authentication**: an `HttpOnly`, `Secure`, `SameSite=Lax` session cookie.
-- **CSRF**: mutating requests with a session require the `X-CSRF-Token` header, whose value comes from `GET /session`. It is derived from the session token, so it needs no storage and lasts as long as the session. Routes that run before a session exists (`/auth/setup`, `/auth/login`) have no token to check: they rely on the `Origin` check and on requiring a JSON content type, which a cross-site form cannot send.
+- **CSRF**: mutating requests with a session require the `X-CSRF-Token` header, whose value comes from `GET /session`. It is derived from the session token, so it needs no storage and lasts as long as the session. Routes that run before a session exists (`/auth/setup`, `/auth/login`, `/auth/password-reset/{token}`) have no token to check: they rely on the `Origin` check and on requiring a JSON content type, which a cross-site form cannot send.
 - **Ids**: UUIDv7 strings.
 - **Pagination**: `?limit=` (maximum 100) and an opaque `?cursor=`. Responses have the form `{ "items": [...], "next_cursor": "..." | null }`.
 - **Origin**: a request that sends an `Origin` other than the one of `CADOCS_PUBLIC_URL` gets `403` `forbidden`. Clients outside a browser send none.
@@ -60,7 +60,9 @@ Bodies and answers:
 
 An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a password 8 to 1024 characters. These routes refuse bodies over 16 KiB.
 
-`/auth/setup`, `/auth/login` and a `PATCH /me` that checks the current password share one limit per client: a burst of 10, then one every 15 seconds. A hash that waits over 10 seconds for its turn answers `503`.
+- `POST /auth/password-reset/{token}` takes `{ password }` and answers `204`, without opening a session. An unknown, used, replaced or expired token is a `404`. A refused password leaves the link usable.
+
+`/auth/setup`, `/auth/login`, `/auth/password-reset/{token}` and a `PATCH /me` that checks the current password share one limit per client: a burst of 10, then one every 15 seconds. A hash that waits over 10 seconds for its turn answers `503`.
 
 ### Instance administration
 
@@ -69,6 +71,12 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 | GET | `/admin/users` | instance admin | List users |
 | PATCH, DELETE | `/admin/users/{user}` | instance admin | Disable, enable, grant instance admin, or delete |
 | POST | `/admin/users/{user}/password-reset` | instance admin | Generate a one-time reset link (ADR 0013) |
+
+- A user here is `{ id, email, name, is_instance_admin, disabled_at, created_at }`, with `disabled_at` `null` for an enabled account. `GET /admin/users` is paginated, oldest first, 50 per page by default.
+- `PATCH /admin/users/{user}` takes `{ disabled?, is_instance_admin? }` and answers the user. Disabling ends the user's sessions and voids their reset link, and enabling brings back neither. A change that leaves no enabled instance admin is a `409`.
+- `DELETE /admin/users/{user}` answers `204`, or `409` for the last enabled instance admin, or for an account that leaves a workspace with no enabled owner.
+- `POST /admin/users/{user}/password-reset` answers `201` with `{ link, expires_at }`, once, as `<CADOCS_PUBLIC_URL>/reset-password/<token>`. A user has one link at a time: a new one replaces the last, and a password change voids it. A disabled user is a `409`. Disabling, demoting or deleting an admin voids the links they made, and links from the command line stay.
+- Every answer under `/admin` has `Cache-Control: no-store`.
 
 ### Workspaces and members
 

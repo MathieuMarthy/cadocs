@@ -5,12 +5,14 @@ use std::time::Duration;
 
 use anyhow::Context;
 use cadocs_collab::{DocRegistry, Permissive};
+use cadocs_server::api::auth::normalize_email;
 use cadocs_server::assets::WebAssets;
 use cadocs_server::cli::{self, Command};
 use cadocs_server::config::Config;
 use cadocs_server::password::Passwords;
+use cadocs_server::session::new_password_reset;
 use cadocs_server::{AppState, data_dir, serve};
-use cadocs_store::{DocStore, SqliteStore};
+use cadocs_store::{AccountStore, DocStore, SqliteStore};
 use tokio::net::TcpListener;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
@@ -31,8 +33,18 @@ unsafe extern "C" {
 
 fn main() -> anyhow::Result<()> {
     // First, so a mistyped command is not answered with a missing setting.
-    let Command::Serve = cli::parse(env::args_os().skip(1))?;
+    let command = cli::parse(env::args_os().skip(1))?;
     let config = Config::from_env()?;
+    match command {
+        Command::Serve => run_server(config),
+        Command::ResetPassword { email } => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(reset_password(config, &email)),
+    }
+}
+
+fn run_server(config: Config) -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_new(&config.log).context("invalid CADOCS_LOG")?)
         .init();
@@ -44,6 +56,21 @@ fn main() -> anyhow::Result<()> {
         .enable_all()
         .build()?
         .block_on(run(config))
+}
+
+/// Beside a running server, so it takes no lock on the data folder (`docs/OPERATIONS.md`).
+async fn reset_password(config: Config, email: &str) -> anyhow::Result<()> {
+    let path = config.data_dir.join("cadocs.db");
+    let store = SqliteStore::open_existing(&path)
+        .await
+        .with_context(|| format!("cannot open {}", path.display()))?;
+    let email = normalize_email(email);
+    let found = store.credentials(&email).await?;
+    let found = found.with_context(|| format!("no account uses {email}"))?;
+    let (link, reset) = new_password_reset(&config.http.public_url, &found.user.id, None)?;
+    store.create_password_reset(&reset).await?;
+    println!("{link}");
+    Ok(())
 }
 
 async fn run(config: Config) -> anyhow::Result<()> {

@@ -1,5 +1,6 @@
 //! The REST API under `/api/v1`: its error shape and what every route shares (`docs/API.md`).
 
+mod admin;
 pub mod auth;
 
 use std::borrow::Cow;
@@ -10,7 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{ConnectInfo, FromRequest, Request, State};
+use axum::extract::{ConnectInfo, FromRequest, FromRequestParts, Path, Request, State};
+use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
@@ -155,10 +157,14 @@ impl From<StoreError> for ApiError {
                 .with_message("Another account uses this email")
                 .with_field("email", "taken"),
             StoreError::StaleCredentials => ApiError::new(ErrorCode::Unauthenticated),
-            StoreError::LastOwner => conflict.with_message("You are the last owner of a workspace"),
-            StoreError::LastInstanceAdmin => {
-                conflict.with_message("You are the last instance admin")
+            StoreError::LastOwner => {
+                conflict.with_message("This account is the last owner of a workspace")
             }
+            StoreError::LastInstanceAdmin => {
+                conflict.with_message("This account is the last instance admin")
+            }
+            StoreError::UserDisabled => conflict.with_message("This account is disabled"),
+            StoreError::UserNotFound => ApiError::new(ErrorCode::NotFound),
             error => {
                 tracing::error!(%error, "storage failed");
                 ApiError::new(ErrorCode::Unavailable)
@@ -197,6 +203,73 @@ fn body_refused(rejection: &JsonRejection) -> ApiError {
     } else {
         ApiError::new(ErrorCode::InvalidRequest).with_message(rejection.body_text())
     }
+}
+
+/// The one parameter of a path, with its refusal in the error shape.
+pub struct PathParam(pub String);
+
+impl<S: Send + Sync> FromRequestParts<S> for PathParam {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, ApiError> {
+        match Path::<String>::from_request_parts(parts, state).await {
+            Ok(Path(value)) => Ok(Self(value)),
+            Err(rejection) => {
+                Err(ApiError::new(ErrorCode::InvalidRequest).with_message(rejection.body_text()))
+            }
+        }
+    }
+}
+
+/// `?limit=` and `?cursor=`. By hand: two parameters do not justify axum's `query` feature and a
+/// form decoder. A cursor is an id or another value of ours, which needs no decoding.
+#[derive(Debug, PartialEq, Eq)]
+pub struct PageQuery {
+    pub limit: u32,
+    pub cursor: Option<String>,
+}
+
+impl PageQuery {
+    const DEFAULT_LIMIT: u32 = 50;
+    const MAX_LIMIT: u32 = 100;
+
+    fn parse(query: &str) -> Result<Self, ApiError> {
+        let mut page = Self {
+            limit: Self::DEFAULT_LIMIT,
+            cursor: None,
+        };
+        for pair in query.split('&') {
+            match pair.split_once('=') {
+                Some(("limit", limit)) => {
+                    let limit = limit.parse().ok();
+                    page.limit = limit
+                        .filter(|limit| (1..=Self::MAX_LIMIT).contains(limit))
+                        .ok_or_else(|| {
+                            ApiError::new(ErrorCode::ValidationFailed)
+                                .with_field("limit", "invalid")
+                        })?;
+                }
+                Some(("cursor", cursor)) => page.cursor = Some(cursor.to_owned()),
+                _ => {}
+            }
+        }
+        Ok(page)
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for PageQuery {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, ApiError> {
+        Self::parse(parts.uri.query().unwrap_or_default())
+    }
+}
+
+/// A page of a list. `next_cursor` is `None` on the last one.
+#[derive(Serialize)]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -240,7 +313,8 @@ where
     // covers the root with a slash, which a nest cannot reach.
     let routes = Router::new()
         .route("/", any(not_found))
-        .merge(auth::routes(state));
+        .merge(auth::routes(state))
+        .merge(admin::routes(state));
     finish(routes, state.http.clone())
 }
 

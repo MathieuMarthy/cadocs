@@ -24,6 +24,14 @@ pub struct User {
     pub is_instance_admin: bool,
 }
 
+/// An account as an instance admin sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserRecord {
+    pub user: User,
+    pub disabled_at: Option<i64>,
+    pub created_at: i64,
+}
+
 /// What a login needs. A disabled user is returned too, so that the caller does the same work for
 /// everyone and timing does not tell them apart.
 #[derive(Debug, Clone)]
@@ -61,6 +69,23 @@ pub struct UserChanges {
     pub name: Option<String>,
     pub email: Option<String>,
     pub password_hash: Option<String>,
+}
+
+/// Fields left to `None` keep their value.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AdminChanges {
+    pub disabled: Option<bool>,
+    pub is_instance_admin: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewPasswordReset {
+    pub token_hash: String,
+    pub user_id: String,
+    /// `None` when it comes from the command line.
+    pub created_by: Option<String>,
+    pub now: i64,
+    pub expires_at: i64,
 }
 
 /// What a change was authorized with. Checking a password takes a while, and another session may
@@ -131,8 +156,8 @@ pub trait AccountStore: Send + Sync + 'static {
         user_id: &str,
     ) -> impl Future<Output = Result<Vec<Membership>, StoreError>> + Send;
 
-    /// Applies `changes` in one transaction. A new password also ends every session of the user
-    /// but `basis.session`. An email another account uses is an `EmailTaken`, and a `basis` that no
+    /// Applies `changes` in one transaction. A new password also voids the user's reset link and
+    /// ends every session of the user but `basis.session`. An email another account uses is an `EmailTaken`, and a `basis` that no
     /// longer holds is a `StaleCredentials`.
     fn update_user(
         &self,
@@ -143,6 +168,50 @@ pub trait AccountStore: Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// Deletes an account and its sessions. Refused with `LastOwner` or `LastInstanceAdmin`, and
-    /// checked inside the transaction, so that two deletions at once cannot both pass.
+    /// checked inside the transaction, so that two deletions at once cannot both pass. An account
+    /// that does not exist is a `UserNotFound`. The reset links they made for others go too.
     fn delete_user(&self, user_id: &str) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// At most `limit` accounts, oldest first, after the one with the id `after`.
+    fn list_users(
+        &self,
+        after: Option<&str>,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<UserRecord>, StoreError>> + Send;
+
+    /// Applies `changes` and returns the account. Disabling also ends the user's sessions and
+    /// voids their reset link, so that enabling them again revives neither. Disabling or demoting
+    /// voids the links they made for others. Refused with `LastInstanceAdmin` or `UserNotFound`,
+    /// checked inside the transaction.
+    fn administer_user(
+        &self,
+        user_id: &str,
+        changes: AdminChanges,
+        now: i64,
+    ) -> impl Future<Output = Result<UserRecord, StoreError>> + Send;
+
+    /// Stores a reset link in place of the user's previous one. Refused with `UserNotFound` or
+    /// `UserDisabled`.
+    fn create_password_reset(
+        &self,
+        reset: &NewPasswordReset,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Whether a reset link can be used now. Only `use_password_reset` decides: this spares a hash
+    /// to a token that has no chance.
+    fn password_reset_usable(
+        &self,
+        token_hash: &str,
+        now: i64,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Sets the password, ends every session of the user and voids their link, in one transaction.
+    /// Returns whether the link was still usable: hashing takes a while, and it may have been
+    /// used, replaced or expired in the meantime.
+    fn use_password_reset(
+        &self,
+        token_hash: &str,
+        password_hash: &str,
+        now: i64,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 }

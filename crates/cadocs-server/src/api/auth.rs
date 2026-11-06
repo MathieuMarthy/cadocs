@@ -18,17 +18,17 @@ use cadocs_store::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{ApiError, ErrorCode, JsonBody, count_request, rate_limit};
+use super::{ApiError, ErrorCode, JsonBody, PathParam, count_request, rate_limit};
 use crate::AppState;
 use crate::session::{self, CurrentSession, csrf_token, new_token, token_hash};
 
-/// Each client can guess this many passwords at once, then one per `GUESS_REFILL`. Setup, login
-/// and a `PATCH /me` that checks the current password share this budget.
+/// Each client can guess this many passwords at once, then one per `GUESS_REFILL`. Setup, login,
+/// using a reset link and a `PATCH /me` that checks the current password share this budget.
 pub const GUESS_BURST: u32 = 10;
 pub const GUESS_REFILL: Duration = Duration::from_secs(15);
 
 /// Far above any of these bodies. Routes before a session must not buffer the default 2 MB.
-const MAX_BODY_BYTES: usize = 16 * 1024;
+pub(super) const MAX_BODY_BYTES: usize = 16 * 1024;
 const MAX_NAME_CHARS: usize = 100;
 const MAX_EMAIL_BYTES: usize = 254;
 const MIN_PASSWORD_CHARS: usize = 8;
@@ -46,7 +46,11 @@ where
     );
     let public = Router::new()
         .route("/auth/setup", post(setup).route_layer(limit.clone()))
-        .route("/auth/login", post(login).route_layer(limit));
+        .route("/auth/login", post(login).route_layer(limit.clone()))
+        .route(
+            "/auth/password-reset/{token}",
+            post(use_password_reset).route_layer(limit),
+        );
     let authenticated = Router::new()
         .route("/auth/logout", post(logout))
         .route("/session", get(current_session))
@@ -58,7 +62,7 @@ where
 }
 
 #[derive(Serialize)]
-struct UserBody {
+pub(super) struct UserBody {
     id: String,
     email: String,
     name: String,
@@ -192,7 +196,7 @@ async fn login<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
     JsonBody(body): JsonBody<LoginRequest>,
 ) -> Result<Response, ApiError> {
-    let email = body.email.trim().to_lowercase();
+    let email = normalize_email(&body.email);
     let found = state.store.credentials(&email).await?;
     let hash = found.as_ref().and_then(|found| found.password_hash.clone());
     let matches = state.passwords.verify(body.password, hash).await?;
@@ -312,6 +316,36 @@ async fn update_me<S: AccountStore, A>(
     }))
 }
 
+#[derive(Deserialize)]
+struct ResetRequest {
+    password: String,
+}
+
+/// Unknown, used, replaced and expired links all answer alike.
+async fn use_password_reset<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    PathParam(token): PathParam,
+    JsonBody(body): JsonBody<ResetRequest>,
+) -> Result<StatusCode, ApiError> {
+    let hash = token_hash(&token);
+    if !state.store.password_reset_usable(&hash, now_ms()).await? {
+        return Err(ApiError::new(ErrorCode::NotFound));
+    }
+    let mut fields = Fields::default();
+    fields.check("password", check_password(&body.password));
+    fields.finish()?;
+
+    let password_hash = state.passwords.hash(body.password).await?;
+    if !state
+        .store
+        .use_password_reset(&hash, &password_hash, now_ms())
+        .await?
+    {
+        return Err(ApiError::new(ErrorCode::NotFound));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn delete_me<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
     Extension(current): Extension<CurrentSession>,
@@ -350,9 +384,14 @@ fn clean_name(name: &str) -> Result<String, &'static str> {
     }
 }
 
+/// The form an email is stored in, and looked up by.
+pub fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
 /// An email is an identifier only, nothing is sent to it (ADR 0013): this catches typing mistakes.
 fn clean_email(email: &str) -> Result<String, &'static str> {
-    let email = email.trim().to_lowercase();
+    let email = normalize_email(email);
     if email.is_empty() {
         return Err("required");
     }

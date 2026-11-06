@@ -7,8 +7,8 @@ use std::future::Future;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use accounts::{
-    AccountStore, ActiveSession, Credentials, FirstUser, Membership, NewSession, UpdateBasis, User,
-    UserChanges,
+    AccountStore, ActiveSession, AdminChanges, Credentials, FirstUser, Membership,
+    NewPasswordReset, NewSession, UpdateBasis, User, UserChanges, UserRecord,
 };
 pub use sqlite::SqliteStore;
 
@@ -43,6 +43,12 @@ pub enum StoreError {
     LastOwner,
     #[error("this user is the last enabled instance admin")]
     LastInstanceAdmin,
+    #[error("this database belongs to another version of cadocs: start the matching server first")]
+    OtherVersion,
+    #[error("no such user")]
+    UserNotFound,
+    #[error("this account is disabled")]
+    UserDisabled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

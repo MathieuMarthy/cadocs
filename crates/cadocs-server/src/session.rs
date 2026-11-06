@@ -7,14 +7,14 @@ use axum::http::header::{COOKIE, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use cadocs_store::{AccountStore, User, now_ms};
+use cadocs_store::{AccountStore, NewPasswordReset, User, now_ms};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tokio::time::timeout;
 
 use crate::AppState;
 use crate::api::{ApiError, ErrorCode};
-use crate::config::HttpConfig;
+use crate::config::{HttpConfig, PublicUrl};
 
 const COOKIE_NAME: &str = "session";
 const CSRF_HEADER: &str = "x-csrf-token";
@@ -23,6 +23,8 @@ const TOUCH_INTERVAL_MS: i64 = 5 * 60 * 1000;
 const TOUCH_WAIT: Duration = Duration::from_secs(1);
 /// Each value costs a query, and a client chooses how many it sends.
 const MAX_COOKIES: usize = 4;
+/// ADR 0013.
+const RESET_LIFETIME: Duration = Duration::from_secs(60 * 60);
 
 /// Handlers behind `require` read this from the request extensions.
 #[derive(Debug, Clone)]
@@ -45,6 +47,26 @@ pub fn new_token() -> Result<String, getrandom::Error> {
 
 pub fn token_hash(token: &str) -> String {
     hex(&Sha256::digest(token))
+}
+
+/// A link to hand over, and the row that makes it work, of which only the hash of the token is
+/// kept. The page behind the link sends the token to `POST /auth/password-reset/{token}`.
+pub fn new_password_reset(
+    public_url: &PublicUrl,
+    user_id: &str,
+    created_by: Option<&str>,
+) -> Result<(String, NewPasswordReset), getrandom::Error> {
+    let token = new_token()?;
+    let now = now_ms();
+    let reset = NewPasswordReset {
+        token_hash: token_hash(&token),
+        user_id: user_id.to_owned(),
+        created_by: created_by.map(str::to_owned),
+        now,
+        expires_at: now + RESET_LIFETIME.as_millis() as i64,
+    };
+    let link = format!("{}/reset-password/{token}", public_url.origin());
+    Ok((link, reset))
 }
 
 /// Derived from the token, so it needs no column, and it lasts as long as the session. Only a

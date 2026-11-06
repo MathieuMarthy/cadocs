@@ -20,8 +20,9 @@ use cadocs_server::rate_limit::RateLimiter;
 use cadocs_server::session::token_hash;
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
-    AccountStore, ActiveSession, Credentials, DocStore, FirstUser, Membership, NewSession,
-    Snapshot, SqliteStore, StoreError, StoredDoc, StoredUpdate, UpdateBasis, UserChanges, now_ms,
+    AccountStore, ActiveSession, AdminChanges, Credentials, DocStore, FirstUser, Membership,
+    NewPasswordReset, NewSession, Snapshot, SqliteStore, StoreError, StoredDoc, StoredUpdate,
+    UpdateBasis, UserChanges, UserRecord, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -158,6 +159,42 @@ impl AccountStore for FlakyStore {
 
     async fn delete_user(&self, user_id: &str) -> Result<(), StoreError> {
         self.inner.delete_user(user_id).await
+    }
+
+    async fn list_users(
+        &self,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<UserRecord>, StoreError> {
+        self.inner.list_users(after, limit).await
+    }
+
+    async fn administer_user(
+        &self,
+        user_id: &str,
+        changes: AdminChanges,
+        now: i64,
+    ) -> Result<UserRecord, StoreError> {
+        self.inner.administer_user(user_id, changes, now).await
+    }
+
+    async fn create_password_reset(&self, reset: &NewPasswordReset) -> Result<(), StoreError> {
+        self.inner.create_password_reset(reset).await
+    }
+
+    async fn password_reset_usable(&self, token_hash: &str, now: i64) -> Result<bool, StoreError> {
+        self.inner.password_reset_usable(token_hash, now).await
+    }
+
+    async fn use_password_reset(
+        &self,
+        token_hash: &str,
+        password_hash: &str,
+        now: i64,
+    ) -> Result<bool, StoreError> {
+        self.inner
+            .use_password_reset(token_hash, password_hash, now)
+            .await
     }
 }
 

@@ -4,11 +4,14 @@ use std::path::Path;
 use std::time::Duration;
 
 use sqlx::Row;
+use sqlx::migrate::Migrator;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
 
 use crate::{DocStore, Snapshot, StoreError, StoredDoc, StoredUpdate, now_ms};
+
+static MIGRATOR: Migrator = sqlx::migrate!("./migrations/sqlite");
 
 /// Each connection has a thread and a page cache, so they are few and closed when idle.
 const READER_CONNECTIONS: u32 = 2;
@@ -29,24 +32,46 @@ impl SqliteStore {
     /// Opens the database, creating it if needed, and runs the migrations. A database newer than
     /// this binary is refused, as its applied migrations are unknown here.
     pub async fn open(path: &Path) -> Result<Self, StoreError> {
-        let writer = SqlitePoolOptions::new()
-            .max_connections(1)
-            .test_before_acquire(false)
-            .connect_with(
-                connect_options(path)
-                    .create_if_missing(true)
-                    .journal_mode(SqliteJournalMode::Wal),
-            )
-            .await?;
-        sqlx::migrate!("./migrations/sqlite").run(&writer).await?;
+        let writer = writer(
+            connect_options(path)
+                .create_if_missing(true)
+                .journal_mode(SqliteJournalMode::Wal),
+        )
+        .await?;
+        MIGRATOR.run(&writer).await?;
+        Ok(Self::with_writer(path, writer))
+    }
 
+    /// Opens a database as an ordinary client, beside a server that may be running. It creates
+    /// nothing and migrates nothing: that is for `serve`, which holds the data folder. So a
+    /// schema this binary does not know exactly is an `OtherVersion`.
+    pub async fn open_existing(path: &Path) -> Result<Self, StoreError> {
+        let writer = writer(connect_options(path)).await?;
+        let applied: Option<i64> =
+            sqlx::query_scalar("SELECT max(version) FROM _sqlx_migrations WHERE success = 1")
+                .fetch_one(&writer)
+                .await?;
+        if applied != MIGRATOR.iter().map(|migration| migration.version).max() {
+            return Err(StoreError::OtherVersion);
+        }
+        Ok(Self::with_writer(path, writer))
+    }
+
+    fn with_writer(path: &Path, writer: SqlitePool) -> Self {
         let reader = SqlitePoolOptions::new()
             .max_connections(READER_CONNECTIONS)
             .test_before_acquire(false)
             .connect_lazy_with(connect_options(path).read_only(true));
-
-        Ok(Self { writer, reader })
+        Self { writer, reader }
     }
+}
+
+async fn writer(options: SqliteConnectOptions) -> Result<SqlitePool, sqlx::Error> {
+    SqlitePoolOptions::new()
+        .max_connections(1)
+        .test_before_acquire(false)
+        .connect_with(options)
+        .await
 }
 
 fn connect_options(path: &Path) -> SqliteConnectOptions {

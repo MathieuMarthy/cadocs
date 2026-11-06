@@ -69,7 +69,7 @@ A workspace always keeps at least one owner. Any change that would remove the la
 | List, disable or delete users, grant instance admin | no | yes |
 | Generate a password reset link | no | yes |
 
-An instance always keeps at least one enabled instance admin. A user who is the last owner of a workspace cannot be deleted until ownership moves or the workspace is deleted.
+An instance always keeps at least one enabled instance admin. A user who is the last owner of a workspace cannot be deleted until ownership moves or the workspace is deleted. Only enabled owners count, as a disabled one cannot act. Disabling the last enabled owner is allowed: it can be undone, and an instance admin must be able to lock out an account that has no other owner beside it.
 
 ## Reacting to changes
 

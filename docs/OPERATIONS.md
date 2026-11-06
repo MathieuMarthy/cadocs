@@ -53,7 +53,7 @@ Environment variables only, so no config file format has to be parsed or documen
 | `cadocs backup <dir>` | Write a consistent backup, on a running or stopped server |
 | `cadocs restore <dir>` | Restore a backup into an empty data folder, on a stopped server |
 
-`reset-password` and `backup` can run beside a live server, because they only open the database as an ordinary SQLite client. The exclusive lock of ADR 0006 is taken by `serve` and `restore`.
+`reset-password` reads the same settings as the server, including `CADOCS_PUBLIC_URL`, and refuses a disabled account. It never creates or migrates the database, and refuses one of another version, so after an upgrade the server must have started once. `reset-password` and `backup` can run beside a live server, because they only open the database as an ordinary SQLite client. The exclusive lock of ADR 0006 is taken by `serve` and `restore`.
 
 ## Data folder
 
