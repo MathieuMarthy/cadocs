@@ -46,12 +46,41 @@ pub enum SpaceRole {
     Admin,
 }
 
+impl SpaceRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Viewer => "viewer",
+            Self::Commenter => "commenter",
+            Self::Editor => "editor",
+            Self::Admin => "admin",
+        }
+    }
+
+    pub fn parse(role: &str) -> Option<Self> {
+        [Self::Viewer, Self::Commenter, Self::Editor, Self::Admin]
+            .into_iter()
+            .find(|known| known.as_str() == role)
+    }
+}
+
 /// The roles a space may give by default: `admin` always needs a grant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefaultRole {
     Viewer,
     Commenter,
     Editor,
+}
+
+impl DefaultRole {
+    pub fn as_str(self) -> &'static str {
+        SpaceRole::from(self).as_str()
+    }
+
+    pub fn parse(role: &str) -> Option<Self> {
+        [Self::Viewer, Self::Commenter, Self::Editor]
+            .into_iter()
+            .find(|known| known.as_str() == role)
+    }
 }
 
 impl From<DefaultRole> for SpaceRole {

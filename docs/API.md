@@ -1,6 +1,6 @@
 # API
 
-All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today the WebSocket route marked "prototype", and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members and invitations. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
+All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today the WebSocket route marked "prototype", and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces and grants, apart from `/spaces/{space}/trash`, `/spaces/{space}/tree` and the export. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
 
 ## Conventions
 
@@ -116,6 +116,7 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 | Method | Route | Role | Purpose |
 | --- | --- | --- | --- |
 | GET, POST | `/workspaces/{ws}/spaces` | member, admin to create | List readable spaces, or create one |
+| GET | `/workspaces/{ws}/spaces/trash` | member | List the trashed spaces the caller can restore |
 | GET | `/spaces/{space}` | viewer | Read |
 | PATCH, DELETE | `/spaces/{space}` | space admin | Update or trash |
 | POST | `/spaces/{space}/restore` | space admin | Restore from trash |
@@ -123,6 +124,13 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 | GET | `/spaces/{space}/export?format=md\|html` | viewer | Export the space as a zip, as a job (V1) |
 | GET, PUT | `/spaces/{space}/grants` | viewer, space admin to edit | Roles of users and groups |
 | GET | `/spaces/{space}/tree?parent={id}` | viewer | One level of the tree, loaded lazily |
+
+- A space is `{ id, workspace_id, slug, name, description, default_role, role, deleted_at, created_at, updated_at }`, where `role` is the caller's, after resolution. Both lists are paginated, oldest first.
+- `POST /workspaces/{ws}/spaces` takes `{ name, description?, default_role? }` and answers `201` with the space. `default_role` is `viewer`, `commenter`, `editor` or `null`, the default, which leaves the space to those with a grant. A description is at most 1000 characters. The slug comes from the name, gets a number if it is taken in the workspace, and never changes.
+- `PATCH /spaces/{space}` takes the same fields, all optional, and answers the space. `"default_role": null` clears it. Any other field that is missing or `null` keeps its value, as does a missing `default_role`.
+- `DELETE /spaces/{space}` answers `204`. A trashed space answers `404` to everyone, its admins too, everywhere but `POST /spaces/{space}/restore` and the trash list. That route answers the space, or `403` for one that is not in the trash.
+- A grant is `{ id, user_id, group_id, role, created_at }`, with one of `user_id` and `group_id` set. `GET /spaces/{space}/grants` is paginated, oldest first.
+- `PUT /spaces/{space}/grants` takes `{ grants: [{ user_id | group_id, role }] }`, at most 500, and makes these the grants of the space: a target that already has one keeps its id and date, and the others lose theirs. It answers `204`. `grants` in `fields` says what is wrong: `too_many`, `invalid` (not exactly one target), `duplicate`, or `unknown_target` for a user or group outside the workspace. An unknown role is `role: invalid`. There is no version check: of two admins who edit at once, the last `PUT` wins.
 
 ### Pages
 

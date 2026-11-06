@@ -55,7 +55,7 @@ A workspace always keeps at least one owner. Any change that would remove the la
 ## Special cases
 
 - **Move across spaces:** needs `editor` on both spaces. A move across workspaces is refused.
-- **Trashed space:** every action is denied except restoring it, for a space `admin`.
+- **Trashed space:** every action is denied except restoring it, for a space `admin`, who also finds it in the list of trashed spaces of the workspace.
 - **Trashed page:** it behaves as absent for all actions except listing the trash, restoring and purging.
 - **Attachments:** a download needs read access to at least one page that references the file ([DATA_MODEL.md](DATA_MODEL.md#attachments)).
 - **Public shares** bypass these rules for rendered content only (ADR 0009).

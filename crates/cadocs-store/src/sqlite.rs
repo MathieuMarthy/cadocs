@@ -1,4 +1,5 @@
 mod accounts;
+mod spaces;
 mod workspaces;
 
 use std::path::Path;

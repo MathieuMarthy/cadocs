@@ -136,6 +136,8 @@ CREATE INDEX space_grants_group ON space_grants(group_id);
 
 `UNIQUE` treats `NULL` values as distinct on both engines, which is what these two constraints need.
 
+A member who leaves or is removed loses their grants and group memberships in that workspace, so an invitation later starts from nothing. A grant only targets a member or a group of the workspace of the space.
+
 ## Pages
 
 The tree lives in SQL. `position` is a fractional index (a string that sorts between its neighbours), so reordering never rewrites siblings.

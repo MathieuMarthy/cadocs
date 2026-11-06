@@ -454,3 +454,21 @@ fn a_workspace_role_reads_back_what_it_writes() {
     }
     assert_eq!(WorkspaceRole::parse("Owner"), None);
 }
+
+#[test]
+fn space_roles_read_back_what_they_write() {
+    use SpaceRole::*;
+    for role in [Viewer, Commenter, Editor, Admin] {
+        assert_eq!(SpaceRole::parse(role.as_str()), Some(role));
+    }
+    assert_eq!(SpaceRole::parse("owner"), None);
+}
+
+#[test]
+fn a_default_role_is_never_admin() {
+    use DefaultRole::*;
+    for role in [Viewer, Commenter, Editor] {
+        assert_eq!(DefaultRole::parse(role.as_str()), Some(role));
+    }
+    assert_eq!(DefaultRole::parse("admin"), None);
+}

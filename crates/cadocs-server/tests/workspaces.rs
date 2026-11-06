@@ -11,32 +11,11 @@ const CARA: &str = "11111111-0000-7000-8000-000000000002";
 const DAN: &str = "11111111-0000-7000-8000-000000000003";
 
 impl Api {
-    async fn get(&self, by: &Login, path: &str) -> Reply {
-        self.raw("GET", path, &[("cookie", &by.cookie)], b"").await
-    }
-
-    async fn first_workspace(&self) -> String {
-        sqlx::query_scalar("SELECT id FROM workspaces ORDER BY id LIMIT 1")
-            .fetch_one(&self.db)
-            .await
-            .unwrap()
-    }
-
     async fn first_user(&self) -> String {
         sqlx::query_scalar("SELECT id FROM users ORDER BY id LIMIT 1")
             .fetch_one(&self.db)
             .await
             .unwrap()
-    }
-
-    async fn add_member(&self, workspace: &str, id: &str, email: &str, role: &str) -> Login {
-        let login = self.add_and_login(id, email).await;
-        self.sql(&format!(
-            "INSERT INTO workspace_members (workspace_id, user_id, role, created_at)
-             VALUES ('{workspace}', '{id}', '{role}', 1)"
-        ))
-        .await;
-        login
     }
 
     async fn set_role(&self, by: &Login, workspace: &str, user: &str, role: &str) -> Reply {

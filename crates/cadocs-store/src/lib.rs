@@ -1,6 +1,7 @@
 //! Store traits and their SQLite implementation (ADR 0002).
 
 mod accounts;
+mod spaces;
 mod sqlite;
 mod workspaces;
 
@@ -11,6 +12,7 @@ pub use accounts::{
     AccountStore, ActiveSession, AdminChanges, Credentials, FirstUser, Membership,
     NewPasswordReset, NewSession, UpdateBasis, User, UserChanges, UserRecord,
 };
+pub use spaces::{Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore};
 pub use sqlite::SqliteStore;
 pub use workspaces::{
     Invitation, InvitationPreview, InvitedUser, MAX_SLUG_CHARS, Member, NewInvitation,
@@ -60,6 +62,12 @@ pub enum StoreError {
     MemberNotFound,
     #[error("no such invitation")]
     InvitationNotFound,
+    #[error("no such space")]
+    SpaceNotFound,
+    #[error("a grant names a user or group outside the workspace")]
+    UnknownGrantTarget,
+    #[error("two grants name the same user or group")]
+    DuplicateGrant,
     #[error("this user may not do that")]
     NotAllowed,
     #[error("this is not the name of the workspace")]

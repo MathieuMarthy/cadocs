@@ -20,10 +20,11 @@ use cadocs_server::rate_limit::RateLimiter;
 use cadocs_server::session::token_hash;
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
-    AccountStore, ActiveSession, AdminChanges, Credentials, DocStore, FirstUser, Invitation,
-    InvitationPreview, InvitedUser, Member, Membership, NewInvitation, NewPasswordReset,
-    NewSession, NewWorkspace, Snapshot, SqliteStore, StoreError, StoredDoc, StoredUpdate,
-    UpdateBasis, UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceStore, now_ms,
+    AccountStore, ActiveSession, AdminChanges, Credentials, DocStore, FirstUser, Grant, Invitation,
+    InvitationPreview, InvitedUser, Member, Membership, NewGrant, NewInvitation, NewPasswordReset,
+    NewSession, NewSpace, NewWorkspace, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore,
+    StoreError, StoredDoc, StoredUpdate, UpdateBasis, UserChanges, UserRecord, Workspace,
+    WorkspaceChanges, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -85,6 +86,84 @@ impl DocStore for FlakyStore {
 
     async fn compact(&self, doc_id: &str, snapshot: &Snapshot) -> Result<(), StoreError> {
         self.inner.compact(doc_id, snapshot).await
+    }
+}
+
+impl SpaceStore for FlakyStore {
+    async fn create_space(&self, space: &NewSpace) -> Result<Space, StoreError> {
+        self.inner.create_space(space).await
+    }
+
+    async fn list_spaces(
+        &self,
+        workspace_id: &str,
+        actor: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Space>, StoreError> {
+        self.inner
+            .list_spaces(workspace_id, actor, after, limit)
+            .await
+    }
+
+    async fn list_trashed_spaces(
+        &self,
+        workspace_id: &str,
+        actor: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Space>, StoreError> {
+        let inner = &self.inner;
+        inner
+            .list_trashed_spaces(workspace_id, actor, after, limit)
+            .await
+    }
+
+    async fn space(&self, space_id: &str, actor: &str) -> Result<Option<Space>, StoreError> {
+        self.inner.space(space_id, actor).await
+    }
+
+    async fn update_space(
+        &self,
+        space_id: &str,
+        actor: &str,
+        changes: &SpaceChanges,
+        now: i64,
+    ) -> Result<Space, StoreError> {
+        self.inner.update_space(space_id, actor, changes, now).await
+    }
+
+    async fn trash_space(&self, space_id: &str, actor: &str, now: i64) -> Result<(), StoreError> {
+        self.inner.trash_space(space_id, actor, now).await
+    }
+
+    async fn restore_space(
+        &self,
+        space_id: &str,
+        actor: &str,
+        now: i64,
+    ) -> Result<Space, StoreError> {
+        self.inner.restore_space(space_id, actor, now).await
+    }
+
+    async fn list_grants(
+        &self,
+        space_id: &str,
+        actor: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Grant>, StoreError> {
+        self.inner.list_grants(space_id, actor, after, limit).await
+    }
+
+    async fn set_grants(
+        &self,
+        space_id: &str,
+        actor: &str,
+        grants: &[NewGrant],
+        now: i64,
+    ) -> Result<(), StoreError> {
+        self.inner.set_grants(space_id, actor, grants, now).await
     }
 }
 

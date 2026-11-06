@@ -101,7 +101,7 @@ async fn create<S: WorkspaceStore, A>(
 
     let new = NewWorkspace {
         id: Uuid::now_v7().to_string(),
-        slug: slug(&name),
+        slug: slug(&name, "workspace"),
         name,
         owner_id: current.user.id,
         now: now_ms(),

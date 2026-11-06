@@ -85,13 +85,21 @@ fn check(role: Option<WorkspaceRole>, action: WorkspaceAction) -> Result<(), Sto
     }
 }
 
-async fn authorize(
+pub(super) async fn authorize(
     conn: &mut SqliteConnection,
     workspace_id: &str,
     actor: &str,
     action: WorkspaceAction,
 ) -> Result<(), StoreError> {
-    check(role_in(conn, workspace_id, actor).await?, action)
+    let role: Option<String> = sqlx::query_scalar(
+        "SELECT m.role FROM workspace_members m JOIN users u ON u.id = m.user_id
+         WHERE m.workspace_id = ?1 AND m.user_id = ?2 AND u.disabled_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(actor)
+    .fetch_optional(conn)
+    .await?;
+    check(role.as_deref().and_then(WorkspaceRole::parse), action)
 }
 
 /// Whether `actor` may give `user_id` the role `next`, or remove them with `None`. Only enabled
@@ -146,6 +154,13 @@ async fn end_links_of(
     Ok(())
 }
 
+/// `base-<number>`, no longer than a slug may be.
+pub(super) fn numbered_slug(base: &str, number: u32) -> String {
+    let suffix = format!("-{number}");
+    let kept: String = base.chars().take(MAX_SLUG_CHARS - suffix.len()).collect();
+    format!("{}{suffix}", kept.trim_end_matches('-'))
+}
+
 /// The first of `base`, `base-2`, `base-3`... that no workspace uses.
 async fn free_slug(tx: &mut SqliteConnection, base: &str) -> Result<String, StoreError> {
     let mut slug = base.to_owned();
@@ -158,11 +173,34 @@ async fn free_slug(tx: &mut SqliteConnection, base: &str) -> Result<String, Stor
         if !taken {
             break;
         }
-        let suffix = format!("-{number}");
-        let kept: String = base.chars().take(MAX_SLUG_CHARS - suffix.len()).collect();
-        slug = format!("{}{suffix}", kept.trim_end_matches('-'));
+        slug = numbered_slug(base, number);
     }
     Ok(slug)
+}
+
+/// A grant must not come back with the user: someone invited again starts from nothing.
+async fn end_grants_of(
+    tx: &mut SqliteConnection,
+    workspace_id: &str,
+    user_id: &str,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "DELETE FROM space_grants WHERE user_id = ?2
+         AND space_id IN (SELECT id FROM spaces WHERE workspace_id = ?1)",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM group_members WHERE user_id = ?2
+         AND group_id IN (SELECT id FROM groups WHERE workspace_id = ?1)",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .execute(tx)
+    .await?;
+    Ok(())
 }
 
 /// Adds the invited role and spends the link.
@@ -365,6 +403,7 @@ impl WorkspaceStore for SqliteStore {
             .execute(&mut *tx)
             .await?;
         end_links_of(&mut tx, workspace_id, user_id).await?;
+        end_grants_of(&mut tx, workspace_id, user_id).await?;
         tx.commit().await?;
         Ok(())
     }

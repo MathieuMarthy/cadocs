@@ -217,6 +217,27 @@ impl Api {
         assert_eq!(reply.status, 200, "{reply:?}");
         Login::from(&reply)
     }
+
+    pub async fn get(&self, by: &Login, path: &str) -> Reply {
+        self.raw("GET", path, &[("cookie", &by.cookie)], b"").await
+    }
+
+    pub async fn first_workspace(&self) -> String {
+        sqlx::query_scalar("SELECT id FROM workspaces ORDER BY id LIMIT 1")
+            .fetch_one(&self.db)
+            .await
+            .unwrap()
+    }
+
+    pub async fn add_member(&self, workspace: &str, id: &str, email: &str, role: &str) -> Login {
+        let login = self.add_and_login(id, email).await;
+        self.sql(&format!(
+            "INSERT INTO workspace_members (workspace_id, user_id, role, created_at)
+             VALUES ('{workspace}', '{id}', '{role}', 1)"
+        ))
+        .await;
+        login
+    }
 }
 
 pub async fn logged_in() -> (Api, Login) {

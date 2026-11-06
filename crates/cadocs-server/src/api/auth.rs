@@ -181,7 +181,7 @@ async fn setup<S: AccountStore, A>(
         name: user.name.clone(),
         password_hash: state.passwords.hash(body.password).await?,
         workspace_id: Uuid::now_v7().to_string(),
-        workspace_slug: slug(&workspace_name),
+        workspace_slug: slug(&workspace_name, "workspace"),
         workspace_name,
     };
     let (token, session) = new_session(&state, &user.id)?;
@@ -436,7 +436,7 @@ pub(super) fn check_password(password: &str) -> Result<(), &'static str> {
 }
 
 /// Runs of anything but ASCII letters and digits become one dash.
-pub(super) fn slug(name: &str) -> String {
+pub(super) fn slug(name: &str, fallback: &str) -> String {
     let lowered = name.to_ascii_lowercase();
     let words = lowered
         .split(|c: char| !c.is_ascii_alphanumeric())
@@ -444,7 +444,7 @@ pub(super) fn slug(name: &str) -> String {
     let slug = words.collect::<Vec<_>>().join("-");
     let slug: String = slug.chars().take(MAX_SLUG_CHARS).collect();
     match slug.trim_end_matches('-') {
-        "" => "workspace".to_owned(),
+        "" => fallback.to_owned(),
         slug => slug.to_owned(),
     }
 }
@@ -455,12 +455,15 @@ mod tests {
 
     #[test]
     fn a_slug_keeps_ascii_letters_and_digits() {
-        assert_eq!(slug("Acme Docs"), "acme-docs");
-        assert_eq!(slug("  R&D -- 2026! "), "r-d-2026");
-        assert_eq!(slug("Équipe"), "quipe");
-        assert_eq!(slug("日本語"), "workspace");
-        assert_eq!(slug(&"a".repeat(200)).len(), MAX_SLUG_CHARS);
-        assert_eq!(slug(&format!("{}-b", "a".repeat(63))), "a".repeat(63));
+        assert_eq!(slug("Acme Docs", "workspace"), "acme-docs");
+        assert_eq!(slug("  R&D -- 2026! ", "workspace"), "r-d-2026");
+        assert_eq!(slug("Équipe", "workspace"), "quipe");
+        assert_eq!(slug("日本語", "workspace"), "workspace");
+        assert_eq!(slug(&"a".repeat(200), "workspace").len(), MAX_SLUG_CHARS);
+        assert_eq!(
+            slug(&format!("{}-b", "a".repeat(63)), "workspace"),
+            "a".repeat(63)
+        );
     }
 
     #[test]

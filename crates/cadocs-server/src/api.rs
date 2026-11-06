@@ -3,6 +3,7 @@
 mod admin;
 pub mod auth;
 mod invitations;
+mod spaces;
 mod workspaces;
 
 use std::borrow::Cow;
@@ -21,7 +22,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
 use cadocs_collab::Authorizer;
-use cadocs_store::{AccountStore, DocStore, StoreError, WorkspaceStore};
+use cadocs_store::{AccountStore, DocStore, SpaceStore, StoreError, WorkspaceStore};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -172,11 +173,18 @@ impl From<StoreError> for ApiError {
             StoreError::NameMismatch => ApiError::new(ErrorCode::ValidationFailed)
                 .with_message("This is not the name of the workspace")
                 .with_field("name", "mismatch"),
+            StoreError::UnknownGrantTarget => ApiError::new(ErrorCode::ValidationFailed)
+                .with_message("A grant names a user or group outside this workspace")
+                .with_field("grants", "unknown_target"),
+            StoreError::DuplicateGrant => ApiError::new(ErrorCode::ValidationFailed)
+                .with_message("Two grants name the same user or group")
+                .with_field("grants", "duplicate"),
             StoreError::NotAllowed => ApiError::new(ErrorCode::Forbidden),
             StoreError::UserNotFound
             | StoreError::WorkspaceNotFound
             | StoreError::MemberNotFound
-            | StoreError::InvitationNotFound => ApiError::new(ErrorCode::NotFound),
+            | StoreError::InvitationNotFound
+            | StoreError::SpaceNotFound => ApiError::new(ErrorCode::NotFound),
             error => {
                 tracing::error!(%error, "storage failed");
                 ApiError::new(ErrorCode::Unavailable)
@@ -336,7 +344,7 @@ impl IntoResponse for ApiError {
 
 pub fn router<S, A>(state: &AppState<S, A>) -> Router<AppState<S, A>>
 where
-    S: DocStore + AccountStore + WorkspaceStore,
+    S: DocStore + AccountStore + WorkspaceStore + SpaceStore,
     A: Authorizer,
 {
     // A nested fallback only sees paths below the root of the nest. `router` in `lib.rs` also
@@ -346,7 +354,8 @@ where
         .merge(auth::routes(state))
         .merge(admin::routes(state))
         .merge(workspaces::routes(state))
-        .merge(invitations::routes(state));
+        .merge(invitations::routes(state))
+        .merge(spaces::routes(state));
     finish(routes, state.http.clone())
 }
 

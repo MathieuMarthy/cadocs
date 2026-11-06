@@ -166,7 +166,8 @@ fn run_sql(dir: &Path, statement: &'static str) {
 #[test]
 fn reset_password_refuses_a_database_of_another_version() {
     for statement in [
-        "DELETE FROM _sqlx_migrations WHERE version = 4",
+        "DELETE FROM _sqlx_migrations
+         WHERE version = (SELECT max(version) FROM _sqlx_migrations)",
         "INSERT INTO _sqlx_migrations
              (version, description, success, checksum, execution_time)
          VALUES (9999, 'from the future', 1, x'00', 0)",
