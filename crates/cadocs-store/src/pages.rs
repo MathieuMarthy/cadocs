@@ -5,7 +5,7 @@
 
 use std::future::Future;
 
-use cadocs_core::permissions::SpaceRole;
+use cadocs_core::permissions::{Scope, SpaceRole};
 
 use crate::StoreError;
 
@@ -86,6 +86,13 @@ pub trait PageStore: Send + Sync + 'static {
         page_id: &str,
         actor: &str,
     ) -> impl Future<Output = Result<Option<PageRecord>, StoreError>> + Send;
+
+    /// What an open socket on this page is worth now, trash included. `None` once the row is gone.
+    fn page_scope(
+        &self,
+        page_id: &str,
+        actor: &str,
+    ) -> impl Future<Output = Result<Option<Scope>, StoreError>> + Send;
 
     /// The page, for a change that goes through its room. Refused with `PageNotFound` or
     /// `NotAllowed`.

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::Router;
@@ -12,8 +12,8 @@ use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{Method, Request, StatusCode, header};
 use axum::middleware::from_fn_with_state;
 use axum::routing::post;
-use cadocs_collab::{Authorizer, CollabConfig, DocRegistry};
-use cadocs_core::permissions::{SocketMode, WorkspaceRole};
+use cadocs_collab::{Authorizer, CollabConfig, DocRegistry, Seat};
+use cadocs_core::permissions::{Scope, SocketMode, SocketOutcome, WorkspaceRole};
 use cadocs_server::api;
 use cadocs_server::client_ip::TrustedProxies;
 use cadocs_server::config::{HttpConfig, PublicUrl, SocketConfig};
@@ -24,9 +24,9 @@ use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Credentials, DateCursor, DocEdit, DocStore,
     FirstUser, Grant, Invitation, InvitationPreview, InvitedUser, Member, Membership, NewGrant,
     NewInvitation, NewPage, NewPasswordReset, NewSession, NewSpace, NewWorkspace, PageMove,
-    PageRecord, PageStore, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore, StoreError,
-    StoredDoc, StoredUpdate, UpdateBasis, UserChanges, UserRecord, Workspace, WorkspaceChanges,
-    WorkspaceStore, now_ms,
+    PageRecord, PageStore, SessionStanding, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore,
+    StoreError, StoredDoc, StoredUpdate, UpdateBasis, UserChanges, UserRecord, Workspace,
+    WorkspaceChanges, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -112,6 +112,10 @@ impl PageStore for FlakyStore {
 
     async fn page(&self, page_id: &str, actor: &str) -> Result<Option<PageRecord>, StoreError> {
         self.inner.page(page_id, actor).await
+    }
+
+    async fn page_scope(&self, page_id: &str, actor: &str) -> Result<Option<Scope>, StoreError> {
+        self.inner.page_scope(page_id, actor).await
     }
 
     async fn page_to_edit(&self, page_id: &str, actor: &str) -> Result<PageRecord, StoreError> {
@@ -416,6 +420,15 @@ impl AccountStore for FlakyStore {
         self.inner.session(token_hash, now).await
     }
 
+    async fn session_standing(
+        &self,
+        token_hash: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<SessionStanding, StoreError> {
+        self.inner.session_standing(token_hash, user_id, now).await
+    }
+
     async fn touch_session(
         &self,
         token_hash: &str,
@@ -500,6 +513,42 @@ impl Authorizer for Fixed {
         _user_id: &str,
     ) -> Result<Option<SocketMode>, StoreError> {
         Ok(self.0)
+    }
+
+    async fn recheck(&self, _seat: &Seat<'_>) -> Result<SocketOutcome, StoreError> {
+        Ok(SocketOutcome::Keep)
+    }
+}
+
+/// Allows the upgrade, then answers the check made once the socket has joined.
+struct ChangedDuringTheJoin(Option<SocketOutcome>);
+
+impl Authorizer for ChangedDuringTheJoin {
+    async fn authorize(&self, _: &str, _: &str) -> Result<Option<SocketMode>, StoreError> {
+        Ok(Some(SocketMode::ReadWrite))
+    }
+
+    async fn recheck(&self, _seat: &Seat<'_>) -> Result<SocketOutcome, StoreError> {
+        self.0.ok_or(StoreError::PageNotFound)
+    }
+}
+
+/// Panics in its first pass over the sockets, and refuses them in the next one.
+#[derive(Default)]
+struct PanicsOnce(AtomicUsize);
+
+impl Authorizer for PanicsOnce {
+    async fn authorize(&self, _: &str, _: &str) -> Result<Option<SocketMode>, StoreError> {
+        Ok(Some(SocketMode::ReadWrite))
+    }
+
+    async fn recheck(&self, _seat: &Seat<'_>) -> Result<SocketOutcome, StoreError> {
+        match self.0.fetch_add(1, Ordering::SeqCst) {
+            // The check of the socket that joins.
+            0 => Ok(SocketOutcome::Keep),
+            1 => panic!("a pass that fails badly"),
+            _ => Ok(SocketOutcome::Close(4403)),
+        }
     }
 }
 
@@ -1070,6 +1119,40 @@ async fn edits_survive_a_server_restart() {
 }
 
 #[tokio::test]
+async fn a_change_during_the_join_closes_the_socket_with_its_code() {
+    let dir = TempDir::new().unwrap();
+    let outcome = Some(SocketOutcome::Close(4404));
+    let authorizer = ChangedDuringTheJoin(outcome);
+    let state = state(&dir, collab(), SocketConfig::default(), authorizer).await;
+    let server = start(state).await;
+    let mut client = server.client("doc").await;
+    assert_eq!(close_code(&mut client).await, Some(CloseCode::from(4404)));
+}
+
+#[tokio::test]
+async fn a_socket_that_cannot_be_checked_after_the_join_is_refused() {
+    let dir = TempDir::new().unwrap();
+    let authorizer = ChangedDuringTheJoin(None);
+    let state = state(&dir, collab(), SocketConfig::default(), authorizer).await;
+    let server = start(state).await;
+    let status = refused_status(server.request("doc")).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn a_pass_that_panics_does_not_stop_the_next_ones() {
+    let dir = TempDir::new().unwrap();
+    let socket = SocketConfig {
+        recheck: Duration::from_millis(20),
+        ..SocketConfig::default()
+    };
+    let state = state(&dir, collab(), socket, PanicsOnce::default()).await;
+    let server = start(state).await;
+    let mut client = server.client("doc").await;
+    assert_eq!(close_code(&mut client).await, Some(CloseCode::from(4403)));
+}
+
+#[tokio::test]
 async fn shutdown_closes_sockets_with_going_away() {
     let dir = TempDir::new().unwrap();
     let server = start_default(&dir).await;
@@ -1292,6 +1375,7 @@ async fn the_server_pings_and_a_silent_client_is_closed() {
     let socket = SocketConfig {
         ping: Duration::from_millis(50),
         ping_timeout: Duration::from_millis(200),
+        ..SocketConfig::default()
     };
     let server = start(state(&dir, collab(), socket, WRITER).await).await;
     let mut client = server.client("doc").await;
@@ -1323,6 +1407,7 @@ async fn a_client_that_answers_pings_stays_connected() {
     let socket = SocketConfig {
         ping: Duration::from_millis(20),
         ping_timeout: Duration::from_millis(100),
+        ..SocketConfig::default()
     };
     let server = start(state(&dir, collab(), socket, WRITER).await).await;
     let mut client = server.client("doc").await;

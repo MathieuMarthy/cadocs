@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use cadocs_core::permissions::SocketMode;
+use cadocs_core::permissions::{SocketMode, SocketOutcome};
 use cadocs_store::{DocEdit, DocStore, StoreError, StoredUpdate};
 use tokio::sync::{Notify, Semaphore, watch};
 use tokio::time::{Instant, sleep, sleep_until};
@@ -14,7 +14,7 @@ use tracing::warn;
 
 use crate::connection::Connection;
 use crate::room::{Room, Transition, lock};
-use crate::{CLOSE_GOING_AWAY, CollabConfig, CollabError};
+use crate::{Authorizer, CLOSE_GOING_AWAY, CollabConfig, CollabError, Seat};
 
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
 /// Further flush attempts of a room at shutdown, after which its edits are given up.
@@ -88,6 +88,7 @@ impl<S: DocStore> DocRegistry<S> {
         doc_id: &str,
         mode: SocketMode,
         user_id: &str,
+        session: &str,
     ) -> Result<Connection, CollabError> {
         let mut permit = Some(
             self.inner
@@ -98,7 +99,7 @@ impl<S: DocStore> DocRegistry<S> {
         );
         self.enter(doc_id, |room| {
             let permit = permit.take().expect("a connection joins only once");
-            room.join(mode, user_id, permit)
+            room.join(mode, user_id, session, permit)
         })
         .await
     }
@@ -141,6 +142,39 @@ impl<S: DocStore> DocRegistry<S> {
                     .map_err(|_| CollabError::AtCapacity)?,
             }
         }
+    }
+
+    /// Asks `authorizer` about every open socket, and closes those it refuses. A socket that cannot
+    /// be checked stays open, and the last failure is returned, for the next pass to fix.
+    pub async fn recheck(&self, authorizer: &impl Authorizer) -> Result<(), StoreError> {
+        let rooms: Vec<_> = lock(&self.inner.rooms)
+            .slots
+            .values()
+            .filter_map(|slot| match slot {
+                Slot::Live(room) => Some(room.clone()),
+                _ => None,
+            })
+            .collect();
+        let mut result = Ok(());
+        for room in rooms {
+            for socket in room.sockets() {
+                let seat = Seat {
+                    page_id: &room.doc_id,
+                    user_id: &socket.user,
+                    session: &socket.session,
+                    mode: socket.mode,
+                };
+                match authorizer.recheck(&seat).await {
+                    Ok(SocketOutcome::Keep) => {}
+                    Ok(SocketOutcome::Close(code)) => room.kick(socket.id, code),
+                    Err(error) => {
+                        warn!(doc_id = %room.doc_id, %error, "cannot recheck a socket");
+                        result = Err(error);
+                    }
+                }
+            }
+        }
+        result
     }
 
     /// Largest frame a socket may receive, for the socket layer's own limit.

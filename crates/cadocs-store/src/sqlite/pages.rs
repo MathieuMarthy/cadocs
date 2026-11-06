@@ -281,6 +281,12 @@ impl PageStore for SqliteStore {
         Ok(readable(select_page(&mut reader, page_id, actor).await?))
     }
 
+    async fn page_scope(&self, page_id: &str, actor: &str) -> Result<Option<Scope>, StoreError> {
+        let mut reader = self.reader.acquire().await?;
+        let row = select_page(&mut reader, page_id, actor).await?;
+        Ok(row.as_ref().map(scope))
+    }
+
     async fn page_to_edit(&self, page_id: &str, actor: &str) -> Result<PageRecord, StoreError> {
         let mut reader = self.reader.acquire().await?;
         let row = authorize(&mut reader, page_id, actor, SpaceAction::EditPage).await?;

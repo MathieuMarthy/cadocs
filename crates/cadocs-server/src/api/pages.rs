@@ -264,6 +264,7 @@ async fn move_page<S: PageStore, A>(
     PathParam(page): PathParam,
     JsonBody(body): JsonBody<MoveRequest>,
 ) -> Result<Json<PageBody>, ApiError> {
+    let new_space = body.space_id.is_some();
     let destination = PageMove {
         space_id: body.space_id,
         parent_id: body.parent_id,
@@ -273,6 +274,9 @@ async fn move_page<S: PageStore, A>(
         .store
         .move_page(&page, &current.user.id, &destination, now_ms())
         .await?;
+    if new_space {
+        state.access_changed();
+    }
     Ok(Json(page.into()))
 }
 
@@ -285,6 +289,7 @@ async fn trash<S: PageStore, A>(
         .store
         .trash_page(&page, &current.user.id, now_ms())
         .await?;
+    state.access_changed();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -303,6 +308,7 @@ async fn purge<S: PageStore, A>(
     PathParam(page): PathParam,
 ) -> Result<StatusCode, ApiError> {
     state.store.purge_page(&page, &current.user.id).await?;
+    state.access_changed();
     Ok(StatusCode::NO_CONTENT)
 }
 

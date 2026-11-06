@@ -29,6 +29,7 @@ Environment variables only, so no config file format has to be parsed or documen
 | `CADOCS_MAX_FRAME_BYTES` **P** | `8388608` | Largest incoming frame |
 | `CADOCS_SEND_QUEUE` **P** | `256` | Queued messages per socket |
 | `CADOCS_PING_SECS` **P** | `30` | Ping interval |
+| `CADOCS_SOCKET_RECHECK_SECS` **P** | `60` | Time between two checks of every open socket: the longest a socket outlives its session, or a change made by a command beside the server. A change made through the API closes sockets at once |
 | `CADOCS_PING_TIMEOUT_SECS` **P** | `90` | Silence before a socket closes, and the longest a single send may take. Must be above `CADOCS_PING_SECS` |
 | `CADOCS_DOC_READS` | `2` | Concurrent document reads outside a room ([ARCHITECTURE.md](ARCHITECTURE.md#reading-a-document-outside-a-room)) |
 

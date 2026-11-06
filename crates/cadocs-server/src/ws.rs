@@ -10,8 +10,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use cadocs_collab::{
     Authorizer, CLOSE_FRAME_TOO_LARGE, CLOSE_PROTOCOL_ERROR, CLOSE_TOO_SLOW, Close, CollabError,
-    Connection, Outbound,
+    Connection, Outbound, Seat,
 };
+use cadocs_core::permissions::SocketOutcome;
 use cadocs_store::DocStore;
 use tokio::time::{Instant, MissedTickBehavior, interval_at, timeout};
 
@@ -44,7 +45,9 @@ pub async fn upgrade<S: DocStore, A: Authorizer>(
             return StatusCode::SERVICE_UNAVAILABLE.into_response();
         }
     };
-    let connection = match state.registry.connect(&page_id, mode, user_id).await {
+    let hash = session.token_hash();
+    let connecting = state.registry.connect(&page_id, mode, user_id, &hash);
+    let connection = match connecting.await {
         Ok(connection) => connection,
         Err(CollabError::AtCapacity | CollabError::ShuttingDown) => {
             return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -54,6 +57,23 @@ pub async fn upgrade<S: DocStore, A: Authorizer>(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+
+    // A recheck only finds sockets that have joined. This covers a change made between the check
+    // above and the join: its pass may have come and gone, but a later change has a pass of its own.
+    let seat = Seat {
+        page_id: &page_id,
+        user_id,
+        session: &hash,
+        mode,
+    };
+    match state.authorizer.recheck(&seat).await {
+        Ok(SocketOutcome::Keep) => {}
+        Ok(SocketOutcome::Close(code)) => connection.close(code),
+        Err(error) => {
+            tracing::error!(page_id, %error, "cannot resolve a role");
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        }
+    }
 
     let max_frame_bytes = state.registry.max_frame_bytes();
     let config = state.socket;

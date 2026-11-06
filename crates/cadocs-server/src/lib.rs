@@ -27,8 +27,8 @@ use cadocs_collab::{Authorizer, DocRegistry};
 use cadocs_store::{AccountStore, DocStore, PageStore, SpaceStore, WorkspaceStore};
 use rust_embed::RustEmbed;
 use tokio::net::TcpListener;
-use tokio::sync::{oneshot, watch};
-use tokio::time::timeout;
+use tokio::sync::{Notify, oneshot, watch};
+use tokio::time::{MissedTickBehavior, interval, timeout};
 
 use crate::config::{HttpConfig, SocketConfig};
 use crate::password::Passwords;
@@ -50,6 +50,8 @@ pub struct AppState<S, A> {
     pub password_guesses: Arc<RateLimiter>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
     sockets: watch::Sender<()>,
+    /// Wakes the recheck of every socket.
+    access: Arc<Notify>,
 }
 
 impl<S, A> Clone for AppState<S, A> {
@@ -63,6 +65,7 @@ impl<S, A> Clone for AppState<S, A> {
             passwords: self.passwords.clone(),
             password_guesses: self.password_guesses.clone(),
             sockets: self.sockets.clone(),
+            access: self.access.clone(),
         }
     }
 }
@@ -87,7 +90,39 @@ impl<S, A> AppState<S, A> {
                 api::auth::GUESS_REFILL,
             )),
             sockets: watch::Sender::new(()),
+            access: Arc::default(),
         }
+    }
+
+    /// To call once a change that may alter what a user can reach is stored. Every socket gets
+    /// rechecked soon after. This does not wait for that: a client that goes away cancels a handler,
+    /// and changes in a burst share one pass.
+    pub fn access_changed(&self) {
+        self.access.notify_one();
+    }
+}
+
+/// Rechecks every socket after each change, and on a timer for what no request announces: a session
+/// that expires, or a command run beside the server. The timer also retries a pass that failed.
+async fn watch_access<S: DocStore, A: Authorizer>(
+    registry: DocRegistry<S>,
+    authorizer: Arc<A>,
+    access: Arc<Notify>,
+    every: Duration,
+) {
+    let mut timer = interval(every);
+    timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            () = access.notified() => {}
+            _ = timer.tick() => {}
+        }
+        // In a task of its own, so that a panic costs one pass and not every later revocation. The
+        // registry logs a storage failure, and the runtime a panic.
+        let registry = registry.clone();
+        let authorizer = authorizer.clone();
+        let pass = tokio::spawn(async move { registry.recheck(authorizer.as_ref()).await });
+        let _ = pass.await;
     }
 }
 
@@ -132,6 +167,12 @@ pub async fn serve<
 ) -> anyhow::Result<()> {
     let registry = state.registry.clone();
     let sockets = state.sockets.clone();
+    let watcher = tokio::spawn(watch_access(
+        registry.clone(),
+        state.authorizer.clone(),
+        state.access.clone(),
+        state.socket.recheck,
+    ));
     let (stop, stopped) = oneshot::channel::<()>();
     let app = router::<S, A, E>(state).into_make_service_with_connect_info::<SocketAddr>();
     let mut http = axum::serve(listener, app)
@@ -141,9 +182,13 @@ pub async fn serve<
         .into_future();
 
     tokio::select! {
-        result = &mut http => return result.context("the HTTP server stopped"),
+        result = &mut http => {
+            watcher.abort();
+            return result.context("the HTTP server stopped");
+        }
         () = shutdown => {}
     }
+    watcher.abort();
     let _ = stop.send(());
 
     // Before waiting on HTTP: a client that stalls mid-request must not hold back the flush.

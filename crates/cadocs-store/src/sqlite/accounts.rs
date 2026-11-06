@@ -7,7 +7,8 @@ use sqlx::{AssertSqlSafe, Row, SqliteConnection, SqliteExecutor};
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
     AccountStore, ActiveSession, AdminChanges, Credentials, FirstUser, Membership,
-    NewPasswordReset, NewSession, StoreError, UpdateBasis, User, UserChanges, UserRecord,
+    NewPasswordReset, NewSession, SessionStanding, StoreError, UpdateBasis, User, UserChanges,
+    UserRecord,
 };
 
 pub(super) const INSERT_SESSION: &str =
@@ -229,6 +230,31 @@ impl AccountStore for SqliteStore {
             user: user(&row),
             last_seen_at: row.get("last_seen_at"),
         }))
+    }
+
+    async fn session_standing(
+        &self,
+        token_hash: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<SessionStanding, StoreError> {
+        let mut reader = self.reader.acquire().await?;
+        let row = sqlx::query(
+            "SELECT u.disabled_at IS NOT NULL AS disabled,
+                 EXISTS (SELECT 1 FROM sessions s WHERE s.token_hash = ?1 AND s.user_id = u.id
+                                                    AND s.expires_at > ?3) AS live
+             FROM users u WHERE u.id = ?2",
+        )
+        .bind(token_hash)
+        .bind(user_id)
+        .bind(now)
+        .fetch_optional(&mut *reader)
+        .await?;
+        Ok(match row {
+            Some(row) if row.get::<bool, _>("disabled") => SessionStanding::Disabled,
+            Some(row) if row.get::<bool, _>("live") => SessionStanding::Active,
+            _ => SessionStanding::Ended,
+        })
     }
 
     async fn touch_session(

@@ -5,12 +5,15 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use cadocs_collab::{
-    CLOSE_FRAME_TOO_LARGE, CLOSE_GOING_AWAY, CLOSE_PAGE_GONE, CLOSE_PROTOCOL_ERROR,
+    Authorizer, CLOSE_FRAME_TOO_LARGE, CLOSE_GOING_AWAY, CLOSE_PAGE_GONE, CLOSE_PROTOCOL_ERROR,
     CLOSE_STORAGE_FAILING, CLOSE_TOO_SLOW, Close, CollabConfig, CollabError, DocRegistry, Outbound,
+    Seat,
 };
 use cadocs_core::permissions::SocketMode::{ReadOnly, ReadWrite};
+use cadocs_core::permissions::{SocketMode, SocketOutcome};
+use cadocs_store::StoreError;
 use cadocs_store::{DocEdit, DocStore, MAX_TITLE_CHARS, SqliteStore};
-use common::{AUTHOR, DOC, MemStore, Peer, config, frame, rebuild, state_vector, title};
+use common::{AUTHOR, DOC, MemStore, Peer, SESSION, config, frame, rebuild, state_vector, title};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 use tokio::time::sleep;
@@ -65,7 +68,10 @@ async fn offline_edits_arrive_through_sync_step2() {
     let registry = registry(&store);
     let mut alice = Peer::join(&registry, ReadWrite).await;
 
-    let conn = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
+    let conn = registry
+        .connect(DOC, ReadWrite, AUTHOR, SESSION)
+        .await
+        .unwrap();
     let mut bob = Peer::new(conn);
     bob.edit("offline");
     bob.sync().await;
@@ -102,8 +108,18 @@ async fn a_repeated_update_is_neither_stored_nor_broadcast() {
 async fn a_flush_copies_the_title_and_the_last_writer() {
     let store = MemStore::new();
     let registry = registry(&store);
-    let ada = Peer::new(registry.connect(DOC, ReadWrite, "ada").await.unwrap());
-    let mut bob = Peer::new(registry.connect(DOC, ReadWrite, "bob").await.unwrap());
+    let ada = Peer::new(
+        registry
+            .connect(DOC, ReadWrite, "ada", SESSION)
+            .await
+            .unwrap(),
+    );
+    let mut bob = Peer::new(
+        registry
+            .connect(DOC, ReadWrite, "bob", SESSION)
+            .await
+            .unwrap(),
+    );
 
     ada.write("Plans").unwrap();
     sleep(FLUSH).await;
@@ -616,7 +632,12 @@ async fn a_room_nobody_joined_still_unloads() {
     store.load_gate.hold();
     let waiting = {
         let registry = registry.clone();
-        tokio::spawn(async move { registry.connect(DOC, ReadWrite, AUTHOR).await.map(drop) })
+        tokio::spawn(async move {
+            registry
+                .connect(DOC, ReadWrite, AUTHOR, SESSION)
+                .await
+                .map(drop)
+        })
     };
     store.load_gate.entered().await;
     waiting.abort();
@@ -639,7 +660,10 @@ async fn concurrent_clients_share_one_load() {
     for _ in 0..5 {
         let registry = registry.clone();
         joins.push(tokio::spawn(async move {
-            registry.connect(DOC, ReadWrite, AUTHOR).await.is_ok()
+            registry
+                .connect(DOC, ReadWrite, AUTHOR, SESSION)
+                .await
+                .is_ok()
         }));
     }
     store.load_gate.entered().await;
@@ -683,12 +707,17 @@ async fn a_failed_load_is_reported_and_can_be_retried() {
     let registry = registry(&store);
     store.fail_load.store(true, Ordering::SeqCst);
 
-    let refused = registry.connect(DOC, ReadWrite, AUTHOR).await;
+    let refused = registry.connect(DOC, ReadWrite, AUTHOR, SESSION).await;
     assert!(matches!(refused, Err(CollabError::Store(_))));
     assert_eq!(registry.loaded_rooms(), 0);
 
     store.fail_load.store(false, Ordering::SeqCst);
-    assert!(registry.connect(DOC, ReadWrite, AUTHOR).await.is_ok());
+    assert!(
+        registry
+            .connect(DOC, ReadWrite, AUTHOR, SESSION)
+            .await
+            .is_ok()
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -707,7 +736,7 @@ async fn a_corrupt_document_is_refused() {
         .unwrap();
     let registry = registry(&store);
 
-    let refused = registry.connect(DOC, ReadWrite, AUTHOR).await;
+    let refused = registry.connect(DOC, ReadWrite, AUTHOR, SESSION).await;
 
     assert!(matches!(refused, Err(CollabError::CorruptDocument { .. })));
     assert_eq!(registry.loaded_rooms(), 0);
@@ -739,7 +768,10 @@ async fn a_read_only_update_is_dropped_and_answered_once() {
 async fn a_read_only_client_is_told_why() {
     let store = MemStore::new();
     let registry = registry(&store);
-    let conn = registry.connect(DOC, ReadOnly, AUTHOR).await.unwrap();
+    let conn = registry
+        .connect(DOC, ReadOnly, AUTHOR, SESSION)
+        .await
+        .unwrap();
     let mut reader = Peer::new(conn);
 
     reader.write("a").unwrap();
@@ -888,23 +920,43 @@ fn capped(store: &Arc<MemStore>, max_rooms: usize) -> DocRegistry<MemStore> {
 async fn at_the_cap_with_only_live_rooms_a_connection_is_refused() {
     let store = MemStore::new();
     let registry = capped(&store, 2);
-    let _a = registry.connect("a", ReadWrite, AUTHOR).await.unwrap();
-    let _b = registry.connect("b", ReadWrite, AUTHOR).await.unwrap();
+    let _a = registry
+        .connect("a", ReadWrite, AUTHOR, SESSION)
+        .await
+        .unwrap();
+    let _b = registry
+        .connect("b", ReadWrite, AUTHOR, SESSION)
+        .await
+        .unwrap();
 
-    let refused = registry.connect("c", ReadWrite, AUTHOR).await;
+    let refused = registry.connect("c", ReadWrite, AUTHOR, SESSION).await;
 
     assert!(matches!(refused, Err(CollabError::AtCapacity)));
     assert_eq!(registry.loaded_rooms(), 2);
-    assert!(registry.connect("a", ReadWrite, AUTHOR).await.is_ok());
+    assert!(
+        registry
+            .connect("a", ReadWrite, AUTHOR, SESSION)
+            .await
+            .is_ok()
+    );
 }
 
 #[tokio::test(start_paused = true)]
 async fn at_the_cap_the_oldest_idle_room_unloads_first() {
     let store = MemStore::new();
     let registry = capped(&store, 3);
-    let older = registry.connect("older", ReadWrite, AUTHOR).await.unwrap();
-    let newer = registry.connect("newer", ReadWrite, AUTHOR).await.unwrap();
-    let _live = registry.connect("live", ReadWrite, AUTHOR).await.unwrap();
+    let older = registry
+        .connect("older", ReadWrite, AUTHOR, SESSION)
+        .await
+        .unwrap();
+    let newer = registry
+        .connect("newer", ReadWrite, AUTHOR, SESSION)
+        .await
+        .unwrap();
+    let _live = registry
+        .connect("live", ReadWrite, AUTHOR, SESSION)
+        .await
+        .unwrap();
     let edit = Peer::new(older);
     edit.write("kept").unwrap();
     drop(edit);
@@ -912,12 +964,18 @@ async fn at_the_cap_the_oldest_idle_room_unloads_first() {
     drop(newer);
     sleep(Duration::from_secs(1)).await;
 
-    let _extra = registry.connect("extra", ReadWrite, AUTHOR).await.unwrap();
+    let _extra = registry
+        .connect("extra", ReadWrite, AUTHOR, SESSION)
+        .await
+        .unwrap();
 
     assert_eq!(registry.loaded_rooms(), 3);
     assert_eq!(title(&rebuild(&store.stored("older"))), "kept");
     let reloads = store.loads();
-    let _newer = registry.connect("newer", ReadWrite, AUTHOR).await.unwrap();
+    let _newer = registry
+        .connect("newer", ReadWrite, AUTHOR, SESSION)
+        .await
+        .unwrap();
     assert_eq!(store.loads(), reloads, "the newer idle room stayed loaded");
 }
 
@@ -925,13 +983,18 @@ async fn at_the_cap_the_oldest_idle_room_unloads_first() {
 async fn a_room_failing_to_flush_is_not_evicted() {
     let store = MemStore::new();
     let registry = capped(&store, 1);
-    let edit = Peer::new(registry.connect("a", ReadWrite, AUTHOR).await.unwrap());
+    let edit = Peer::new(
+        registry
+            .connect("a", ReadWrite, AUTHOR, SESSION)
+            .await
+            .unwrap(),
+    );
     store.fail_append.store(true, Ordering::SeqCst);
     edit.write("kept").unwrap();
     drop(edit);
     sleep(FLUSH).await;
 
-    let refused = registry.connect("b", ReadWrite, AUTHOR).await;
+    let refused = registry.connect("b", ReadWrite, AUTHOR, SESSION).await;
 
     assert!(matches!(refused, Err(CollabError::AtCapacity)));
     store.fail_append.store(false, Ordering::SeqCst);
@@ -947,13 +1010,21 @@ async fn past_the_socket_cap_a_connection_is_refused() {
         ..config()
     };
     let registry = DocRegistry::new(store.clone(), config);
-    let first = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
+    let first = registry
+        .connect(DOC, ReadWrite, AUTHOR, SESSION)
+        .await
+        .unwrap();
 
-    let refused = registry.connect(DOC, ReadWrite, AUTHOR).await;
+    let refused = registry.connect(DOC, ReadWrite, AUTHOR, SESSION).await;
     assert!(matches!(refused, Err(CollabError::AtCapacity)));
 
     drop(first);
-    assert!(registry.connect(DOC, ReadWrite, AUTHOR).await.is_ok());
+    assert!(
+        registry
+            .connect(DOC, ReadWrite, AUTHOR, SESSION)
+            .await
+            .is_ok()
+    );
 }
 
 // Flush failure
@@ -1026,7 +1097,12 @@ async fn a_full_queue_closes_write_sockets_and_refuses_the_edit() {
     store.fail_append.store(false, Ordering::SeqCst);
     sleep(Duration::from_secs(31)).await;
 
-    let mut back = Peer::new(registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap());
+    let mut back = Peer::new(
+        registry
+            .connect(DOC, ReadWrite, AUTHOR, SESSION)
+            .await
+            .unwrap(),
+    );
     back.doc = writer.doc.clone();
     back.sync().await;
     sleep(FLUSH).await;
@@ -1095,8 +1171,18 @@ async fn a_failed_compaction_does_not_block_an_unload() {
 async fn shutdown_flushes_every_room_and_closes_its_sockets() {
     let store = MemStore::new();
     let registry = registry(&store);
-    let mut alice = Peer::new(registry.connect("a", ReadWrite, AUTHOR).await.unwrap());
-    let bob = Peer::new(registry.connect("b", ReadWrite, AUTHOR).await.unwrap());
+    let mut alice = Peer::new(
+        registry
+            .connect("a", ReadWrite, AUTHOR, SESSION)
+            .await
+            .unwrap(),
+    );
+    let bob = Peer::new(
+        registry
+            .connect("b", ReadWrite, AUTHOR, SESSION)
+            .await
+            .unwrap(),
+    );
     alice.write("one").unwrap();
     bob.write("two").unwrap();
 
@@ -1108,7 +1194,7 @@ async fn shutdown_flushes_every_room_and_closes_its_sockets() {
     assert_eq!(title(&rebuild(&store.stored("b"))), "two");
     assert_eq!(registry.loaded_rooms(), 0);
     assert!(matches!(
-        registry.connect("a", ReadWrite, AUTHOR).await,
+        registry.connect("a", ReadWrite, AUTHOR, SESSION).await,
         Err(CollabError::ShuttingDown)
     ));
 }
@@ -1180,7 +1266,10 @@ async fn malformed_frames_close_the_socket_but_not_the_room() {
         &[0, 2, 3, 255, 255, 255],
     ];
     for bad in frames {
-        let conn = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
+        let conn = registry
+            .connect(DOC, ReadWrite, AUTHOR, SESSION)
+            .await
+            .unwrap();
         let refused = conn.receive(bad).map_err(|close| close.0);
         assert_eq!(refused, Err(CLOSE_PROTOCOL_ERROR), "frame {bad:?}");
     }
@@ -1196,7 +1285,10 @@ async fn malformed_frames_close_the_socket_but_not_the_room() {
 async fn mutated_frames_do_not_break_the_room() {
     let store = MemStore::new();
     let registry = registry(&store);
-    let conn = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
+    let conn = registry
+        .connect(DOC, ReadWrite, AUTHOR, SESSION)
+        .await
+        .unwrap();
     let mut source = Peer::with_doc(conn, Doc::with_client_id(7));
     source.sync().await;
     source.write("hello").unwrap();
@@ -1226,7 +1318,10 @@ async fn mutated_frames_do_not_break_the_room() {
         if next() % 4 == 0 {
             bytes.truncate(next() % bytes.len());
         }
-        let conn = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
+        let conn = registry
+            .connect(DOC, ReadWrite, AUTHOR, SESSION)
+            .await
+            .unwrap();
         let _ = conn.receive(&bytes);
     }
 
@@ -1269,7 +1364,10 @@ async fn a_client_that_stops_reading_is_closed() {
 async fn outbound_stays_closed_after_a_close() {
     let store = MemStore::new();
     let registry = registry(&store);
-    let mut conn = registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap();
+    let mut conn = registry
+        .connect(DOC, ReadWrite, AUTHOR, SESSION)
+        .await
+        .unwrap();
     registry.shutdown().await.unwrap();
 
     assert!(matches!(
@@ -1297,7 +1395,10 @@ fn peak_rss_kb() -> usize {
 async fn a_tiny_frame_cannot_declare_a_huge_count() {
     let store = MemStore::new();
     let registry = registry(&store);
-    let conn = registry.connect(DOC, ReadOnly, AUTHOR).await.unwrap();
+    let conn = registry
+        .connect(DOC, ReadOnly, AUTHOR, SESSION)
+        .await
+        .unwrap();
     let count = [0x80, 0x80, 0x80, 0x80, 0x02]; // 1 << 29
     let frames: [Vec<u8>; 3] = [
         [&[0, 0, 5][..], &count].concat(),
@@ -1325,7 +1426,7 @@ async fn a_snapshot_that_cannot_be_applied_is_refused() {
     store.compact(DOC, &snapshot).await.unwrap();
     let registry = registry(&store);
 
-    let refused = registry.connect(DOC, ReadWrite, AUTHOR).await;
+    let refused = registry.connect(DOC, ReadWrite, AUTHOR, SESSION).await;
 
     assert!(matches!(refused, Err(CollabError::CorruptDocument { .. })));
 }
@@ -1362,7 +1463,12 @@ async fn a_client_requesting_the_document_without_reading_is_closed() {
     let registry = DocRegistry::new(store.clone(), config);
     let alice = Peer::join(&registry, ReadWrite).await;
     alice.write(&"a".repeat(600)).unwrap();
-    let mut reader = Peer::new(registry.connect(DOC, ReadOnly, AUTHOR).await.unwrap());
+    let mut reader = Peer::new(
+        registry
+            .connect(DOC, ReadOnly, AUTHOR, SESSION)
+            .await
+            .unwrap(),
+    );
 
     for _ in 0..4 {
         let empty = yrs::StateVector::default();
@@ -1463,7 +1569,12 @@ async fn a_failed_load_is_not_a_failed_shutdown() {
     store.load_gate.hold();
     let loading = {
         let registry = registry.clone();
-        tokio::spawn(async move { registry.connect(DOC, ReadWrite, AUTHOR).await.map(drop) })
+        tokio::spawn(async move {
+            registry
+                .connect(DOC, ReadWrite, AUTHOR, SESSION)
+                .await
+                .map(drop)
+        })
     };
     store.load_gate.entered().await;
     let stopping = {
@@ -1719,7 +1830,12 @@ async fn a_large_document_reaches_a_client_with_a_small_frame_queued() {
         alice.write(&"a".repeat(400)).unwrap();
     }
 
-    let mut bob = Peer::new(registry.connect(DOC, ReadWrite, AUTHOR).await.unwrap());
+    let mut bob = Peer::new(
+        registry
+            .connect(DOC, ReadWrite, AUTHOR, SESSION)
+            .await
+            .unwrap(),
+    );
     bob.sync().await;
 
     assert_eq!(bob.closed, None);
@@ -1738,6 +1854,458 @@ async fn an_awareness_state_must_be_json() {
 
     assert_eq!(refused, Err(CLOSE_PROTOCOL_ERROR));
     assert!(watcher.present().is_empty());
+}
+
+fn state_at(id: u64, clock: u32, json: &str) -> Message {
+    let entry = AwarenessUpdateEntry {
+        clock,
+        json: json.into(),
+    };
+    let clients = [(yrs::block::ClientID::new(id), entry)].into();
+    Message::Awareness(AwarenessUpdate { clients })
+}
+
+fn state_of(peer: &Peer, id: u64) -> Option<serde_json::Value> {
+    peer.awareness.state(yrs::block::ClientID::new(id))
+}
+
+async fn join_as<S: DocStore>(registry: &DocRegistry<S>, user: &str) -> Peer {
+    let conn = registry.connect(DOC, ReadOnly, user, SESSION).await;
+    let mut peer = Peer::new(conn.unwrap());
+    peer.sync().await;
+    peer
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_socket_cannot_overwrite_the_state_of_another_user() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut ada = join_as(&registry, "ada").await;
+    let bob = join_as(&registry, "bob").await;
+    ada.send(state_at(1, 1, r#"{"name":"ada"}"#)).unwrap();
+    ada.pump().await;
+
+    bob.send(state_at(1, 2, r#"{"name":"bob"}"#)).unwrap();
+    ada.pump().await;
+
+    assert_eq!(state_of(&ada, 1).unwrap()["name"], "ada");
+    assert_eq!(ada.closed, None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_socket_cannot_remove_the_state_of_another_user() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut ada = join_as(&registry, "ada").await;
+    let mut bob = join_as(&registry, "bob").await;
+    ada.send(state_at(1, 1, r#"{"name":"ada"}"#)).unwrap();
+    bob.pump().await;
+
+    // What `y-protocols` sends about a peer it has not heard from for 30 seconds.
+    bob.send(state_at(1, 1, "null")).unwrap();
+    ada.pump().await;
+    bob.pump().await;
+
+    assert!(state_of(&ada, 1).is_some());
+    assert_eq!(bob.closed, None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_echo_of_another_state_closes_nobody() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let ada = join_as(&registry, "ada").await;
+    let mut bob = join_as(&registry, "bob").await;
+    ada.send(state_at(1, 1, r#"{"name":"ada"}"#)).unwrap();
+    bob.pump().await;
+
+    assert_eq!(bob.send(state_at(1, 1, r#"{"name":"ada"}"#)), Ok(()));
+    bob.pump().await;
+
+    assert_eq!(bob.closed, None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reconnecting_client_takes_its_id_back_from_its_old_socket() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut watcher = join_as(&registry, "bob").await;
+    let old = join_as(&registry, "ada").await;
+    let new = join_as(&registry, "ada").await;
+    old.send(state_at(1, 1, r#"{"at":"old"}"#)).unwrap();
+
+    new.send(state_at(1, 2, r#"{"at":"new"}"#)).unwrap();
+    drop(old);
+    watcher.pump().await;
+
+    assert_eq!(state_of(&watcher, 1).unwrap()["at"], "new");
+    drop(new);
+    watcher.pump().await;
+    assert_eq!(state_of(&watcher, 1), None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_id_of_a_socket_that_left_can_be_used_again() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut watcher = join_as(&registry, "carol").await;
+    let ada = join_as(&registry, "ada").await;
+    ada.send(state_at(1, 1, r#"{"name":"ada"}"#)).unwrap();
+    drop(ada);
+
+    let bob = join_as(&registry, "bob").await;
+    bob.send(state_at(1, 2, r#"{"name":"bob"}"#)).unwrap();
+    watcher.pump().await;
+
+    assert_eq!(state_of(&watcher, 1).unwrap()["name"], "bob");
+}
+
+const POSITION: &str = r#"{"type":null,"tname":null,"item":{"client":7,"clock":2},"assoc":0}"#;
+
+#[tokio::test(start_paused = true)]
+async fn a_cursor_of_a_real_client_is_accepted() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut watcher = join_as(&registry, "bob").await;
+    let reader = join_as(&registry, "ada").await;
+    let end = r#"{"type":{"client":7,"clock":0},"tname":null,"item":null,"assoc":-1}"#;
+    let root = r#"{"tname":"default"}"#;
+
+    for (clock, cursor) in [
+        format!(r#"{{"anchor":{POSITION},"head":{POSITION}}}"#),
+        format!(r#"{{"anchor":{end},"head":{root}}}"#),
+        "null".to_owned(),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let state = format!(r#"{{"user":{{"name":"ada"}},"cursor":{cursor}}}"#);
+        assert_eq!(reader.send(state_at(1, clock as u32 + 1, &state)), Ok(()));
+    }
+    watcher.pump().await;
+
+    assert!(state_of(&watcher, 1).is_some());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cursor_other_clients_cannot_read_closes_the_socket() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut watcher = join_as(&registry, "bob").await;
+    for cursor in [
+        "{}".to_owned(),
+        "1".to_owned(),
+        r#""x""#.to_owned(),
+        format!(r#"{{"anchor":{POSITION}}}"#),
+        format!(r#"{{"anchor":{POSITION},"head":null}}"#),
+        format!(r#"{{"anchor":{POSITION},"head":{{}}}}"#),
+        format!(r#"{{"anchor":{POSITION},"head":{{"assoc":0}}}}"#),
+        format!(r#"{{"anchor":{POSITION},"head":{{"item":{{}}}}}}"#),
+        format!(r#"{{"anchor":{POSITION},"head":{{"item":7}}}}"#),
+        format!(r#"{{"anchor":{POSITION},"head":{{"item":{{"client":"7","clock":1}}}}}}"#),
+        format!(r#"{{"anchor":{POSITION},"head":{{"item":{{"client":7,"clock":1.5}}}}}}"#),
+        format!(r#"{{"anchor":{POSITION},"head":{{"type":{{"client":-1,"clock":0}}}}}}"#),
+        format!(r#"{{"anchor":{POSITION},"head":{{"tname":3}}}}"#),
+        format!(r#"{{"anchor":{POSITION},"head":{{"tname":"x","assoc":"y"}}}}"#),
+    ] {
+        let reader = join_as(&registry, "ada").await;
+        let state = format!(r#"{{"cursor":{cursor}}}"#);
+        let refused = reader.send(state_at(1, 1, &state));
+        assert_eq!(refused, Err(CLOSE_PROTOCOL_ERROR), "{cursor}");
+    }
+    watcher.pump().await;
+    assert!(watcher.present().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_second_cursor_key_cannot_hide_a_bad_cursor() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let reader = join_as(&registry, "ada").await;
+    let refused = reader.send(state_at(1, 1, r#"{"cursor":null,"cursor":{}}"#));
+    assert_eq!(refused, Err(CLOSE_PROTOCOL_ERROR));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_state_that_is_not_an_object_has_no_cursor_to_check() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let reader = join_as(&registry, "ada").await;
+    assert_eq!(reader.send(state_at(1, 1, " [1]")), Ok(()));
+    assert_eq!(reader.send(state_at(1, 2, r#""text""#)), Ok(()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_room_that_stays_live_forgets_the_ids_that_left() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut watcher = join_as(&registry, "bob").await;
+    let mut keeper = join_as(&registry, "carol").await;
+    keeper.send(state_at(2, 3, r#"{"keeps":1}"#)).unwrap();
+    let gone = join_as(&registry, "ada").await;
+    gone.send(state_at(1, 5, "{}")).unwrap();
+    drop(gone);
+
+    // A clock the room knows is ignored as old, for as long as the room remembers the id.
+    let mut late = join_as(&registry, "ada").await;
+    late.send(state_at(1, 1, "{}")).unwrap();
+    let joiner = join_as(&registry, "dan").await;
+    assert_eq!(state_of(&joiner, 1), None);
+    drop(joiner);
+
+    for round in 0..256 {
+        let peer = join_as(&registry, "ada").await;
+        let entries = (0..16).map(|id| (1000 + round * 16 + id, "{}".to_owned()));
+        peer.send(Message::Awareness(awareness_update(entries)))
+            .unwrap();
+        drop(peer);
+        // A socket that stops reading gets closed.
+        for listener in [&mut watcher, &mut keeper, &mut late] {
+            listener.pump().await;
+        }
+    }
+
+    // Seen by a client that joins now: the watcher keeps its own clock for that id.
+    late.send(state_at(1, 1, "{}")).unwrap();
+    let joiner = join_as(&registry, "dan").await;
+    assert!(state_of(&joiner, 1).is_some(), "the room forgot this id");
+
+    // What is live stays, with its clock.
+    assert_eq!(state_of(&joiner, 2).unwrap()["keeps"], 1);
+    keeper.send(state_at(2, 3, r#"{"keeps":2}"#)).unwrap();
+    keeper.send(state_at(2, 4, r#"{"keeps":3}"#)).unwrap();
+    watcher.pump().await;
+    assert_eq!(state_of(&watcher, 2).unwrap()["keeps"], 3);
+}
+
+/// Fills the room with sockets of 16 ids each, and returns them.
+async fn fill_room<S: DocStore>(registry: &DocRegistry<S>, state: &str, ids: u64) -> Vec<Peer> {
+    let mut peers = Vec::new();
+    for first in (0..ids).step_by(16) {
+        let peer = join_as(registry, "ada").await;
+        let last = (first + 16).min(ids);
+        let entries = (first..last).map(|id| (id + 100, state.to_owned()));
+        peer.send(Message::Awareness(awareness_update(entries)))
+            .unwrap();
+        peers.push(peer);
+    }
+    peers
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_full_room_ignores_a_new_state_and_keeps_the_socket() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut watcher = join_as(&registry, "bob").await;
+    let peers = fill_room(&registry, "{}", 256).await;
+    watcher.pump().await;
+    assert_eq!(watcher.present().len(), 256);
+
+    let late = join_as(&registry, "carol").await;
+    assert_eq!(late.send(state_at(1, 1, "{}")), Ok(()));
+    watcher.pump().await;
+    assert_eq!(state_of(&watcher, 1), None);
+
+    drop(peers);
+    watcher.pump().await;
+    assert_eq!(late.send(state_at(1, 2, "{}")), Ok(()));
+    watcher.pump().await;
+    assert!(state_of(&watcher, 1).is_some());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_full_room_still_takes_a_change_of_a_known_state() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut watcher = join_as(&registry, "bob").await;
+    let ada = join_as(&registry, "carol").await;
+    ada.send(state_at(1, 1, "{}")).unwrap();
+    let _peers = fill_room(&registry, "{}", 255).await;
+
+    ada.send(state_at(1, 2, r#"{"moved":true}"#)).unwrap();
+    watcher.pump().await;
+
+    assert_eq!(state_of(&watcher, 1).unwrap()["moved"], true);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_states_of_a_room_are_bounded_in_bytes() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut watcher = join_as(&registry, "bob").await;
+    let large = format!("\"{}\"", "x".repeat(60 * 1024));
+    let _peers = fill_room(&registry, &large, 32).await;
+    watcher.pump().await;
+
+    assert_eq!(watcher.present().len(), 17);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_frame_with_more_states_than_a_room_holds_closes_the_socket() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let reader = join_as(&registry, "ada").await;
+    let entries = (0..273).map(|id| (id, "null".to_owned()));
+    let refused = reader.send(Message::Awareness(awareness_update(entries)));
+    assert_eq!(refused, Err(CLOSE_PROTOCOL_ERROR));
+}
+
+// Rechecks
+
+/// Closes the sockets of one user, and fails for another.
+struct Rules {
+    closes: &'static str,
+    fails: &'static str,
+}
+
+impl Authorizer for Rules {
+    async fn authorize(&self, _: &str, _: &str) -> Result<Option<SocketMode>, StoreError> {
+        Ok(Some(ReadWrite))
+    }
+
+    async fn recheck(&self, seat: &Seat<'_>) -> Result<SocketOutcome, StoreError> {
+        assert_eq!((seat.page_id, seat.session), (DOC, SESSION));
+        if seat.user_id == self.fails {
+            return Err(StoreError::PageNotFound);
+        }
+        Ok(match seat.user_id == self.closes {
+            true => SocketOutcome::Close(4403),
+            false => SocketOutcome::Keep,
+        })
+    }
+}
+
+async fn writer<S: DocStore>(registry: &DocRegistry<S>, user: &str) -> Peer {
+    let conn = registry.connect(DOC, ReadWrite, user, SESSION).await;
+    let mut peer = Peer::new(conn.unwrap());
+    peer.sync().await;
+    peer
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_recheck_closes_the_sockets_it_refuses_and_only_those() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut ada = writer(&registry, "ada").await;
+    let mut bob = writer(&registry, "bob").await;
+
+    let rules = Rules {
+        closes: "bob",
+        fails: "",
+    };
+    registry.recheck(&rules).await.unwrap();
+    ada.pump().await;
+    bob.pump().await;
+
+    assert_eq!(bob.closed, Some(4403));
+    assert_eq!(ada.closed, None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_socket_told_to_close_can_no_longer_write() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut ada = writer(&registry, "ada").await;
+    let bob = writer(&registry, "bob").await;
+    let rules = Rules {
+        closes: "bob",
+        fails: "",
+    };
+    registry.recheck(&rules).await.unwrap();
+
+    bob.write("too late").unwrap();
+    ada.pump().await;
+
+    assert_eq!(title(&ada.doc), "");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_recheck_that_fails_keeps_the_socket_and_checks_the_others() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut ada = writer(&registry, "ada").await;
+    let mut bob = writer(&registry, "bob").await;
+    let rules = Rules {
+        closes: "bob",
+        fails: "ada",
+    };
+
+    assert!(registry.recheck(&rules).await.is_err());
+    ada.pump().await;
+    bob.pump().await;
+
+    assert_eq!(ada.closed, None);
+    assert_eq!(bob.closed, Some(4403));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_connection_can_be_closed_by_the_socket_layer() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut ada = writer(&registry, "ada").await;
+    ada.conn.close(4409);
+    ada.pump().await;
+    assert_eq!(ada.closed, Some(4409));
+}
+
+// A dependency that never arrives
+
+#[tokio::test(start_paused = true)]
+async fn a_log_blocked_by_a_lost_dependency_compacts_in_the_end() {
+    let store = MemStore::new();
+    let registry = compacting(&store, 2);
+    let alice = Peer::join(&registry, ReadWrite).await;
+    let bob = Peer::join(&registry, ReadWrite).await;
+    let _lost = alice.edit("lost ");
+    let waiting = alice.edit("waiting");
+    alice
+        .send(Message::Sync(SyncMessage::Update(waiting)))
+        .unwrap();
+
+    for word in ["a", "b", "c", "d", "e", "f"] {
+        bob.write(word).unwrap();
+        sleep(FLUSH).await;
+    }
+    assert_eq!(store.compacts(), 0, "a dependency gets some time to arrive");
+
+    for word in ["g", "h", "i"] {
+        bob.write(word).unwrap();
+        sleep(FLUSH).await;
+    }
+    assert!(store.compacts() > 0);
+    let stored = store.stored(DOC);
+    assert!(stored.snapshot.is_some());
+    assert!(stored.updates.len() < 8, "{}", stored.updates.len());
+    let rebuilt = rebuild(&stored);
+    assert_eq!(title(&rebuilt), "abcdefghi");
+    assert!(!rebuilt.transact().has_missing_updates());
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_edit_after_a_compaction_without_a_lost_dependency_is_kept() {
+    let store = MemStore::new();
+    let registry = compacting(&store, 2);
+    let alice = Peer::join(&registry, ReadWrite).await;
+    let bob = Peer::join(&registry, ReadWrite).await;
+    let lost = alice.edit("one ");
+    let waiting = alice.edit("two");
+    alice
+        .send(Message::Sync(SyncMessage::Update(waiting)))
+        .unwrap();
+    for word in ["a", "b", "c", "d", "e", "f", "g", "h", "i"] {
+        bob.write(word).unwrap();
+        sleep(FLUSH).await;
+    }
+    assert!(store.compacts() > 0);
+
+    // The lost update comes back after all: what waited for it is released and stored again.
+    alice
+        .send(Message::Sync(SyncMessage::Update(lost)))
+        .unwrap();
+    sleep(FLUSH).await;
+
+    let rebuilt = rebuild(&store.stored(DOC));
+    assert!(title(&rebuilt).contains("one two"), "{}", title(&rebuilt));
 }
 
 #[tokio::test(start_paused = true)]

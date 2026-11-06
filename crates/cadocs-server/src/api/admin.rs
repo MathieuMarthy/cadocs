@@ -97,6 +97,7 @@ async fn update_user<S: AccountStore, A>(
         .store
         .administer_user(&user, changes, now_ms())
         .await?;
+    state.access_changed();
     Ok(Json(record.into()))
 }
 
@@ -105,6 +106,7 @@ async fn delete_user<S: AccountStore, A>(
     PathParam(user): PathParam,
 ) -> Result<StatusCode, ApiError> {
     state.store.delete_user(&user).await?;
+    state.access_changed();
     Ok(StatusCode::NO_CONTENT)
 }
 

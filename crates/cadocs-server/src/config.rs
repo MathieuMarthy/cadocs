@@ -100,6 +100,9 @@ pub struct SocketConfig {
     pub ping: Duration,
     /// Silence before a socket closes. Also bounds how long one send may take.
     pub ping_timeout: Duration,
+    /// Time between two rechecks of every socket, which is how an expired session or a change made
+    /// outside the server closes one.
+    pub recheck: Duration,
 }
 
 impl Default for SocketConfig {
@@ -107,6 +110,7 @@ impl Default for SocketConfig {
         Self {
             ping: Duration::from_secs(30),
             ping_timeout: Duration::from_secs(90),
+            recheck: Duration::from_secs(60),
         }
     }
 }
@@ -146,6 +150,7 @@ impl Config {
             socket: SocketConfig {
                 ping: read.secs("CADOCS_PING_SECS", socket.ping)?,
                 ping_timeout: read.secs("CADOCS_PING_TIMEOUT_SECS", socket.ping_timeout)?,
+                recheck: read.secs("CADOCS_SOCKET_RECHECK_SECS", socket.recheck)?,
             },
         };
         config.validate()?;
@@ -181,6 +186,10 @@ impl Config {
         ensure!(
             !self.socket.ping.is_zero(),
             "CADOCS_PING_SECS must not be 0"
+        );
+        ensure!(
+            (1..=MAX_SECS).contains(&self.socket.recheck.as_secs()),
+            "CADOCS_SOCKET_RECHECK_SECS must be between 1 and {MAX_SECS}"
         );
         ensure!(
             self.socket.ping_timeout > self.socket.ping,
@@ -442,6 +451,8 @@ mod tests {
     #[test]
     fn values_that_would_panic_or_kill_every_socket_are_refused() {
         assert!(config(&[("CADOCS_PING_SECS", "0")]).is_err());
+        assert!(config(&[("CADOCS_SOCKET_RECHECK_SECS", "0")]).is_err());
+        assert!(config(&[("CADOCS_SOCKET_RECHECK_SECS", "18446744073709551615")]).is_err());
         assert!(config(&[("CADOCS_FLUSH_INTERVAL_MS", "0")]).is_err());
         assert!(config(&[("CADOCS_SEND_QUEUE", "0")]).is_err());
         assert!(

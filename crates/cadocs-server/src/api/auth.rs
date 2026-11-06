@@ -238,6 +238,7 @@ async fn logout<S: AccountStore, A>(
     Extension(current): Extension<CurrentSession>,
 ) -> Result<Response, ApiError> {
     state.store.delete_session(&current.token_hash()).await?;
+    state.access_changed();
     Ok(session_ended(&state))
 }
 
@@ -320,6 +321,9 @@ async fn update_me<S: AccountStore, A>(
         .store
         .update_user(&user.id, &changes, &basis, now_ms())
         .await?;
+    if changes.password_hash.is_some() {
+        state.access_changed();
+    }
     Ok(Json(UserBody {
         name: changes.name.unwrap_or(user.name),
         email: changes.email.unwrap_or(user.email),
@@ -355,6 +359,7 @@ async fn use_password_reset<S: AccountStore, A>(
     {
         return Err(ApiError::new(ErrorCode::NotFound));
     }
+    state.access_changed();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -363,6 +368,7 @@ async fn delete_me<S: AccountStore, A>(
     Extension(current): Extension<CurrentSession>,
 ) -> Result<Response, ApiError> {
     state.store.delete_user(&current.user.id).await?;
+    state.access_changed();
     Ok(session_ended(&state))
 }
 

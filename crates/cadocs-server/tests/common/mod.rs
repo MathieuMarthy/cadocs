@@ -76,13 +76,21 @@ impl Login {
 }
 
 pub async fn start_with(public_url: &str, proxies: &str) -> Api {
+    start_tuned(public_url, proxies, &[]).await
+}
+
+/// `settings` are more environment variables.
+pub async fn start_tuned(public_url: &str, proxies: &str, settings: &[(&str, &str)]) -> Api {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("cadocs.db");
     let store = Arc::new(SqliteStore::open(&path).await.unwrap());
     let config = Config::from_lookup(|name| match name {
         "CADOCS_PUBLIC_URL" => Some(public_url.to_owned()),
         "CADOCS_TRUSTED_PROXIES" => Some(proxies.to_owned()),
-        _ => None,
+        _ => settings
+            .iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| (*value).to_owned()),
     })
     .unwrap();
     let registry = DocRegistry::new(store.clone(), config.collab);

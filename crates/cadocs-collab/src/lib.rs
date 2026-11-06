@@ -11,8 +11,11 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use cadocs_core::permissions::{CLOSE_NOT_FOUND, Scope, SocketMode, page_socket_mode};
-use cadocs_store::{PageStore, StoreError};
+use cadocs_core::permissions::{
+    CLOSE_FORBIDDEN, CLOSE_NOT_FOUND, CLOSE_SESSION_ENDED, Scope, SocketMode, SocketOutcome,
+    page_socket_mode, recompute_page_socket,
+};
+use cadocs_store::{AccountStore, PageStore, SessionStanding, StoreError, now_ms};
 
 pub use connection::{Close, Connection, Outbound};
 pub use registry::DocRegistry;
@@ -85,13 +88,29 @@ impl From<StoreError> for CollabError {
     }
 }
 
-/// Decides the mode of a page socket before the upgrade. `None` refuses it.
+/// An open page socket, as a recheck sees it.
+#[derive(Debug, Clone, Copy)]
+pub struct Seat<'a> {
+    pub page_id: &'a str,
+    pub user_id: &'a str,
+    /// The hash of the session that opened the socket.
+    pub session: &'a str,
+    pub mode: SocketMode,
+}
+
 pub trait Authorizer: Send + Sync + 'static {
+    /// Decides the mode of a page socket before the upgrade. `None` refuses it.
     fn authorize(
         &self,
         page_id: &str,
         user_id: &str,
     ) -> impl Future<Output = Result<Option<SocketMode>, StoreError>> + Send;
+
+    /// What must happen to an open socket, as things stand now.
+    fn recheck(
+        &self,
+        seat: &Seat<'_>,
+    ) -> impl Future<Output = Result<SocketOutcome, StoreError>> + Send;
 }
 
 /// Resolves the role of a user from the database, as REST does.
@@ -106,7 +125,7 @@ impl<S> PageAuthorizer<S> {
     }
 }
 
-impl<S: PageStore> Authorizer for PageAuthorizer<S> {
+impl<S: PageStore + AccountStore> Authorizer for PageAuthorizer<S> {
     async fn authorize(
         &self,
         page_id: &str,
@@ -115,5 +134,22 @@ impl<S: PageStore> Authorizer for PageAuthorizer<S> {
         let page = self.store.page(page_id, user_id).await?;
         // `page` hides what is trashed, so a page it returns is live.
         Ok(page.and_then(|page| page_socket_mode(Scope::live(Some(page.role)))))
+    }
+
+    async fn recheck(&self, seat: &Seat<'_>) -> Result<SocketOutcome, StoreError> {
+        let standing = self
+            .store
+            .session_standing(seat.session, seat.user_id, now_ms());
+        match standing.await? {
+            SessionStanding::Active => {}
+            SessionStanding::Disabled => return Ok(SocketOutcome::Close(CLOSE_FORBIDDEN)),
+            SessionStanding::Ended => return Ok(SocketOutcome::Close(CLOSE_SESSION_ENDED)),
+        }
+        let scope = self.store.page_scope(seat.page_id, seat.user_id).await?;
+        Ok(
+            scope.map_or(SocketOutcome::Close(CLOSE_NOT_FOUND), |scope| {
+                recompute_page_socket(seat.mode, scope)
+            }),
+        )
     }
 }

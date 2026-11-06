@@ -81,6 +81,8 @@ A change that may lower access runs through the same check for open sockets, bot
 | Page moved to another space | Recompute for sockets on the page and its descendants |
 | Member removed, user disabled or deleted | Close with `4403`, or `4401` if the account is gone |
 | Logout, session expired, password changed | Close that user's affected sockets with `4401` |
-| Page or space trashed | Close with `4404` |
+| Page or space trashed, page purged, workspace deleted | Close with `4404` |
 
-Outcome of a recompute on a page socket: if the page is no longer readable, close with `4403`. If it stays readable but the mode changes, close with `4409`, and the client reconnects in the new mode.
+Outcome of a recompute on a page socket: if the page is no longer readable, close with `4403`. If it stays readable but the mode changes, close with `4409`, and the client reconnects in the new mode. A raise closes too, so a viewer who becomes an editor can write without reloading.
+
+Every trigger runs one pass over all open page sockets, which looks at each socket's session, then at its role, from the database. So a trigger needs no list of who it affects, and a pass closes in the order of that check: a session that ended or an account that is gone gives `4401`, a disabled account `4403`, a page row that is gone `4404`. A pass also runs every `CADOCS_SOCKET_RECHECK_SECS`, for what no request announces: an expired session, a command run beside the server, and a pass that failed on a storage error, whose sockets stay open until then. A socket that joins runs the same check once, after joining, so a change landing between its first check and its join cannot miss it.

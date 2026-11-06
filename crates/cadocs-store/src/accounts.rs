@@ -55,6 +55,16 @@ pub struct ActiveSession {
     pub last_seen_at: i64,
 }
 
+/// What an open socket's session has become.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionStanding {
+    Active,
+    /// The account stays, and a reversible decision keeps it out.
+    Disabled,
+    /// Logged out, expired, revoked, or the account is gone.
+    Ended,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Membership {
     pub workspace_id: String,
@@ -136,6 +146,15 @@ pub trait AccountStore: Send + Sync + 'static {
         token_hash: &str,
         now: i64,
     ) -> impl Future<Output = Result<Option<ActiveSession>, StoreError>> + Send;
+
+    /// `user_id` is who opened the session: disabling an account deletes its sessions, and the
+    /// answer must still tell that apart from a logout.
+    fn session_standing(
+        &self,
+        token_hash: &str,
+        user_id: &str,
+        now: i64,
+    ) -> impl Future<Output = Result<SessionStanding, StoreError>> + Send;
 
     /// Records a use of the session and extends it.
     fn touch_session(

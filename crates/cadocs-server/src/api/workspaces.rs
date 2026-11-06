@@ -175,6 +175,7 @@ async fn delete_workspace<S: WorkspaceStore, A>(
         .store
         .delete_workspace(&workspace, &current.user.id, &body.name)
         .await?;
+    state.access_changed();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -233,6 +234,7 @@ async fn update_member<S: WorkspaceStore, A>(
         .store
         .set_member_role(&workspace, &current.user.id, &user, role)
         .await?;
+    state.access_changed();
     Ok(Json(member.into()))
 }
 
@@ -245,5 +247,6 @@ async fn remove_member<S: WorkspaceStore, A>(
         .store
         .remove_member(&workspace, &current.user.id, &user)
         .await?;
+    state.access_changed();
     Ok(StatusCode::NO_CONTENT)
 }

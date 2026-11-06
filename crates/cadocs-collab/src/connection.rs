@@ -97,6 +97,11 @@ impl Connection {
         }
     }
 
+    /// Ends this socket with `code`, as a recheck of another task would.
+    pub fn close(&self, code: u16) {
+        self.room.kick(self.id, code);
+    }
+
     pub fn mode(&self) -> SocketMode {
         self.room.mode(self.id)
     }

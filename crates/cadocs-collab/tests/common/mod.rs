@@ -19,6 +19,7 @@ use yrs::{Doc, GetString, Map, ReadTxn, StateVector, Text, TextPrelim, Transact,
 
 pub const DOC: &str = "doc";
 pub const AUTHOR: &str = "ada";
+pub const SESSION: &str = "session of ada";
 
 /// Pauses a store call until it is released, so a test can act in the middle of it.
 #[derive(Default)]
@@ -275,7 +276,7 @@ impl Peer {
 
     /// Joins and completes the y-sync handshake.
     pub async fn join<S: DocStore>(registry: &DocRegistry<S>, mode: SocketMode) -> Self {
-        let conn = registry.connect(DOC, mode, AUTHOR).await.unwrap();
+        let conn = registry.connect(DOC, mode, AUTHOR, SESSION).await.unwrap();
         let mut peer = Self::new(conn);
         peer.sync().await;
         peer

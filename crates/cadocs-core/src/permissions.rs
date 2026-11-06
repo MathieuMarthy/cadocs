@@ -1,5 +1,7 @@
 //! The access rules of `docs/PERMISSIONS.md` as pure functions. Anything not listed is denied.
 
+/// Sent when the session is over, or the account is gone.
+pub const CLOSE_SESSION_ENDED: u16 = 4401;
 /// Sent when a recompute leaves the page unreadable.
 pub const CLOSE_FORBIDDEN: u16 = 4403;
 /// Sent when the page or its space is in the trash.

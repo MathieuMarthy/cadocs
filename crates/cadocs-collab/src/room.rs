@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::mem;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use cadocs_core::permissions::SocketMode;
 use cadocs_store::{DocEdit, Snapshot, StoredDoc, StoredUpdate};
+use serde::Deserialize;
 use serde::de::IgnoredAny;
+use serde_json::Value;
 use tokio::sync::{Notify, OwnedSemaphorePermit, mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tracing::warn;
@@ -30,6 +32,18 @@ const READ_ONLY_REASON: &str = "read-only";
 const MAX_ANNOUNCED_IDS: usize = 16;
 /// Largest awareness state: a name, a colour and a cursor take well under 1 KiB.
 const MAX_AWARENESS_STATE_BYTES: usize = 64 * 1024;
+/// States a room holds at once, and their bytes. Past this a state is ignored and its socket stays:
+/// presence is the only thing lost, and the client tries again at its next heartbeat.
+const MAX_ROOM_STATES: usize = 256;
+const MAX_ROOM_STATE_BYTES: usize = 1024 * 1024;
+/// Ids a room remembers, gone ones included. yrs keeps a clock for each id it ever saw, so a room
+/// that never empties would grow with each reload of a tab. Past this it forgets the gone ones.
+const MAX_ROOM_KNOWN_IDS: usize = 4096;
+/// Entries of one awareness frame: an honest client echoes what the room holds, plus its own.
+const MAX_FRAME_STATES: usize = MAX_ROOM_STATES + MAX_ANNOUNCED_IDS;
+/// How far past `compact_updates` a log may grow while an update waits for a dependency. Past this
+/// the dependency counts as lost, and compaction drops what waits for it.
+const WAITING_LOG_FACTOR: usize = 4;
 const NULL_STATE: &str = "null";
 /// The root type that holds the title (`docs/DATA_MODEL.md`).
 const TITLE: &str = "title";
@@ -44,6 +58,8 @@ struct Client {
     mode: SocketMode,
     /// The user behind this socket, shared by the edits it makes.
     user: Arc<str>,
+    /// The hash of the session that opened it.
+    session: Arc<str>,
     frames: mpsc::Sender<Arc<[u8]>>,
     /// Bytes waiting in `frames`. A frame count alone would let a client that requests the whole
     /// document and never reads pin `send_queue` copies of it.
@@ -51,8 +67,6 @@ struct Client {
     max_queued_bytes: usize,
     /// `None` once the client was told to close.
     close: Option<oneshot::Sender<u16>>,
-    /// Awareness ids this socket owns, removed when it closes.
-    owned: HashSet<ClientID>,
     /// Ids this socket introduced to the room, removed ones included.
     announced: usize,
     told_read_only: bool,
@@ -81,6 +95,20 @@ impl Client {
     }
 }
 
+/// Who announced an awareness state.
+struct StateOwner {
+    socket: u64,
+    bytes: usize,
+}
+
+/// A socket a recheck must look at.
+pub(crate) struct OpenSocket {
+    pub(crate) id: u64,
+    pub(crate) mode: SocketMode,
+    pub(crate) user: Arc<str>,
+    pub(crate) session: Arc<str>,
+}
+
 /// A loaded document. All of this is reached under one short lock, never held across an await.
 pub(crate) struct RoomState {
     awareness: Awareness,
@@ -88,6 +116,12 @@ pub(crate) struct RoomState {
     applied: Arc<Mutex<Option<Vec<u8>>>>,
     clients: HashMap<u64, Client>,
     next_client: u64,
+    /// Every awareness state the room holds, removed when its socket closes.
+    states: HashMap<ClientID, StateOwner>,
+    /// Sum of `states`.
+    state_bytes: usize,
+    /// Ids `awareness` holds a clock for.
+    known_ids: usize,
     /// Updates the room task has not picked up yet.
     pub(crate) queue: Vec<StoredUpdate>,
     /// Who wrote the last of `queue`.
@@ -157,6 +191,43 @@ impl RoomState {
             .doc()
             .transact()
             .encode_state_as_update_v1(&StateVector::default())
+    }
+
+    /// The document without what still waits for a dependency.
+    fn encode_applied(&self) -> Vec<u8> {
+        self.awareness
+            .doc()
+            .transact()
+            .encode_diff_v1(&StateVector::default())
+    }
+
+    /// Starts over from the live states, which keep their clocks. A clock forgotten this way only
+    /// lets an old state of a gone client back in, and that client would have to send it.
+    fn forget_gone_ids(&mut self) {
+        if self.known_ids <= MAX_ROOM_KNOWN_IDS {
+            return;
+        }
+        let Ok(live) = self.awareness.update() else {
+            return;
+        };
+        let mut awareness = Awareness::new(self.awareness.doc().clone());
+        if awareness.apply_update(live).is_ok() {
+            self.awareness = awareness;
+            self.known_ids = self.states.len();
+        }
+    }
+
+    fn own_state(&mut self, client: ClientID, owner: StateOwner) {
+        self.state_bytes += owner.bytes;
+        if let Some(previous) = self.states.insert(client, owner) {
+            self.state_bytes -= previous.bytes;
+        }
+    }
+
+    fn forget_state(&mut self, client: ClientID) {
+        if let Some(previous) = self.states.remove(&client) {
+            self.state_bytes -= previous.bytes;
+        }
     }
 
     /// `None` for a document with no title yet. The panic guard is for the room task, which must
@@ -242,6 +313,9 @@ impl Room {
                 applied,
                 clients: HashMap::new(),
                 next_client: 0,
+                states: HashMap::new(),
+                state_bytes: 0,
+                known_ids: 0,
                 queue: Vec::new(),
                 author: None,
                 unflushed_bytes: 0,
@@ -266,6 +340,28 @@ impl Room {
         self.config.max_frame_bytes
     }
 
+    /// The sockets not told to close yet.
+    pub(crate) fn sockets(&self) -> Vec<OpenSocket> {
+        self.state()
+            .clients
+            .iter()
+            .filter(|(_, client)| client.close.is_some())
+            .map(|(id, client)| OpenSocket {
+                id: *id,
+                mode: client.mode,
+                user: client.user.clone(),
+                session: client.session.clone(),
+            })
+            .collect()
+    }
+
+    /// Tells one socket to close. Its frames are ignored from here on.
+    pub(crate) fn kick(&self, id: u64, code: u16) {
+        if let Some(client) = self.state().clients.get_mut(&id) {
+            client.kick(code);
+        }
+    }
+
     pub(crate) fn mode(&self, id: u64) -> SocketMode {
         self.state()
             .clients
@@ -279,6 +375,7 @@ impl Room {
         self: &Arc<Self>,
         mode: SocketMode,
         user: &str,
+        session: &str,
         permit: OwnedSemaphorePermit,
     ) -> Connection {
         // The handshake alone takes two frames.
@@ -294,11 +391,11 @@ impl Room {
             Client {
                 mode,
                 user: user.into(),
+                session: session.into(),
                 frames,
                 queued_bytes: queued_bytes.clone(),
                 max_queued_bytes: self.config.max_frame_bytes,
                 close: Some(close),
-                owned: HashSet::new(),
                 announced: 0,
                 told_read_only: false,
             },
@@ -353,30 +450,25 @@ impl Room {
                     .apply_update_summary(update)
                     .map_err(|_| Close(CLOSE_PROTOCOL_ERROR))?;
                 if let Some(summary) = summary {
-                    // Only real changes change ownership: `y-websocket` echoes the states of
-                    // other clients back, with a clock the server already knows.
-                    for changed in summary.added.iter().chain(&summary.updated) {
-                        for client in state.clients.values_mut() {
-                            client.owned.remove(changed);
-                        }
-                    }
-                    for removed in &summary.removed {
-                        for client in state.clients.values_mut() {
-                            client.owned.remove(removed);
-                        }
-                    }
-                    if let Some(client) = state.clients.get_mut(&id) {
-                        client.owned.extend(&summary.added);
-                        client.owned.extend(&summary.updated);
-                    }
                     let update = state
                         .awareness
                         .update_with_clients(summary.all_changes())
                         .map_err(|_| Close(CLOSE_PROTOCOL_ERROR))?;
+                    // Only real changes change ownership: `y-websocket` echoes the states of
+                    // other clients back, with a clock the server already knows.
+                    for changed in summary.added.iter().chain(&summary.updated) {
+                        let entry = update.clients.get(changed);
+                        let bytes = entry.map_or(0, |entry| entry.json.len());
+                        state.own_state(*changed, StateOwner { socket: id, bytes });
+                    }
+                    for removed in &summary.removed {
+                        state.forget_state(*removed);
+                    }
                     // To the sender too, as `y-websocket`'s server does: its client reconnects
                     // after 30 seconds of silence, and this is all it hears when alone.
                     state.broadcast_all(&Message::Awareness(update));
                 }
+                state.forget_gone_ids();
                 Ok(())
             }
             Message::AwarenessQuery => {
@@ -491,14 +583,23 @@ impl Room {
     /// Removes a client and the awareness states it owned, so no ghost cursor stays.
     pub(crate) fn leave(&self, id: u64) {
         let mut state = self.state();
-        let Some(client) = state.clients.remove(&id) else {
+        if state.clients.remove(&id).is_none() {
             return;
-        };
+        }
+        let owned: Vec<ClientID> = state
+            .states
+            .iter()
+            .filter(|(_, owner)| owner.socket == id)
+            .map(|(client, _)| *client)
+            .collect();
+        for client in &owned {
+            state.forget_state(*client);
+        }
         // A null state at the same clock removes the entry everywhere, as `y-websocket`'s server
         // does. `remove_state` would bump the clock, and the client's next change after a
         // reconnect would be ignored as old.
-        if !client.owned.is_empty()
-            && let Ok(mut update) = state.awareness.update_with_clients(client.owned)
+        if !owned.is_empty()
+            && let Ok(mut update) = state.awareness.update_with_clients(owned)
         {
             for entry in update.clients.values_mut() {
                 entry.json = NULL_STATE.into();
@@ -520,12 +621,24 @@ impl Room {
             return None;
         }
         // yrs merges what is waiting into the encoded state, and that merge lost a delete in
-        // `real_updates_in_any_order_survive_a_reload`. The log stays correct, so it waits.
-        if state.awareness.doc().transact().has_missing_updates() {
+        // `real_updates_in_any_order_survive_a_reload`. The log stays correct, so it waits, but not
+        // forever. A connected writer resends what this drops, and real clients send in order, so
+        // this loses a crafted update, or one whose writer left and whose dependency never came.
+        let waiting = state.awareness.doc().transact().has_missing_updates();
+        if waiting && state.stored_updates <= self.config.compact_updates * WAITING_LOG_FACTOR {
             return None;
         }
+        if waiting {
+            warn!(doc_id = %self.doc_id, "compacting without an update whose dependency never came");
+        }
         // The panic guard matters here: this runs in the room task, which must survive to flush.
-        let encoded = catch_unwind(AssertUnwindSafe(|| state.encode_full()));
+        let encoded = catch_unwind(AssertUnwindSafe(|| {
+            if waiting {
+                state.encode_applied()
+            } else {
+                state.encode_full()
+            }
+        }));
         match encoded {
             Ok(encoded) => Some(Snapshot {
                 state: encoded,
@@ -568,24 +681,60 @@ fn admit_awareness(
     id: u64,
     update: &mut AwarenessUpdate,
 ) -> Result<(), Close> {
+    if update.clients.len() > MAX_FRAME_STATES {
+        return Err(Close(CLOSE_PROTOCOL_ERROR));
+    }
     let awareness = &state.awareness;
     update.clients.retain(|client, entry| {
         entry.json.as_ref() != NULL_STATE || awareness.meta(*client).is_some()
     });
-    // The browser parses each state and stops at the first bad one, which would hide every cursor
-    // after it, for everybody.
+    let Some(user) = state.clients.get(&id).map(|client| client.user.clone()) else {
+        return Ok(());
+    };
+    // Dropped, not refused: `y-websocket` echoes what it hears, and removes a peer it has not heard
+    // from. A reconnecting client reuses its id while its old socket may still be open, so a
+    // socket of the same user takes the id over.
+    let clients = &state.clients;
+    let states = &state.states;
+    update.clients.retain(|client, _| {
+        states
+            .get(client)
+            .and_then(|owner| clients.get(&owner.socket))
+            .is_none_or(|owner| owner.user == user)
+    });
+
+    // After that drop, as a joiner echoes everything the room holds. The browser parses each state
+    // and stops at the first bad one, which would hide every cursor after it, for everybody.
     let refused = |entry: &AwarenessUpdateEntry| {
-        entry.json.len() > MAX_AWARENESS_STATE_BYTES
-            || serde_json::from_str::<IgnoredAny>(&entry.json).is_err()
+        entry.json.len() > MAX_AWARENESS_STATE_BYTES || !valid_state(&entry.json)
     };
     if update.clients.values().any(refused) {
         return Err(Close(CLOSE_PROTOCOL_ERROR));
     }
+
+    let mut held = states.len();
+    let mut bytes = state.state_bytes;
+    update.clients.retain(|client, entry| {
+        if entry.json.as_ref() == NULL_STATE {
+            return true;
+        }
+        let current = states.get(client).map(|owner| owner.bytes);
+        let held_after = held + usize::from(current.is_none());
+        let bytes_after = bytes - current.unwrap_or_default() + entry.json.len();
+        let fits = held_after <= MAX_ROOM_STATES && bytes_after <= MAX_ROOM_STATE_BYTES;
+        if fits {
+            held = held_after;
+            bytes = bytes_after;
+        }
+        fits
+    });
+
     let introduced = update
         .clients
         .keys()
         .filter(|client| awareness.meta(**client).is_none())
         .count();
+    state.known_ids += introduced;
     let Some(client) = state.clients.get_mut(&id) else {
         return Ok(());
     };
@@ -594,6 +743,47 @@ fn admit_awareness(
         return Err(Close(CLOSE_PROTOCOL_ERROR));
     }
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct CursorField {
+    #[serde(default)]
+    cursor: Option<Value>,
+}
+
+/// JSON, with a `cursor` that every other client can read: the cursor plugin throws on anything
+/// else, for each client that renders it.
+fn valid_state(json: &str) -> bool {
+    // Only the cursor is built in memory. A repeated key is refused here, so it cannot hide one.
+    if !json.trim_start().starts_with('{') {
+        return serde_json::from_str::<IgnoredAny>(json).is_ok();
+    }
+    serde_json::from_str::<CursorField>(json).is_ok_and(|state| {
+        state.cursor.is_none_or(|cursor| {
+            ["anchor", "head"]
+                .iter()
+                .all(|end| cursor.get(end).is_some_and(valid_position))
+        })
+    })
+}
+
+/// A `Y.RelativePosition` as JSON. `Y.createAbsolutePositionFromRelativePosition` throws when it
+/// points at nothing.
+fn valid_position(position: &Value) -> bool {
+    let present = |field| position.get(field).filter(|value| !value.is_null());
+    let tname = present("tname");
+    let (item, kind) = (present("item"), present("type"));
+    (item.is_some() || kind.is_some() || tname.is_some())
+        && item.is_none_or(valid_id)
+        && kind.is_none_or(valid_id)
+        && tname.is_none_or(Value::is_string)
+        && present("assoc").is_none_or(Value::is_i64)
+}
+
+fn valid_id(id: &Value) -> bool {
+    ["client", "clock"]
+        .iter()
+        .all(|field| id.get(field).is_some_and(Value::is_u64))
 }
 
 /// Whether these ids go past what `known` holds.

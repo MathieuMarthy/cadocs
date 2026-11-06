@@ -247,5 +247,6 @@ async fn join<S: WorkspaceStore, A>(
 ) -> Result<Response, ApiError> {
     let id = &current.user.id;
     let workspaces = state.store.accept_as_user(hash, id, now_ms()).await?;
+    state.access_changed();
     Ok(session_body(current.user, workspaces, &current.token))
 }

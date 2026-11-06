@@ -202,6 +202,7 @@ async fn update<S: SpaceStore, A>(
         .map(|role| fields.check("default_role", clean_default_role(role.as_deref())));
     fields.finish()?;
 
+    let new_default_role = default_role.is_some();
     let changes = SpaceChanges {
         name,
         description,
@@ -211,6 +212,9 @@ async fn update<S: SpaceStore, A>(
         .store
         .update_space(&space, &current.user.id, &changes, now_ms())
         .await?;
+    if new_default_role {
+        state.access_changed();
+    }
     Ok(Json(space.into()))
 }
 
@@ -223,6 +227,7 @@ async fn trash<S: SpaceStore, A>(
         .store
         .trash_space(&space, &current.user.id, now_ms())
         .await?;
+    state.access_changed();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -327,5 +332,6 @@ async fn set_grants<S: SpaceStore, A>(
         .store
         .set_grants(&space, &current.user.id, &grants, now_ms())
         .await?;
+    state.access_changed();
     Ok(StatusCode::NO_CONTENT)
 }
