@@ -28,7 +28,7 @@ Ending a session:
 
 Other rules:
 - **Tests first.** Write the failing test, watch it fail, implement, watch it pass.
-- **Commit only when asked.**
+- **Commit only when asked.** Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, with an optional crate as scope, as in `feat(collab): add room unloading`.
 - **Stay lean on tokens.** Redirect long command output to a file and read its tail. Do not repeat content already shown.
 - **Report results as they are.** If a RAM target is missed, say so with the analysis. Never adjust a benchmark scenario to make a number pass.
 
