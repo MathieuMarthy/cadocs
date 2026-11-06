@@ -61,20 +61,44 @@ Steps, one session each. Each step adds the migration for the tables it needs, a
 - [ ] **Step 10:** `cadocs-jobs` and the reader outside a room: `jobs`, worker, retries, purge of sessions, tokens and the trash, `CADOCS_DOC_READS`. Done when a crash during a job, retries and the read bound are tested.
 - [ ] **Step 11:** Svelte shell: routing, setup, login, invitation and reset pages, account, instance administration, light and dark themes, phone layout, the source code link, `4401`, `4403` and `4404` shown in the page. Done when Playwright goes from first run to an empty workspace.
 - [ ] **Step 12:** Navigation: spaces, lazy tree with drag and drop, trash, recent pages, live updates from the events socket. Done when two browsers see each other's tree changes.
-- [ ] **Step 13:** Administration screens: workspace settings, members, invitations, space settings and grants. Done when Playwright invites a user and changes their role, and the open page reacts.
+- [ ] **Step 13:** Administration screens: workspace settings, members, invitations, space settings and grants. Comes after step 14, which brings the page view. Done when Playwright invites a user and changes their role, and the open page reacts.
 - [ ] **Step 14:** Editor, first blocks: page view in the shell, read-only mode from the role, slash menu, headings, lists, tasks, code with syntax highlighting, quotes, dividers, links, Markdown shortcuts. Done when each block works in Playwright with two browsers.
 - [ ] **Step 15:** Editor, other blocks: callouts, toggles, tables, links to pages, table of contents. Done when each block works in Playwright with two browsers.
 - [ ] **Step 16:** `cadocs-content`: `XmlFragment` to AST, renderers to text, HTML and Markdown, Markdown to AST to Yjs, and the test that compares the Rust and TipTap schemas (ADR 0008). Done when every node round-trips and HTML escaping and the URL allow-list are tested.
-- [ ] **Step 17:** Attachments: `cadocs-files`, streaming upload, download, limits and quota, reference tracking, orphan cleanup, image and file blocks. Done when the attachment rules of [DATA_MODEL.md](DATA_MODEL.md#attachments) pass, including a full disk.
-- [ ] **Step 18:** Search: `cadocs-search`, stemming, FTS5, the reindex job, the search route and screen. Done when results respect readable spaces and stemming is tested in English and French.
+- [ ] **Step 17:** Attachments: `cadocs-files`, streaming upload, download, limits and quota, reference tracking, orphan cleanup, image and file blocks. Done when the attachment rules of [DATA_MODEL.md](DATA_MODEL.md#attachments) pass, including a full disk. The reference added when a page's content holds an attachment belongs to step 18, which owns the indexing job.
+- [ ] **Step 18:** Search: `cadocs-search`, stemming, FTS5, the reindex job, the search route and screen. The indexing job also adds the attachment references it finds. Done when results respect readable spaces, stemming is tested in English and French, and an image pasted into another page is readable there.
 - [ ] **Step 19:** Revisions: creation job, list, view, restore, thinning, screens. Done when a restore reaches connected clients as a normal edit and keeps the previous content as a revision.
 - [ ] **Step 20:** Markdown import and export for one page, with or without attachments, and the print stylesheet. Done when an export imports back with its content and attachments.
 - [ ] **Step 21:** Delivery: `cadocs backup` and `cadocs restore`, Docker image, `aarch64` and `x86_64` binaries, [OPERATIONS.md](OPERATIONS.md) complete. Done when a backup and restore round trip passes on a running server.
 - [ ] **Step 22:** Coverage: the whole permission matrix over REST and WebSocket, and a check of each scope item against its tests. Done when nothing in the scope lacks an automated test.
-- [ ] **Step 23:** MVP benchmark: idle, 30 active users, login peaks, 10,000 pages, and the value of `CADOCS_MAX_ROOMS`. Done when the results are recorded against the exit criteria, as measured.
+- [ ] **Step 23:** MVP benchmark: idle, 30 active users, login peaks, 10,000 pages, and the value of `CADOCS_MAX_ROOMS`. Comes last, after step 24, whose fixes could invalidate the measures. Done when the results are recorded against the exit criteria, as measured.
 - [ ] **Step 24:** Security review of auth, uploads and rendered HTML. Done when its findings are fixed or recorded.
 
-The two weeks of daily use start after step 24.
+The two weeks of daily use start once steps 23 and 24 are both done.
+
+### Order and parallel work
+
+Steps keep their numbers, but this order wins over them: the next step is the first unchecked one in this table, and steps of one wave can run at the same time, each in its own worktree. A session running in parallel is told its step.
+
+| Wave | Steps | Needs |
+| --- | --- | --- |
+| 1 | 9, 10, 11 | Nothing left |
+| 2 | 12, 14 | 12: 9 and 11. 14: 11 |
+| 3 | 13, 15 | 13: 14. 15: 14, and 12 for picking a page to link to |
+| 4 | 16 | 15, for the schema comparison test |
+| 5 | 17, 18, 19 | 10 and 16. 17 and 19 also need 14 for their blocks and screens |
+| 6 | 20 | 16 and 17 |
+| 7 | 22, 24 | Every feature step |
+| 8 | 23 | Everything, alone on a quiet machine |
+
+Step 21 needs nothing left and fits any wave before 7. If it runs before step 17, its round trip test gains attachments afterwards, and `OPERATIONS.md` is finished at the end. Step 16 can start beside 14 and 15 for the AST and renderers, once the node list is fixed, but it only ends after 15.
+
+When steps run in parallel:
+
+- **Migrations:** agree on the numbers before starting, since two branches would otherwise both take the next one. This matters most in wave 5.
+- **Steps 9 and 10:** both touch `lib.rs` and `DocRegistry`. When they meet, check that the trash purge job publishes the same events as `purge_page`.
+- **Steps 12 and 14:** both touch the Svelte routes.
+- **Idle RSS:** a step only measures its own branch, so measure again after each merge to see the combined drift.
 
 Exit criteria:
 
