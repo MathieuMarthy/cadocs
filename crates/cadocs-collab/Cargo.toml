@@ -1,0 +1,20 @@
+[package]
+name = "cadocs-collab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cadocs-core.workspace = true
+cadocs-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tracing.workspace = true
+yrs.workspace = true
+
+[dev-dependencies]
+sqlx.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "test-util", "time"] }

@@ -76,10 +76,14 @@ update ─► Room queue ─► flush every ~500 ms ─► INSERT INTO doc_updat
 
 - A batch of updates is flushed as one transaction, so typing does not cost one fsync per keystroke.
 - Compaction encodes the whole document as a single update, which also drops the per-keystroke structure. It needs the document loaded, and the room is loaded at both trigger points.
+- One task per room does all its flushes and compactions, so they never overlap. A snapshot's `upto_seq` is the last stored `seq`, even if the state already holds edits still queued. Those keep a higher `seq`, so their flush is accepted, and replaying them changes nothing.
+- The log stores what an update really changed, so a repeated update costs nothing. The exception is an update whose dependency is missing: yrs holds it outside the document, so the frame itself is stored too, or a restart would lose it. This covers blocks and deletes of blocks not seen yet.
+- A document with an update still waiting does not compact. yrs merges waiting data into the encoded state, and that merge was seen to lose a delete. The log stays correct, so compaction resumes once nothing waits.
+- An update that cannot be applied at load is skipped with a warning, since it can turn out invalid only once its dependency arrives, and that document stops compacting so the row is never deleted. An update that cannot be decoded, or a snapshot that cannot be applied, makes the load fail.
 - Durability window: an update lives only in memory until its flush. If the process dies while a client stays connected, that client resends what the server lacks when it reconnects, through the state vector exchange. If the client has also gone, up to one flush interval of edits is lost. This is the accepted trade-off, and the interval is configurable.
 - Power loss or an OS crash can lose more. With `synchronous=NORMAL` (ADR 0002), WAL commits reach the disk at the next checkpoint, so the most recent transactions may roll back. The database stays consistent, and connected clients resend their edits as above. Edits from clients that have gone since the last checkpoint are lost.
-- A graceful shutdown flushes every room before exiting.
-- If a flush fails, updates stay queued and the flush retries with backoff. When the room queue is full, the room closes its write sockets with `1013` instead of dropping edits. Clients keep them and resend after reconnecting ([OPERATIONS.md](OPERATIONS.md#failure-behaviour)).
+- A graceful shutdown flushes every room before exiting, retrying a failed flush three times before giving up.
+- If a flush fails, updates stay queued and the flush retries with backoff. When the room queue is full while a flush is failing, a frame with new blocks makes the room close its write sockets with `1013` instead of dropping edits. On working storage the limit is one frame higher, since the next flush drains the queue, so a large offline edit closes nobody. Clients keep them and resend after reconnecting ([OPERATIONS.md](OPERATIONS.md#failure-behaviour)).
 
 ### Room lifecycle
 
@@ -91,9 +95,11 @@ absent ───────────────► loading ─► live ─�
    └──────────── flush, compact, drop ◄── idle timeout ──────────┘
 ```
 
+An unload whose flush fails puts the room back as live: its edits exist nowhere else. It retries once a flush succeeds.
+
 Load and unload are serialized per document. A client that arrives during an unload waits for it to finish and then loads the persisted state. It must never receive a second copy of a document that is still being written.
 
-Loaded rooms are capped by `CADOCS_MAX_ROOMS`. At the cap, the oldest idle room unloads first. If every room is live, the new connection gets a `503` before the upgrade.
+Loaded rooms are capped by `CADOCS_MAX_ROOMS`. At the cap, the oldest idle room unloads first, skipping rooms whose flush is failing. If every room is live, the new connection gets a `503` before the upgrade.
 
 ### Reading a document outside a room
 
@@ -172,4 +178,6 @@ Not measured yet. The prototype benchmark will fill in this section.
 - The database is a file, so backups are `VACUUM INTO` or a filesystem snapshot, and it must live on a local disk. WAL does not work on network filesystems.
 - A power cut can lose recent edits that no connected client still holds (see [Persistence and compaction](#persistence-and-compaction)).
 - Files removed from a page stay on disk until the page is purged or the file is deleted explicitly ([DATA_MODEL.md](DATA_MODEL.md#attachments)).
+- **yrs 0.28 is not memory safe on crafted updates.** A fuzz of mutated frames gave a `SIGSEGV` inside `apply_update`, in dev and release builds, with no panic first, so `catch_unwind` cannot stop it. Anyone who can write to a page can therefore crash the server, which loses unflushed edits. Read-only sockets never reach that code. Write access therefore means trust, and the server must not be open to untrusted writers (ADR 0014).
+- yrs does not always converge when every update arrives shuffled: about one order in 2,000 in a test with no cadocs code. Real clients send in order over one socket and resync through the handshake.
 - Yjs history grows with edits. Compaction limits overhead, but deleted content keeps small tombstones.

@@ -25,7 +25,7 @@ Environment variables only, so no config file format has to be parsed or documen
 | `CADOCS_ROOM_IDLE_SECS` **P** | `60` | Delay before an empty room unloads |
 | `CADOCS_ROOM_QUEUE_BYTES` **P** | `4194304` | Unflushed updates a room may hold |
 | `CADOCS_MAX_ROOMS` **P** | `256` | Loaded rooms. Idle rooms are unloaded first. If all are live, new connections get `503` |
-| `CADOCS_MAX_SOCKETS` **P** | `512` | Open WebSockets of any kind. Past this, `503` |
+| `CADOCS_MAX_SOCKETS` **P** | `512` | Open WebSockets of any kind. Past this, `503`. `DocRegistry` holds the count, and the events socket must share it |
 | `CADOCS_MAX_FRAME_BYTES` **P** | `8388608` | Largest incoming frame |
 | `CADOCS_SEND_QUEUE` **P** | `256` | Queued messages per socket |
 | `CADOCS_PING_SECS` **P** | `30` | Ping interval |
@@ -104,7 +104,7 @@ Restoring on a stopped server replaces the data folder. Browsers still open on o
 | Failure | Behaviour |
 | --- | --- |
 | Flush fails (disk full, I/O error) | Updates stay in the room queue and the flush retries with backoff. `/health` returns `503`. See below |
-| Room queue full | The room stops accepting updates and closes its write sockets with `1013`. Clients keep their edits and resend them when they reconnect |
+| Room queue full while flushes fail | The room stops accepting updates and closes its write sockets with `1013`. Clients keep their edits and resend them when they reconnect |
 | Upload hits a full disk | The upload fails with `500`, its temporary file is removed, and nothing is recorded |
 | Job fails | Retried with backoff, then kept as `failed` for inspection |
 | Second instance on the same folder | Refuses to start, because of the lock |

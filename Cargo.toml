@@ -8,12 +8,23 @@ edition = "2024"
 license = "AGPL-3.0-only"
 
 [workspace.dependencies]
+cadocs-collab = { path = "crates/cadocs-collab" }
 cadocs-core = { path = "crates/cadocs-core" }
 cadocs-store = { path = "crates/cadocs-store" }
+serde = { version = "1", default-features = false }
+serde_json = { version = "1", default-features = false, features = ["std"] }
 sqlx = { version = "0.9", default-features = false, features = ["macros", "migrate", "runtime-tokio", "sqlite"] }
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", default-features = false }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+yrs = { version = "0.28", features = ["sync"] }
+
+# Tests must see the yrs that ships: its overflow checks and debug assertions only fire in dev
+# builds, on crafted frames, and would hide what the release binary does with them.
+[profile.dev.package.yrs]
+debug-assertions = false
+overflow-checks = false
 
 [profile.release]
 lto = true

@@ -34,12 +34,13 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | --- | --- | --- | --- |
 | `tokio` | Async runtime, required by axum and sqlx. Features limited to what is used | Low, set by worker count | Medium |
 | `axum` (`ws` feature, `multipart` from the MVP) | Same stack as uptime-monitoring. Thin layer over hyper | Low | Medium |
-| `yrs` | Yjs port, the core of ADR 0003. Includes sync and awareness | Scales with loaded documents | Medium |
+| `yrs` (`sync` feature, so observers are `Send`) | Yjs port, the core of ADR 0003. Includes sync and awareness | Scales with loaded documents | Medium |
 | `sqlx` (`sqlite`, `runtime-tokio`, `migrate`, `macros` for `migrate!`, no default features) | Async SQLite with embedded migrations, path to PostgreSQL | Each connection has a thread and a page cache, bounded by pool size | Medium, bundled SQLite included |
 | `rust-embed` | Static front end in the binary, as in uptime-monitoring | None until served (file-backed) | Size of the assets |
 | `tracing`, `tracing-subscriber` (`env-filter`) | Structured logs | Low | Low |
 | `thiserror` | Typed errors in the library crates | None | None |
 | `anyhow` | Error context in the binary and tools | None | Low |
+| `serde`, `serde_json` | Checking that awareness states are JSON. Already pulled in by yrs | None extra | None extra |
 | `futures-util` (no default features) | Splitting WebSocket streams | None | Low |
 | `mimalloc` (optional feature) | Candidate allocator, kept only if the benchmark justifies it | To be measured | Low |
 
@@ -57,7 +58,6 @@ These never reach the server binary.
 | Crate | Stage | Why | Cost note |
 | --- | --- | --- | --- |
 | `argon2` | MVP | Password hashing | About 19 MB per hash, capped by a semaphore |
-| `serde`, `serde_json` | MVP | REST bodies. Already pulled in by yrs | None extra |
 | `uuid` (`v7`) | MVP | Sortable ids | Very low |
 | `tower-http` | MVP | Timeouts, compression, tracing, limited features | Low |
 | `pulldown-cmark` | MVP | Markdown parsing, no allocation-heavy DOM | Low |
@@ -98,3 +98,7 @@ opt-level = 3
 ```
 
 These are the settings of uptime-monitoring, plus `panic = "abort"`, which removes unwinding tables. The trade-off: a panic in one task stops the process instead of only that task. For a server whose rooms hold unflushed edits this needs care, so the choice is confirmed or reversed once the panic paths have been reviewed. The prototype keeps the default unwinding until then.
+
+Unwinding is load-bearing today. yrs can panic on crafted frames, and `cadocs-collab` catches that with `catch_unwind` to close one socket instead of losing a room. `panic = "abort"` would turn such a frame into a server crash, so it stays off until yrs is hardened or frames are validated first. This does not cover everything: yrs can also segfault on crafted frames ([ARCHITECTURE.md](ARCHITECTURE.md#limits-accepted-by-design)).
+
+`[profile.dev.package.yrs]` turns off debug assertions and overflow checks for yrs alone, so tests exercise what the release binary does with crafted frames.

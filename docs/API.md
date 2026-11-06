@@ -210,11 +210,13 @@ client                                  server
 
 ### Rules
 
-- **Read-only.** `SyncStep2` and `Update` frames from a read-only client are dropped, and the server sends one Auth frame with the reason `read-only`. Awareness is still accepted, so a reader's presence shows.
-- **Awareness ownership.** The server tracks the client ids each socket announced, and removes them on close.
-- **Limits.** A frame over the maximum size closes the socket. Each client has a bounded send queue. A client that stops reading is closed rather than buffered.
+- **Read-only.** `SyncStep2` and `Update` frames from a read-only client are dropped, and the server sends one Auth frame per socket with the reason `read-only`. `y-websocket` answers every SyncStep1 with a SyncStep2, so a read-only client gets this frame at each connection, and it only logs a warning. Awareness is still accepted, so a reader's presence shows.
+- **Awareness ownership.** The server tracks the client ids each socket announced, and removes them on close with a null state at the same clock, as `y-websocket`'s server does. A client that reconnects with an unchanged clock therefore shows again at its next change, at most one heartbeat later.
+- **Awareness limits.** A socket may introduce 16 client ids over its life, and a state must be valid JSON of at most 64 KiB. Otherwise the socket closes with `1002`. Removing an unknown id is ignored. Ownership of an id is not checked yet, so a socket can overwrite another cursor.
+- **Limits.** A frame over the maximum size closes the socket, and so does a frame declaring more entries than its bytes can hold (yrs would reserve memory for that count first). Each client has a send queue bounded in frames (`CADOCS_SEND_QUEUE`) and in bytes (`CADOCS_MAX_FRAME_BYTES`). A client that stops reading is closed rather than buffered.
 - **Keep-alive.** The server pings periodically, and closes a socket that stays silent past the timeout.
-- **Malformed frames** close the socket, without affecting the room.
+- **Malformed frames** close the socket with `1002`, without affecting the room. An Auth frame or an unknown message type from a client counts as malformed.
+- **One message per frame.** `y-websocket` reads a single message from a frame, so the server never packs several. It reads the first message of a client frame and ignores any bytes after it, as `y-websocket`'s own server does.
 
 ### Close codes
 
@@ -222,6 +224,7 @@ client                                  server
 | --- | --- | --- |
 | 1000 | Normal | None |
 | 1001 | Server shutting down | Reconnect with backoff |
+| 1002 | Malformed frame | Report an error |
 | 1009 | Frame too large | Report an error |
 | 1013 | Storage is failing | Reconnect with backoff, keep local edits |
 | 4401 | Session ended | Stop, go to login |
