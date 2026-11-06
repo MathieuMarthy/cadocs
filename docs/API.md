@@ -237,7 +237,7 @@ client                                  server
 | 4408 | Client too slow, or idle timeout | Reconnect with backoff |
 | 4409 | Role changed, page still readable | Refetch the role, reconnect in the new mode |
 
-`y-websocket` reconnects automatically, whatever the close code. The front end must listen for `4401`, `4403` and `4404`, and call `provider.disconnect()`. On `4409` it updates the editor's mode and lets the provider reconnect.
+By default, `y-websocket` reconnects after any close code except 4400 to 4499, where it stops for good. That range includes `4408` and `4409`, so the front end passes its own `shouldReconnect`, which stops only on `4401`, `4403` and `4404`. On `4409` it updates the editor's mode and lets the provider reconnect.
 
 ## Events WebSocket
 

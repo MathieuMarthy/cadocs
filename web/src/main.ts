@@ -16,6 +16,8 @@ const DEFAULT_DOC = "welcome";
 const CLOSE_MALFORMED = 1002;
 const CLOSE_TOO_LARGE = 1009;
 const CLOSE_STORAGE_FAILING = 1013;
+/** The closes where reconnecting cannot help. See `Close codes` in `docs/API.md`. */
+const CLOSES_FINAL = [4401, 4403, 4404];
 
 function element<T extends HTMLElement>(id: string) {
   return document.getElementById(id) as T;
@@ -35,6 +37,8 @@ const scheme = location.protocol === "https:" ? "wss" : "ws";
 // Tabs go through the server like any other client, instead of a BroadcastChannel shortcut.
 const provider = new WebsocketProvider(`${scheme}://${location.host}/ws`, doc, ydoc, {
   disableBc: true,
+  // By default it gives up on all of 4400 to 4499, which includes 4408 and 4409.
+  shouldReconnect: (event) => !CLOSES_FINAL.includes(event.code),
 });
 const { awareness } = provider;
 
