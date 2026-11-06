@@ -56,6 +56,8 @@ These never reach the server binary.
 | `tower` (`util`) | Calling the router directly in tests |
 | `tempfile` | Temporary databases in tests |
 
+`web/` has two npm dev dependencies for the same purpose: `@playwright/test` (Apache-2.0) for the browser tests, and `@types/node` to type-check them. Neither reaches `web/dist`.
+
 ### Planned
 
 | Crate | Stage | Why | Cost note |

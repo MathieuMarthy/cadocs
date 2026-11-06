@@ -11,6 +11,7 @@ cargo test --workspace
 cargo clippy --all-targets -- -D warnings
 npm --prefix web ci && npm --prefix web run build   # before a release build: the binary embeds web/dist
 cargo build --release
+npm --prefix web run test:e2e                       # after the two builds: it runs target/release/cadocs, whose web/dist is embedded
 ```
 
 Run it with `target/release/cadocs` and open `http://127.0.0.1:3000/?doc=<id>`. For front end work, run the server, then `npm --prefix web run dev`, which proxies `/ws` to it.
@@ -48,8 +49,9 @@ Other rules:
 
 - **Prototype limits:** no real auth, REST API, search or Markdown conversion. `Authorizer` is a trait with a permissive implementation, and the server binds to `127.0.0.1`. Do not expose it.
 - **Browser tests:** Playwright reads the browser path from `CHROMIUM_PATH` through `executablePath`, and uses its own Chromium when unset. Any Chromium-based browser works.
+- **End-to-end tests:** `web/e2e/` runs the real binary, on its own port and temporary data folder (`server.ts`, `CADOCS_BIN` picks another binary). `compat.test.ts` uses `node:test` with the real `yjs` and `y-websocket`, and needs Node 22.18 or later for type stripping and `node:sqlite`. `browsers.spec.ts` uses Playwright, with two real browser processes. An open client resends its whole document when it reconnects, so a test about the disk must have no client left when the server comes back. A paragraph's text holds the label of a remote caret: read it with `bodyLines`. Do not `goto("about:blank")` before another `goto`: the browser sometimes commits it twice, which aborts the next navigation.
 - **yrs 0.28:** `yrs::sync` has `Awareness`, `Message`, `SyncMessage`, `MessageReader`, `DefaultProtocol` and the `Protocol` trait. Filter around `Protocol::handle_message` to reject `SyncStep2` and `Update` in read-only mode. `Doc` is `Send + Sync`. Enable the `sync` feature if the async or observer APIs require it.
-- **y-websocket** appends `/<room>` to the server URL, and reconnects whatever the close code.
+- **y-websocket** appends `/<room>` to the server URL. By default it stops for good on close codes 4400 to 4499, so `web/src/main.ts` passes `shouldReconnect`, and any other client of this server must too. The MVP must still show `4401`, `4403` and `4404` in the page: today the status stays at "offline, retrying".
 - **Yjs document layout:** root types `title` (`Y.Text`) and `default` (`XmlFragment`, TipTap's default field). See `docs/DATA_MODEL.md`.
 - **Store:** `DocStore` (`cadocs-store`) uses native `impl Future + Send` methods, so collab is generic over it instead of using `dyn`. The room assigns `seq`, starting from `StoredDoc::last_seq() + 1`. `compact` refuses a snapshot older than the stored one with `StoreError::StaleSnapshot`. `append_updates` can be replayed after a lost commit, and returns `StoreError::SeqConflict` for a `seq` the snapshot covers or that holds other data. A room must flush its queue before it compacts. `SqliteStore::open` takes the database file path, and its parent folder must exist. There is no in-memory store or `close()` yet. `StoreError` wraps `sqlx::Error`, so a failure-injecting test store can return `sqlx::Error::PoolTimedOut`.
 - **Permissions:** `cadocs-core::permissions` covers the matrix, the special cases and the recompute of page sockets. The `4401` closes and the recompute of events sockets are not there yet: they come with sessions in the MVP. `would_remove_last_instance_admin` is a separate check, so MVP handlers must call it before disabling, deleting or demoting a user, or fold it into the actions as `last_owner` is. `Authorizer` and its `Permissive` implementation are in `cadocs-collab`.

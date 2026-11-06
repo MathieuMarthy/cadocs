@@ -13,15 +13,15 @@ Steps, one session each:
 - [x] **Step 1:** Cargo workspace, `cadocs-core` (permissions), `cadocs-store` (migrations, updates, snapshots). Done when the matrix of [PERMISSIONS.md](PERMISSIONS.md) and the store tests pass.
 - [x] **Step 2:** `cadocs-collab` (rooms, y-sync, batched flush, compaction, unload, limits from [OPERATIONS.md](OPERATIONS.md)). Done when replay, compaction equivalence, unload and reload, load/unload concurrency, read-only, awareness cleanup, room cap and flush failure tests pass.
 - [x] **Step 3:** `cadocs-server` (`/ws/{doc}`, `/health`, embedded front end), `web/` (TipTap, Brut tokens), `docs/DESIGN_SYSTEM.md`. Done when the page edits and persists when opened by hand.
-- [ ] **Step 4:** Node test with the real `yjs` and `y-websocket`, Playwright test with two browsers. Done when both pass, including after a server restart.
+- [x] **Step 4:** Node test with the real `yjs` and `y-websocket`, Playwright test with two browsers. Done when both pass, including after a server restart.
 - [ ] **Step 5:** `cadocs-bench`, `bench/rss.sh`, allocator comparison, following the [benchmark scenario](ARCHITECTURE.md#benchmark-scenario). Done when the results are in `ARCHITECTURE.md` and the go or no-go is recorded.
 
 Exit criteria:
 
-- [ ] Two browsers edit one document at the same time, with visible cursors.
-- [ ] Content survives a server restart.
-- [ ] Compaction and unloading keep the document identical (automated tests).
-- [ ] The real `yjs` and `y-websocket` clients pass the compatibility test.
+- [x] Two browsers edit one document at the same time, with visible cursors.
+- [x] Content survives a server restart.
+- [x] Compaction and unloading keep the document identical (automated tests).
+- [x] The real `yjs` and `y-websocket` clients pass the compatibility test.
 - [ ] RSS is measured idle, with 10 and 100 open documents, and after unload.
 - [ ] A go or no-go on the architecture is recorded, using the rule in the benchmark scenario.
 

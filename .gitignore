@@ -9,3 +9,5 @@ dist/
 # Personal, per-developer files
 CLAUDE.local.md
 /local/
+test-results/
+playwright-report/
