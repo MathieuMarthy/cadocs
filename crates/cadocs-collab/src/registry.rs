@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use cadocs_core::permissions::SocketMode;
 use cadocs_store::{DocStore, StoreError, StoredUpdate};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, watch};
 use tokio::time::{Instant, sleep, sleep_until};
 use tracing::warn;
 
@@ -38,6 +38,7 @@ struct Inner<S> {
     rooms: Mutex<Rooms>,
     sockets: Arc<Semaphore>,
     failing_rooms: AtomicUsize,
+    unloaded: Notify,
 }
 
 enum Attempt {
@@ -74,6 +75,7 @@ impl<S: DocStore> DocRegistry<S> {
                 rooms: Mutex::default(),
                 sockets,
                 failing_rooms: AtomicUsize::new(0),
+                unloaded: Notify::new(),
             }),
         }
     }
@@ -112,6 +114,11 @@ impl<S: DocStore> DocRegistry<S> {
     /// Rooms in memory, including those loading or unloading.
     pub fn loaded_rooms(&self) -> usize {
         lock(&self.inner.rooms).slots.len()
+    }
+
+    /// Resolves once a room has unloaded since the last call. Several unloads may count as one.
+    pub async fn room_unloaded(&self) {
+        self.inner.unloaded.notified().await;
     }
 
     /// False while any room fails to flush, which `/health` reports.
@@ -452,6 +459,9 @@ impl<S: DocStore> RoomTask<S> {
         drop(rooms);
         if let Some(done) = done {
             done.send_replace(Some(flushed.map_err(CollabError::from)));
+        }
+        if gone {
+            self.inner.unloaded.notify_one();
         }
         gone
     }

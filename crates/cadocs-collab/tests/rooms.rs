@@ -382,6 +382,24 @@ async fn a_returning_client_keeps_the_room() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_unload_is_announced() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let alice = Peer::join(&registry, ReadWrite).await;
+    let announced = tokio::spawn({
+        let registry = registry.clone();
+        async move { registry.room_unloaded().await }
+    });
+    drop(alice);
+
+    sleep(Duration::from_secs(59)).await;
+    assert!(!announced.is_finished());
+
+    sleep(Duration::from_secs(2)).await;
+    assert!(announced.is_finished());
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_untouched_room_unloads_without_writing() {
     let store = MemStore::new();
     let registry = registry(&store);
