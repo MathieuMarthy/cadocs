@@ -26,10 +26,11 @@ Errors have one shape:
 | 413 | `too_large` |
 | 429 | `rate_limited` |
 | 500 | `internal` (details go to the log only) |
+| 503 | `unavailable` (a limit is reached, or storage is failing) |
 
 ## REST routes
 
-Minimum role per route: `member` is a workspace role. Space roles are `viewer` < `commenter` < `editor` < `admin` (ADR 0009).
+Minimum role per route: `member` is a workspace role. Space roles are `viewer` < `commenter` < `editor` < `admin` (ADR 0009). [PERMISSIONS.md](PERMISSIONS.md) is the reference when a route needs more detail.
 
 ### Auth and session
 
@@ -37,24 +38,43 @@ Minimum role per route: `member` is a workspace role. Space roles are `viewer` <
 | --- | --- | --- | --- |
 | POST | `/auth/setup` | none, first run only | Create the first user and workspace |
 | POST | `/auth/login` | none, rate limited | Email and password login |
-| POST | `/auth/logout` | user | End the session |
+| POST | `/auth/logout` | user | End the session, close its sockets |
+| POST | `/auth/password-reset/{token}` | none, rate limited | Set a new password from a reset link, revoke all sessions (ADR 0013) |
+| POST | `/auth/forgot-password` | none, rate limited | Send a reset link by email, only with SMTP (V1) |
 | GET | `/auth/oidc/{provider}` | none | Start an OIDC login (V1) |
 | GET | `/auth/oidc/{provider}/callback` | none | Finish an OIDC login (V1) |
 | GET | `/session` | user | Current user, workspaces, CSRF token |
-| PATCH | `/me` | user | Update name or password |
+| PATCH | `/me` | user | Update name, email or password. Email and password need the current password, and a new password revokes other sessions |
+| DELETE | `/me` | user | Delete the account, refused for a last owner |
+| POST, DELETE | `/me/totp` | user | Enable or disable MFA (V1) |
+
+### Instance administration
+
+| Method | Route | Role | Purpose |
+| --- | --- | --- | --- |
+| GET | `/admin/users` | instance admin | List users |
+| PATCH, DELETE | `/admin/users/{user}` | instance admin | Disable, enable, grant instance admin, or delete |
+| POST | `/admin/users/{user}/password-reset` | instance admin | Generate a one-time reset link (ADR 0013) |
 
 ### Workspaces and members
 
 | Method | Route | Role | Purpose |
 | --- | --- | --- | --- |
 | GET | `/workspaces` | user | List the caller's workspaces |
-| POST | `/workspaces` | user | Create a workspace |
+| POST | `/workspaces` | instance admin | Create a workspace |
 | GET, PATCH | `/workspaces/{ws}` | member, admin to edit | Read or update |
+| DELETE | `/workspaces/{ws}` | owner | Delete, with the workspace name as confirmation |
 | GET | `/workspaces/{ws}/members` | member | List members |
-| PATCH, DELETE | `/workspaces/{ws}/members/{user}` | admin | Change a role or remove a member |
-| POST | `/workspaces/{ws}/invitations` | admin | Invite by email |
-| POST | `/invitations/{token}/accept` | none | Accept an invitation |
+| PATCH, DELETE | `/workspaces/{ws}/members/{user}` | admin, owner for owners | Change a role or remove a member. A member can remove themself |
+| GET, POST | `/workspaces/{ws}/invitations` | admin | List pending invitations, or create one. Creating returns the link once |
+| DELETE | `/invitations/{id}` | admin | Revoke an invitation |
+| GET | `/invitations/{token}` | none | Workspace name and email, for the acceptance page |
+| POST | `/invitations/{token}/accept` | none | Accept: a new user sends a name and password, a logged-in user with the invited email just joins |
 | GET, POST | `/workspaces/{ws}/groups` | member, admin to create | Groups (V1) |
+| PATCH, DELETE | `/groups/{group}` | admin | Rename or delete a group (V1) |
+| PUT, DELETE | `/groups/{group}/members/{user}` | admin | Add or remove a member (V1) |
+| GET | `/workspaces/{ws}/recent` | member | Recently updated pages in readable spaces |
+| GET | `/jobs/{id}` | the user who started it | Status of an import or export |
 
 ### Spaces
 
@@ -63,6 +83,9 @@ Minimum role per route: `member` is a workspace role. Space roles are `viewer` <
 | GET, POST | `/workspaces/{ws}/spaces` | member, admin to create | List readable spaces, or create one |
 | GET | `/spaces/{space}` | viewer | Read |
 | PATCH, DELETE | `/spaces/{space}` | space admin | Update or trash |
+| POST | `/spaces/{space}/restore` | space admin | Restore from trash |
+| GET | `/spaces/{space}/trash` | editor | List trashed pages |
+| GET | `/spaces/{space}/export?format=md\|html` | viewer | Export the space as a zip, as a job (V1) |
 | GET, PUT | `/spaces/{space}/grants` | viewer, space admin to edit | Roles of users and groups |
 | GET | `/spaces/{space}/tree?parent={id}` | viewer | One level of the tree, loaded lazily |
 
@@ -71,36 +94,42 @@ Minimum role per route: `member` is a workspace role. Space roles are `viewer` <
 | Method | Route | Role | Purpose |
 | --- | --- | --- | --- |
 | POST | `/spaces/{space}/pages` | editor | Create a page |
-| GET | `/pages/{page}` | viewer | Metadata |
-| PATCH | `/pages/{page}` | editor | Title and icon |
-| POST | `/pages/{page}/move` | editor | New `parent_id` and `position`, possibly in another space |
+| GET | `/pages/{page}` | viewer | Metadata, including the caller's effective `role` |
+| GET | `/workspaces/{ws}/pages/by-slug/{slug}` | viewer | Same, from a front-end URL |
+| PATCH | `/pages/{page}` | editor | Title |
+| POST | `/pages/{page}/move` | editor | New `parent_id` and `position`, possibly in another space, where `editor` is also required |
+| POST | `/pages/{page}/duplicate` | editor | Copy a page, optionally to another space (V1) |
 | DELETE | `/pages/{page}` | editor | Move to trash |
 | POST | `/pages/{page}/restore` | editor | Restore from trash |
-| GET | `/pages/{page}/export?format=md\|html` | viewer | Export |
+| DELETE | `/pages/{page}/purge` | space admin | Delete a trashed page for good |
+| GET | `/pages/{page}/export?format=md\|html&attachments=0\|1` | viewer | Export. Without attachments, one file with absolute links. With them, a zip |
 | POST | `/spaces/{space}/import` | editor | Import Markdown or a zip, as a job |
 | GET | `/pages/{page}/revisions` | viewer | List revisions |
 | GET | `/pages/{page}/revisions/{n}` | viewer | Rendered content of a revision |
 | POST | `/pages/{page}/revisions/{n}/restore` | editor | Apply a revision as a new edit |
 
-The title is also edited live in the document. The server copies it to `pages.title` when flushing. `PATCH` covers API clients.
+The Yjs document holds the title, and the server copies it to `pages.title` when flushing. `PATCH` does not write that column: it applies a Yjs update through the room, like any other edit, so a later flush cannot overwrite it.
+
+The role in `GET /pages/{page}` tells the front end whether to make the editor read-only.
 
 ### Comments
 
 | Method | Route | Role | Purpose |
 | --- | --- | --- | --- |
 | GET | `/pages/{page}/comments` | viewer | List threads |
-| POST | `/pages/{page}/comments` | commenter | Create a comment or a reply |
+| POST | `/pages/{page}/comments` | commenter | Create a comment or a reply, with an optional anchor (ADR 0012) |
 | PATCH, DELETE | `/comments/{id}` | author, or space admin | Edit or delete |
 | POST | `/comments/{id}/resolve` | commenter | Resolve or reopen |
 | GET | `/me/mentions` | user | Unread mentions |
+| POST | `/me/mentions/{id}/read` | user | Mark a mention as read |
 
 ### Attachments
 
 | Method | Route | Role | Purpose |
 | --- | --- | --- | --- |
 | POST | `/pages/{page}/attachments` | editor | Streaming multipart upload |
-| GET | `/attachments/{id}` | viewer of the page | Download |
-| DELETE | `/attachments/{id}` | editor | Delete |
+| GET | `/attachments/{id}` | viewer of a referencing page | Download |
+| DELETE | `/attachments/{id}` | editor of a referencing page | Delete |
 
 ### Search
 
@@ -112,17 +141,21 @@ The title is also edited live in the document. The server copies it to `pages.ti
 
 | Method | Route | Role | Purpose |
 | --- | --- | --- | --- |
-| GET, POST | `/pages/{page}/shares` | viewer, editor to create | List or create public links |
+| GET, POST | `/pages/{page}/shares` | editor | List or create public links |
 | DELETE | `/shares/{id}` | editor | Revoke |
 | GET | `/s/{token}` (outside `/api`) | none | Public page, rendered as HTML on the server |
+| GET | `/s/{token}/p/{slug}` (outside `/api`) | none | A descendant, if the share includes children |
+| GET | `/s/{token}/files/{id}` (outside `/api`) | none | An attachment referenced by a page the share covers |
+
+Public routes are rate limited, send an `ETag` based on `updated_at`, and render through the bounded reader described in [ARCHITECTURE.md](ARCHITECTURE.md#reading-a-document-outside-a-room).
 
 ### Operations
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| GET | `/health` (outside `/api`) | Liveness, with a database check |
+| GET | `/health` (outside `/api`) | Liveness, with a database check. `503` while flushes are failing |
 
-## WebSocket protocol
+## Page WebSocket protocol
 
 ### Connection
 
@@ -190,9 +223,33 @@ client                                  server
 | 1000 | Normal | None |
 | 1001 | Server shutting down | Reconnect with backoff |
 | 1009 | Frame too large | Report an error |
+| 1013 | Storage is failing | Reconnect with backoff, keep local edits |
 | 4401 | Session ended | Stop, go to login |
 | 4403 | Access revoked | Stop, leave the page |
 | 4404 | Page deleted | Stop, leave the page |
 | 4408 | Client too slow, or idle timeout | Reconnect with backoff |
+| 4409 | Role changed, page still readable | Refetch the role, reconnect in the new mode |
 
-`y-websocket` reconnects automatically, whatever the close code. The front end must listen for `4401`, `4403` and `4404`, and call `provider.disconnect()`.
+`y-websocket` reconnects automatically, whatever the close code. The front end must listen for `4401`, `4403` and `4404`, and call `provider.disconnect()`. On `4409` it updates the editor's mode and lets the provider reconnect.
+
+## Events WebSocket
+
+```
+GET /ws/events?workspace={workspace_id}      MVP
+```
+
+The checks before the upgrade are the same as for a page socket, with workspace membership in place of page access. Frames are server to client, as JSON text (ADR 0011). A client frame closes the socket. Close codes `1001`, `4401`, `4403` and `4408` apply.
+
+Events are hints. The client refetches through REST, and refetches the tree after every reconnect.
+
+```json
+{ "type": "page.moved", "space": "<id>", "page": "<id>" }
+```
+
+| Type | Fields | Meaning |
+| --- | --- | --- |
+| `page.created`, `page.moved`, `page.renamed`, `page.trashed`, `page.restored` | `space`, `page` | The tree changed. A move across spaces is sent to both |
+| `space.created`, `space.updated`, `space.trashed`, `space.restored` | `space` | The space list changed |
+| `access.changed` | none | The user's permissions changed, reload the space list |
+| `notification` | `id` | A new notification (V1) |
+| `resync` | none | Events were dropped because the client lagged, reload everything shown |

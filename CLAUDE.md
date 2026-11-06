@@ -2,7 +2,7 @@
 
 Self-hosted collaborative wiki, a lightweight Docmost alternative. Top priority: minimal server RAM (10 to 30 MB idle, under 100 MB for a few dozen active users). One binary plus one data folder, no mandatory external service.
 
-Design lives in `docs/`: read only what the current task needs. `ARCHITECTURE.md` for the flows, `API.md` for the wire protocol, `DATA_MODEL.md` for the schema, `CARGO_WORKSPACE.md` for crates, `ROADMAP.md` for stages and progress, `adr/` for the reasons behind a decision. Do not reopen a decision recorded in an ADR unless a measurement contradicts it. If it does, write a new ADR.
+Design lives in `docs/`: read only what the current task needs. `ARCHITECTURE.md` for the flows, `API.md` for the wire protocol, `DATA_MODEL.md` for the schema, `PERMISSIONS.md` for the access matrix, `OPERATIONS.md` for configuration and deployment, `CARGO_WORKSPACE.md` for crates, `ROADMAP.md` for stages and progress, `adr/` for the reasons behind a decision. Do not reopen a decision recorded in an ADR unless a measurement contradicts it. If it does, write a new ADR.
 
 ## Commands
 
@@ -36,9 +36,9 @@ Other rules:
 
 - **Language:** everything in the repository is in English: docs, code comments, commit messages and UI strings.
 - **Errors:** `thiserror` in library crates, `anyhow` in binaries.
-- **Dependencies:** each one must justify its RAM and binary cost. Update `docs/CARGO_WORKSPACE.md` when adding one.
+- **Dependencies:** each one must justify its RAM and binary cost, and be compatible with AGPL-3.0 (ADR 0010). Update `docs/CARGO_WORKSPACE.md` when adding one.
 - **Reference project:** https://github.com/MathieuMarthy/uptime-monitoring uses the same stack (SQLite setup in `src/db.rs`, embedded assets in `src/assets.rs`, release profile).
-- **Design:** the UI follows the Brut design system, documented in `docs/DESIGN_SYSTEM.md` from step 3 on. IBM Plex is embedded in the binary, never loaded from Google Fonts (ADR 0004).
+- **Design:** the UI follows the Brut design system, documented in `docs/DESIGN_SYSTEM.md` from step 3 on. IBM Plex is embedded in the binary, never loaded from Google Fonts (ADR 0004). Brut's examples are in French, and the UI translates them to English.
 
 ## Notes
 
@@ -46,3 +46,5 @@ Other rules:
 - **Browser tests:** Playwright reads the browser path from `CHROMIUM_PATH` through `executablePath`, and uses its own Chromium when unset. Any Chromium-based browser works.
 - **yrs 0.28:** `yrs::sync` has `Awareness`, `Message`, `SyncMessage`, `MessageReader`, `DefaultProtocol` and the `Protocol` trait. Filter around `Protocol::handle_message` to reject `SyncStep2` and `Update` in read-only mode. `Doc` is `Send + Sync`. Enable the `sync` feature if the async or observer APIs require it.
 - **y-websocket** appends `/<room>` to the server URL, and reconnects whatever the close code.
+- **Yjs document layout:** root types `title` (`Y.Text`) and `default` (`XmlFragment`, TipTap's default field). See `docs/DATA_MODEL.md`.
+- **Benchmark:** the scenario and go or no-go rule in `docs/ARCHITECTURE.md` are fixed. Do not change them to make a number pass.

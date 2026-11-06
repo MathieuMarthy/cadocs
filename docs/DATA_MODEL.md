@@ -9,7 +9,7 @@ The schema targets SQLite first and stays portable to PostgreSQL (ADR 0002). The
 - **Booleans** are `SMALLINT` with a `CHECK (x IN (0, 1))`.
 - **Enums** are `TEXT` with a `CHECK` constraint.
 - **Binary data** is `BLOB` (`BYTEA` on PostgreSQL).
-- **Deletion**: pages and spaces use a `deleted_at` soft delete (trash). A job purges them later. Other rows are deleted for real.
+- **Deletion**: pages and spaces use a `deleted_at` soft delete (trash). A job purges them after `CADOCS_TRASH_DAYS`. Other rows are deleted for real.
 
 ## Accounts
 
@@ -44,7 +44,18 @@ CREATE TABLE sessions (
 );
 CREATE INDEX sessions_user ON sessions(user_id);
 CREATE INDEX sessions_expiry ON sessions(expires_at);
+
+CREATE TABLE password_resets (               -- ADR 0013
+    token_hash TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL, -- NULL: from the CLI
+    expires_at BIGINT NOT NULL,
+    created_at BIGINT NOT NULL
+);
+CREATE INDEX password_resets_user ON password_resets(user_id);
 ```
+
+`sessions.last_seen_at` is written at most once every 5 minutes, so that reads do not turn into writes. Each such write also extends `expires_at`.
 
 ## Workspaces, groups and spaces
 
@@ -127,7 +138,7 @@ CREATE INDEX space_grants_group ON space_grants(group_id);
 
 ## Pages
 
-The tree lives in SQL. Moving a page changes one row. `position` is a fractional index (a string that sorts between its neighbours), so reordering never rewrites siblings.
+The tree lives in SQL. `position` is a fractional index (a string that sorts between its neighbours), so reordering never rewrites siblings.
 
 ```sql
 CREATE TABLE pages (
@@ -137,17 +148,18 @@ CREATE TABLE pages (
     parent_id    TEXT REFERENCES pages(id) ON DELETE CASCADE,
     position     TEXT NOT NULL,
     slug         TEXT NOT NULL,              -- short random id for URLs
-    title        TEXT NOT NULL DEFAULT '',
-    icon         TEXT,
+    title        TEXT NOT NULL DEFAULT '',   -- copy of the Yjs title
     created_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
     updated_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
     deleted_at   BIGINT,
+    deleted_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
     created_at   BIGINT NOT NULL,
     updated_at   BIGINT NOT NULL,
     UNIQUE (workspace_id, slug)
 );
 CREATE INDEX pages_tree ON pages(space_id, parent_id, position);
 CREATE INDEX pages_parent ON pages(parent_id);
+CREATE INDEX pages_recent ON pages(workspace_id, updated_at);
 
 -- V2. Restrictions narrow access and never widen it (ADR 0009).
 CREATE TABLE page_restrictions (
@@ -167,6 +179,7 @@ CREATE TABLE page_shares (
     page_id            TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
     token              TEXT NOT NULL UNIQUE,  -- 128 random bits, in the public URL
     include_children   SMALLINT NOT NULL DEFAULT 0 CHECK (include_children IN (0, 1)),
+    indexable          SMALLINT NOT NULL DEFAULT 0 CHECK (indexable IN (0, 1)), -- allow search engines
     created_by         TEXT REFERENCES users(id) ON DELETE SET NULL,
     expires_at         BIGINT,
     created_at         BIGINT NOT NULL
@@ -174,9 +187,17 @@ CREATE TABLE page_shares (
 CREATE INDEX page_shares_page ON page_shares(page_id);
 ```
 
+**Moving.** A move within a space changes one row. A move to another space also rewrites `space_id` on every descendant, in the same transaction. The server refuses to move a page under itself or under one of its descendants, using a recursive query on `parent_id`. A move across workspaces is refused.
+
+**Trash.** Trashing a page sets the same `deleted_at` on the page and on every descendant that is not already trashed, in one transaction, so `deleted_at IS NULL` is enough to filter any read. Restoring brings back the rows with that exact `deleted_at` in the subtree, so a page trashed separately earlier stays in the trash. If the parent of the restored page is still trashed, the page goes to the root of its space.
+
+A trashed space keeps its pages as they are, and access rules treat the whole space as absent ([PERMISSIONS.md](PERMISSIONS.md)).
+
 ## Document content
 
 `doc_updates` is an append-only log and `doc_snapshots` holds the compacted state. To load a page: read its snapshot, then apply every update with `seq` greater than `snapshot.upto_seq`.
+
+A Yjs document has two root types: `title`, a `Y.Text`, and `default`, the `XmlFragment` that TipTap edits. A flush copies `title` to `pages.title` when it changed, and updates `updated_at` and `updated_by`.
 
 ```sql
 CREATE TABLE doc_snapshots (
@@ -208,7 +229,9 @@ CREATE TABLE page_revisions (
 
 The `seq` keeps growing after compaction, because `upto_seq` records the position. This lets a compaction run while updates arrive: the transaction deletes only rows with `seq <= upto_seq`.
 
-A revision is created by a job, after a pause in editing or at most every N minutes of activity, and only if the content changed. A revision holds a full state rather than a Yjs snapshot. It can then be rendered or restored without the document's complete history, and old revisions can be pruned. Restoring a revision applies a new update on top of the current document, so it reaches connected clients as a normal edit.
+A revision is created by a job after `CADOCS_REVISION_PAUSE_SECS` without edits, or after `CADOCS_REVISION_MAX_SECS` of continuous activity, and only if the content changed. A revision holds a full state rather than a Yjs snapshot. It can then be rendered or restored without the document's complete history, and old revisions can be pruned. All revisions are kept for `CADOCS_REVISION_KEEP_DAYS`. Older ones are thinned to one per day, and the most recent revision is never pruned.
+
+Restoring cannot simply merge the old state, because a CRDT merge would keep current content. In one room transaction, the server renders the revision into the AST (ADR 0008), clears `default` and `title`, and writes the AST back. Connected clients receive this as a normal edit, and the previous content stays available as a revision of its own, created first.
 
 ## Comments and mentions
 
@@ -219,6 +242,9 @@ CREATE TABLE comments (
     parent_id    TEXT REFERENCES comments(id) ON DELETE CASCADE, -- one level of replies
     author_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
     body         TEXT NOT NULL,              -- Markdown
+    anchor_start BLOB,                       -- Yjs RelativePosition, NULL: reply or whole page
+    anchor_end   BLOB,
+    anchor_text  TEXT,                       -- quoted text, shown if the anchor is lost
     resolved_at  BIGINT,
     resolved_by  TEXT REFERENCES users(id) ON DELETE SET NULL,
     created_at   BIGINT NOT NULL,
@@ -241,7 +267,7 @@ CREATE INDEX mentions_page ON mentions(page_id);
 CREATE INDEX mentions_comment ON mentions(comment_id);
 ```
 
-A comment is anchored in the document, not in SQL: the editor stores a mark with the comment id around the commented range, so the anchor follows edits and merges for free. Mentions in the page body are diffed from the Yjs content by the indexing job.
+A comment's anchor is a pair of Yjs relative positions stored here, so it follows edits and merges without writing to the document. A `commenter` stays read-only on the wire (ADR 0012). Mentions in the page body are diffed from the Yjs content by the indexing job.
 
 ## Attachments
 
@@ -249,7 +275,6 @@ A comment is anchored in the document, not in SQL: the editor stores a mark with
 CREATE TABLE attachments (
     id           TEXT PRIMARY KEY,           -- also the storage key
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    page_id      TEXT REFERENCES pages(id) ON DELETE SET NULL, -- NULL: orphan, a job purges it
     file_name    TEXT NOT NULL,              -- display only, never a path
     content_type TEXT NOT NULL,
     size         BIGINT NOT NULL,
@@ -258,8 +283,20 @@ CREATE TABLE attachments (
     created_at   BIGINT NOT NULL
 );
 CREATE INDEX attachments_workspace ON attachments(workspace_id);
-CREATE INDEX attachments_page ON attachments(page_id);
+
+CREATE TABLE attachment_refs (
+    attachment_id TEXT NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+    page_id       TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    PRIMARY KEY (attachment_id, page_id)
+);
+CREATE INDEX attachment_refs_page ON attachment_refs(page_id);
 ```
+
+An upload creates the first reference. The indexing job adds one for each attachment it finds in a page's content, so an image pasted into another page is readable there, after a short delay.
+
+Editing never removes a reference, because a revision may still show the file. References disappear when a page is purged or through `DELETE /attachments/{id}`. An attachment with no reference left is an orphan, and a job deletes it with its file. The cost is disk space: an image removed from a page stays stored until the page is purged or someone deletes the file. A revision restored after an explicit delete shows a placeholder.
+
+A download needs read access to at least one referencing page. A public share serves a file only if a page covered by the share references it.
 
 ## Jobs
 
@@ -287,30 +324,37 @@ A finished job is deleted. A job that exhausts its attempts stays as `failed`, f
 ```sql
 -- SQLite only. PostgreSQL uses a tsvector column instead, behind the same trait.
 CREATE TABLE page_text (
-    page_id    TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+    id         INTEGER PRIMARY KEY,          -- also the page_fts rowid
+    page_id    TEXT NOT NULL UNIQUE REFERENCES pages(id) ON DELETE CASCADE,
     plain_text TEXT NOT NULL,                -- original words, for excerpts
     indexed_at BIGINT NOT NULL
 );
 
 CREATE VIRTUAL TABLE page_fts USING fts5(
-    page_id UNINDEXED,
     title,                                   -- stemmed (ADR 0007)
     body,                                    -- stemmed
     tokenize = "unicode61 remove_diacritics 2",
     prefix = '2 3'
 );
+
+CREATE TRIGGER page_text_delete AFTER DELETE ON page_text BEGIN
+    DELETE FROM page_fts WHERE rowid = old.id;
+END;
 ```
+
+`page_fts` is linked by `rowid`, because a lookup on an `UNINDEXED` column would scan the whole table on every reindex. The trigger also runs on the cascade from `pages`.
 
 Query shape, with permission filtering inside the SQL:
 
 ```sql
-SELECT f.page_id, bm25(page_fts, 5.0, 1.0) AS score
+SELECT t.page_id, bm25(page_fts, 5.0, 1.0) AS score -- weights: title, body
 FROM page_fts f
-JOIN pages p ON p.id = f.page_id
+JOIN page_text t ON t.id = f.rowid
+JOIN pages p ON p.id = t.page_id
 WHERE page_fts MATCH ?1
   AND p.workspace_id = ?2
   AND p.deleted_at IS NULL
-  AND p.space_id IN (/* spaces readable by the user */)
+  AND p.space_id IN (/* readable spaces, trashed ones excluded */)
 ORDER BY score
 LIMIT 20;
 ```
@@ -329,6 +373,15 @@ LIMIT 20;
 | Claiming a job | Single writer, conditional `UPDATE` | `FOR UPDATE SKIP LOCKED` |
 
 Migrations are kept in one folder per engine, so each can use its own syntax. Their results must match this document.
+
+## Planned tables
+
+Specified when their stage starts, following the same conventions.
+
+| Stage | Tables |
+| --- | --- |
+| V1 | `page_links` (backlinks), `notifications`, `user_totp` and recovery codes, `templates` |
+| V2 | `page_labels`, `audit_log`, `api_tokens`, `webhooks` |
 
 ## Prototype subset
 

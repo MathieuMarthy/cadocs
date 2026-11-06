@@ -33,7 +33,7 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | Crate | Why | RAM | Binary |
 | --- | --- | --- | --- |
 | `tokio` | Async runtime, required by axum and sqlx. Features limited to what is used | Low, set by worker count | Medium |
-| `axum` (`ws` feature) | Same stack as uptime-monitoring. Thin layer over hyper | Low | Medium |
+| `axum` (`ws` feature, `multipart` from the MVP) | Same stack as uptime-monitoring. Thin layer over hyper | Low | Medium |
 | `yrs` | Yjs port, the core of ADR 0003. Includes sync and awareness | Scales with loaded documents | Medium |
 | `sqlx` (`sqlite`, `runtime-tokio`, `migrate`) | Async SQLite with embedded migrations, path to PostgreSQL | Each connection has a thread and a page cache, bounded by pool size | Medium, bundled SQLite included |
 | `rust-embed` | Static front end in the binary, as in uptime-monitoring | None until served (file-backed) | Size of the assets |
@@ -65,8 +65,13 @@ These never reach the server binary.
 | `zstd` | MVP | Compression of revisions | Bounded by compression level |
 | `sha2`, `subtle`, `getrandom` | MVP | Tokens and constant-time comparison, as in uptime-monitoring | Very low |
 | `jiff` | MVP | Dates, as in uptime-monitoring | Low without the bundled tz database |
+| `async_zip` | MVP | Streaming zip for exports with attachments and for imports | Low, nothing buffered whole |
 | `lettre` | V1 | SMTP, optional feature | Only in builds that enable it |
+| `rusty-s3` | V1 | Signs S3 requests, optional feature (ADR 0005) | Only in builds that enable it |
+| `totp-lite` | V1 | TOTP codes | Very low |
 | `openidconnect` or a smaller client | V1 | OIDC, optional feature. To evaluate against a hand-written flow | Pulls an HTTP client |
+
+Fractional indexing, rate limiting and the data folder lock (`std::fs::File::try_lock`) are small enough to write without a dependency.
 
 ## Rejected crates
 
