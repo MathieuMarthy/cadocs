@@ -513,7 +513,7 @@ impl WorkspaceStore for SqliteStore {
         now: i64,
     ) -> Result<Option<InvitationPreview>, StoreError> {
         let row = sqlx::query(
-            "SELECT w.name, i.email, i.role, i.expires_at,
+            "SELECT w.id, w.name, i.email, i.role, i.expires_at,
                     EXISTS (SELECT 1 FROM users u WHERE u.email = i.email) AS has_account
              FROM workspace_invitations i JOIN workspaces w ON w.id = i.workspace_id
              WHERE i.token_hash = ?1 AND i.expires_at > ?2",
@@ -523,6 +523,7 @@ impl WorkspaceStore for SqliteStore {
         .fetch_optional(&self.reader)
         .await?;
         Ok(row.map(|row| InvitationPreview {
+            workspace_id: row.get("id"),
             workspace_name: row.get("name"),
             email: row.get("email"),
             role: role(&row),

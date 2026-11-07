@@ -1100,6 +1100,45 @@ async fn unknown_paths_and_methods_are_refused() {
 }
 
 #[tokio::test]
+async fn front_end_routes_get_the_page() {
+    let dir = TempDir::new().unwrap();
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
+    let index = Fixtures::get("index.html").unwrap();
+
+    for path in [
+        "/login",
+        "/invite/token",
+        "/reset-password/token",
+        "/w/docs",
+    ] {
+        let response = get(state.clone(), path).await;
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX);
+        assert_eq!(body.await.unwrap().as_ref(), index.data.as_ref(), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn missing_files_stay_missing() {
+    let dir = TempDir::new().unwrap();
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
+    for path in [
+        "/assets/gone",
+        "/assets/gone.js",
+        "/licenses/gone.txt",
+        "/ws/gone",
+    ] {
+        let response = get(state.clone(), path).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+}
+
+#[tokio::test]
 async fn two_clients_edit_one_document() {
     let dir = TempDir::new().unwrap();
     let server = start_default(&dir).await;

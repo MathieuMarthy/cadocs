@@ -34,6 +34,19 @@ async fn first_run_creates_an_admin_who_owns_a_workspace() {
 }
 
 #[tokio::test]
+async fn anyone_can_read_whether_setup_is_pending() {
+    let api = start().await;
+    let before = api.raw("GET", "/auth/setup", &[], b"").await;
+    assert_eq!(before.status, 200);
+    assert_eq!(before.body, json!({ "required": true }));
+    assert_eq!(before.header("cache-control"), Some("no-store"));
+
+    api.setup().await;
+    let after = api.raw("GET", "/auth/setup", &[], b"").await;
+    assert_eq!(after.body, json!({ "required": false }));
+}
+
+#[tokio::test]
 async fn setup_works_only_once() {
     let (api, _) = logged_in().await;
     let again = api.setup().await;

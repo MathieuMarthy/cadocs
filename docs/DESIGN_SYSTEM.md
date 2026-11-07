@@ -34,6 +34,7 @@ Each color has a light and a dark value, except the presence colors, which are s
 | `presence-3`, `presence-3-ink` | `#7cc4f2`, `#04202f` | same | Third collaborator |
 
 - `bg`, `panel`, `ink`, `ink-2`, `muted` and `line` make up 95% of the interface.
+- The tokens use `light-dark()`, so the system chooses, unless `data-theme` on `<html>` sets `color-scheme` to one of them.
 - Selection is a **full inversion**, never a pale tinted background.
 - Past three collaborators, the presence colors loop.
 
@@ -83,7 +84,7 @@ Those subsets have no box-drawing characters, so the tree prefixes of the MVP ne
 
 ## Components
 
-The prototype only uses the page content, the status and presence. The others are the reference for the MVP.
+The shell uses the buttons, fields, breadcrumb and workspace selector. The others are the reference for the next steps.
 
 ### Page content
 
@@ -107,6 +108,12 @@ The prototype only uses the page content, the status and presence. The others ar
 - Never an `accent` background.
 - Focus: 2px `accent` outline, offset by 2px.
 
+### Field
+
+- `label` above a `control-height` input in mono 13px, with a `line` border on `bg` and `space-2` horizontal padding.
+- A refusal shows below it in `accent-text`, mono 12px, and turns the border `accent-text`.
+- Focus as for buttons.
+
 ### Tree item
 
 - A sidebar row for a space or a page, `row-height` tall, `space-2` horizontal padding.
@@ -117,7 +124,7 @@ The prototype only uses the page content, the status and presence. The others ar
 
 ### Workspace selector
 
-A 22px `accent` square, the name at 600, and the current workspace in `muted` followed by `▾`.
+A 22px `accent` square, the name at 600, and the current workspace in `muted` followed by `▾`. It opens in place, as rows below it: only the command menu floats.
 
 ### Search field
 

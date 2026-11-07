@@ -539,6 +539,7 @@ async fn anyone_with_the_link_reads_the_invitation_until_it_expires() {
     assert_eq!(reply.status, 200, "{reply:?}");
     assert_eq!(reply.header("cache-control"), Some("no-store"));
     assert_eq!(reply.body["workspace_name"], "Acme Docs");
+    assert_eq!(reply.body["workspace_id"], id.as_str());
     assert_eq!(reply.body["email"], "eve@example.org");
     assert_eq!(reply.body["has_account"], false);
 

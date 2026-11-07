@@ -74,6 +74,7 @@ pub struct Invitation {
 /// What a link shows to whoever holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvitationPreview {
+    pub workspace_id: String,
     pub workspace_name: String,
     pub email: String,
     pub role: WorkspaceRole,

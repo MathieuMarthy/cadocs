@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 
 const STARTUP_MS = 10_000;
 const STOP_MS = 15_000;
-const PASSWORD = "correct horse battery";
+export const PASSWORD = "correct horse battery";
 
 function binary() {
   const path = process.env.CADOCS_BIN
@@ -37,6 +37,14 @@ interface Login {
   token: string;
   csrf: string;
   spaceId: string;
+  workspaceId: string;
+}
+
+/** Someone other than the first account, as `addMember` makes them. */
+export interface Member {
+  id: string;
+  email: string;
+  token: string;
 }
 
 /** The real binary on its own data folder and port. */
@@ -103,7 +111,51 @@ export class TestServer {
     const headers = { cookie: `session=${token}`, "x-csrf-token": session.csrf_token };
     const path = `/workspaces/${session.workspaces[0].id}/spaces`;
     const space = await this.post(path, { name: "Pages" }, headers);
-    return { token, csrf: session.csrf_token, spaceId: (await space.json()).id };
+    return {
+      token,
+      csrf: session.csrf_token,
+      spaceId: (await space.json()).id,
+      workspaceId: session.workspaces[0].id,
+    };
+  }
+
+  /** A REST call as the first account, whose answer must be a success. */
+  async call(method: string, path: string, body?: unknown) {
+    const { token, csrf } = await this.session();
+    const response = await fetch(`${this.url}/api/v1${path}`, {
+      method,
+      headers: {
+        "content-type": "application/json",
+        cookie: `session=${token}`,
+        "x-csrf-token": csrf,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
+    return response.status === 204 ? null : response.json();
+  }
+
+  /** An invitation link to the workspace of the first account. */
+  async invite(email: string, role = "member") {
+    const { workspaceId } = await this.session();
+    const body = { email, role };
+    return (await this.call("POST", `/workspaces/${workspaceId}/invitations`, body)).link as string;
+  }
+
+  /** A second account in the workspace, and an editor of the space of the first one. */
+  async addMember(email: string): Promise<Member> {
+    const { spaceId } = await this.session();
+    const token = new URL(await this.invite(email)).pathname.split("/").pop();
+    const response = await this.post(`/invitations/${token}/accept`, {
+      name: "Grace",
+      password: PASSWORD,
+    });
+    const cookie = /^session=([^;]*)/.exec(response.headers.getSetCookie()[0] ?? "")?.[1];
+    if (!cookie) throw new Error("no session cookie");
+    const { user } = await response.json();
+    const grants = [{ user_id: user.id, role: "editor" }];
+    await this.call("PUT", `/spaces/${spaceId}/grants`, { grants });
+    return { id: user.id, email, token: cookie };
   }
 
   async session() {

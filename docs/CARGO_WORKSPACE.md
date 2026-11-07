@@ -15,7 +15,7 @@ cadocs/
 │   ├── cadocs-jobs/          worker and job handlers (MVP)
 │   ├── cadocs-server/        the binary: config, HTTP, WebSocket, embedded assets
 │   └── cadocs-bench/         y-sync load client, dev tool only
-├── web/                      Vite and TipTap front end
+├── web/                      Vite, Svelte and TipTap front end
 ├── bench/                    RSS benchmark
 └── docs/
 ```
@@ -60,7 +60,7 @@ These never reach the server binary.
 | `tower` (`util`) | Calling the router directly in tests |
 | `tempfile` | Temporary databases in tests |
 
-`web/` has two npm dev dependencies for the same purpose: `@playwright/test` (Apache-2.0) for the browser tests, and `@types/node` to type-check them. Neither reaches `web/dist`.
+`web/` has two npm dev dependencies for the same purpose: `@playwright/test` (Apache-2.0) for the browser tests, and `@types/node` to type-check them. Neither reaches `web/dist`. `svelte` (MIT) is a runtime dependency of the shell, and `@sveltejs/vite-plugin-svelte` (MIT) a build dependency. The shell is about 73 KB of JavaScript, 26 KB compressed, and TipTap stays in a chunk that only a page loads.
 
 ### Planned
 

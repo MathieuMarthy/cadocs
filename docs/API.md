@@ -38,6 +38,7 @@ Minimum role per route: `member` is a workspace role. Space roles are `viewer` <
 
 | Method | Route | Role | Purpose |
 | --- | --- | --- | --- |
+| GET | `/auth/setup` | none | Whether first-run setup is pending |
 | POST | `/auth/setup` | none, first run only | Create the first user and workspace |
 | POST | `/auth/login` | none, rate limited | Email and password login |
 | POST | `/auth/logout` | user | End the session, close its sockets |
@@ -52,6 +53,7 @@ Minimum role per route: `member` is a workspace role. Space roles are `viewer` <
 
 Bodies and answers:
 
+- `GET /auth/setup` answers `{ required }`, `true` while no account exists.
 - `POST /auth/setup` takes `{ email, name, password, workspace_name }`, and answers `201` with the session body and the cookie. Once an account exists it answers `409`.
 - `POST /auth/login` takes `{ email, password }`, and answers `200` with the session body and the cookie. An unknown email, a wrong password and a disabled account all answer the same `401`, in the same time.
 - `GET /session` answers `{ user: { id, email, name, is_instance_admin }, workspaces: [{ id, slug, name, role }], csrf_token }`.
@@ -106,7 +108,7 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 - An invitation is `{ id, email, role, invited_by, expires_at, created_at }`, where `role` is `admin` or `member`. A link ends with the right to make it: when its inviter drops below `admin`, leaves, is removed, disabled or deleted. `GET /workspaces/{ws}/invitations` is paginated, oldest first, and leaves out expired ones.
 - `POST /workspaces/{ws}/invitations` takes `{ email, role }` and answers `201` with the invitation and `link`, once, as `<CADOCS_PUBLIC_URL>/invite/<token>`, valid 7 days (ADR 0013). An email has one link per workspace: a new one replaces the last. The email of a member is a `409`, with `email: member`.
 - `DELETE /invitations/{id}` answers `204`, and `404` to anyone who is not an admin of its workspace.
-- `GET /invitations/{token}` answers `{ workspace_name, email, role, expires_at, has_account }`. `has_account` tells the page to ask for a login rather than a password.
+- `GET /invitations/{token}` answers `{ workspace_id, workspace_name, email, role, expires_at, has_account }`. `has_account` tells the page to ask for a login rather than a password.
 - `POST /invitations/{token}/accept` always takes a JSON body. `{ name, password }` makes the account of the invited email, and answers `201` with the session body and the cookie, or `409` with `email: taken` if that email has an account. `{}` joins with the current session, needs the CSRF token, and answers `200` with the session body: `401` with no session, `403` for an account with another email. A member keeps their role. A refused password leaves the link usable.
 - A link that is unknown, used, replaced, revoked or expired, or whose workspace is gone, is a `404`. Answers that hold a link or a session have `Cache-Control: no-store`.
 | GET | `/jobs/{id}` | the user who started it | Status of an import or export |

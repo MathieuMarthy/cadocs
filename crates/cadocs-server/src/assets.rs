@@ -15,8 +15,13 @@ pub async fn serve<E: RustEmbed>(uri: Uri) -> Response {
         "" => "index.html",
         path => path,
     };
-    let Some(file) = E::get(path) else {
-        return StatusCode::NOT_FOUND.into_response();
+    let (path, file) = match E::get(path) {
+        Some(file) => (path, file),
+        None if is_front_end_route(path) => match E::get("index.html") {
+            Some(file) => ("index.html", file),
+            None => return StatusCode::NOT_FOUND.into_response(),
+        },
+        None => return StatusCode::NOT_FOUND.into_response(),
     };
 
     let mut response = Response::new(Body::from(file.data));
@@ -33,6 +38,15 @@ pub async fn serve<E: RustEmbed>(uri: Uri) -> Response {
     };
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
     response
+}
+
+/// The front end routes in the browser, so a link to one of its pages must load it. A path with
+/// an extension, or under a folder of files or of the server, is a file that is missing. The
+/// front end's router leaves the same folders to the browser (`web/src/lib/router.svelte.ts`).
+fn is_front_end_route(path: &str) -> bool {
+    let first = path.split('/').next().unwrap_or_default();
+    let last = path.rsplit('/').next().unwrap_or_default();
+    !matches!(first, "api" | "assets" | "licenses" | "ws") && !last.contains('.')
 }
 
 /// The few types the build produces, which does not justify a MIME table in the binary.

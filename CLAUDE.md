@@ -15,7 +15,7 @@ npm --prefix web run test:e2e                       # after the two builds: it r
 bench/rss.sh build && bench/rss.sh run              # RAM benchmark, about 12 minutes, results in target/bench
 ```
 
-Run it with `CADOCS_PUBLIC_URL=http://127.0.0.1:3000 target/release/cadocs`. The page needs a session and a page id, and nothing offers them before step 11: `POST /api/v1/auth/setup` from the browser's console, create a space and a page over REST, then open `http://127.0.0.1:3000/?page=<id>`. For front end work, set `CADOCS_PUBLIC_URL` to the Vite address (`http://localhost:5173`), run the server, then `npm --prefix web run dev`, which proxies `/ws` and `/api` to it.
+Run it with `CADOCS_PUBLIC_URL=http://127.0.0.1:3000 target/release/cadocs`. The first visit offers first-run setup. Nothing lists pages before step 12: create a space and a page over REST, then open `http://127.0.0.1:3000/?page=<id>`. For front end work, set `CADOCS_PUBLIC_URL` to the Vite address (`http://localhost:5173`), run the server, then `npm --prefix web run dev`, which proxies `/ws` and `/api` to it.
 
 ## Workflow
 

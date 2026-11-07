@@ -3,19 +3,19 @@
 :root {
   color-scheme: light dark;
 
-  --bg: #f5f5f4;
-  --panel: #ebebea;
-  --ink: #141414;
-  --ink-2: #2d2d2c;
-  --muted: #5a5a58;
-  --line: #cdcdca;
-  --accent: #ff5a1f;
-  --accent-text: #b3390d;
+  --bg: light-dark(#f5f5f4, #0e0e0e);
+  --panel: light-dark(#ebebea, #151515);
+  --ink: light-dark(#141414, #e6e6e4);
+  --ink-2: light-dark(#2d2d2c, #c8c8c5);
+  --muted: light-dark(#5a5a58, #999996);
+  --line: light-dark(#cdcdca, #2b2b2b);
+  --accent: light-dark(#ff5a1f, #ff6b30);
+  --accent-text: light-dark(#b3390d, #ff8a5c);
   --selection: var(--ink);
   --selection-ink: var(--bg);
-  --mark: #ffdccb;
-  --ok: #2e7d32;
-  --shadow-offset: 5px 5px 0 #141414;
+  --mark: light-dark(#ffdccb, #3f2516);
+  --ok: light-dark(#2e7d32, #6ccb6f);
+  --shadow-offset: 5px 5px 0 var(--ink);
 
   --presence-1: #f5b83d;
   --presence-1-ink: #1a1200;
@@ -45,18 +45,11 @@
   --control-height: 34px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e0e0e;
-    --panel: #151515;
-    --ink: #e6e6e4;
-    --ink-2: #c8c8c5;
-    --muted: #999996;
-    --line: #2b2b2b;
-    --accent: #ff6b30;
-    --accent-text: #ff8a5c;
-    --mark: #3f2516;
-    --ok: #6ccb6f;
-    --shadow-offset: 5px 5px 0 #e6e6e4;
-  }
+/* A choice in the interface overrides the system. See `web/src/lib/theme.svelte.ts`. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }

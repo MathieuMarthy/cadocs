@@ -150,6 +150,7 @@ async fn revoke<S: WorkspaceStore, A>(
 
 #[derive(Serialize)]
 struct PreviewBody {
+    workspace_id: String,
     workspace_name: String,
     email: String,
     role: &'static str,
@@ -160,6 +161,7 @@ struct PreviewBody {
 impl From<InvitationPreview> for PreviewBody {
     fn from(preview: InvitationPreview) -> Self {
         Self {
+            workspace_id: preview.workspace_id,
             workspace_name: preview.workspace_name,
             email: preview.email,
             role: preview.role.as_str(),

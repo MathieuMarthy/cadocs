@@ -44,7 +44,10 @@ where
         rate_limit,
     );
     let public = Router::new()
-        .route("/auth/setup", post(setup).route_layer(limit.clone()))
+        .route(
+            "/auth/setup",
+            post(setup).route_layer(limit.clone()).get(setup_state),
+        )
         .route("/auth/login", post(login).route_layer(limit.clone()))
         .route(
             "/auth/password-reset/{token}",
@@ -143,6 +146,20 @@ pub(super) fn new_session<S, A>(
         expires_at: now + state.http.session_lifetime.as_millis() as i64,
     };
     Ok((token, session))
+}
+
+#[derive(Serialize)]
+struct SetupState {
+    required: bool,
+}
+
+/// Tells the front end to show first-run setup, since `GET /session` is a `401` either way.
+async fn setup_state<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+) -> Result<Response, ApiError> {
+    let required = !state.store.has_users().await?;
+    let no_store = [(CACHE_CONTROL, HeaderValue::from_static("no-store"))];
+    Ok((no_store, Json(SetupState { required })).into_response())
 }
 
 #[derive(Deserialize)]
