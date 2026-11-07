@@ -12,7 +12,7 @@ The server needs document text for search, and HTML or Markdown for public pages
 - Renderers go from the AST to plain text, HTML and Markdown.
 - Import parses Markdown with `pulldown-cmark` into the same AST, and writes it to a Yjs document. HTML import is left to the browser, where paste already goes through TipTap.
 - The node and mark schema is defined once in Rust. A test exports the TipTap schema from `web/` and compares it with the Rust definition, so the two cannot drift silently.
-- An unknown node keeps its text and logs a warning. Content is never dropped.
+- An unknown node keeps its text and logs a warning. Content is never dropped. Plugin blocks are not unknown nodes: they use the `plugin` envelope node of ADR 0016.
 - HTML output is built from the AST with escaping at every step, and link and image URLs go through a scheme allow-list. Public pages render content written by other users.
 
 ## Consequences

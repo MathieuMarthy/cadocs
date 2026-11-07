@@ -26,6 +26,8 @@ Instance admins have no implicit access to content. Their role covers accounts a
 | Create or revoke an invitation | no | yes | yes |
 | Change or remove a `member` or `admin` | no | yes | yes |
 | Manage groups (V1) | no | yes | yes |
+| Choose which installed content plugins the workspace offers (V2) | no | yes | yes |
+| Enable or disable an offered content plugin for oneself (V2) | yes | yes | yes |
 | Change or remove an `owner`, or grant `owner` | no | no | yes |
 | Delete the workspace | no | no | yes |
 
@@ -68,6 +70,10 @@ A workspace always keeps at least one owner. Any change that would remove the la
 | Create a workspace | no | yes |
 | List, disable or delete users, grant instance admin | no | yes |
 | Generate a password reset link | no | yes |
+| Enable or disable an installed user plugin for oneself (V2) | yes | yes |
+| List installed plugins (V2) | no | yes |
+
+Installing plugin code is not an instance action: only the operator does it, on the server (ADR 0016).
 
 An instance always keeps at least one enabled instance admin. A user who is the last owner of a workspace cannot be deleted until ownership moves or the workspace is deleted. Only enabled owners count, as a disabled one cannot act. Disabling the last enabled owner is allowed: it can be undone, and an instance admin must be able to lock out an account that has no other owner beside it.
 

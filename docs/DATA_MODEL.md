@@ -387,4 +387,4 @@ Specified when their stage starts, following the same conventions.
 | Stage | Tables |
 | --- | --- |
 | V1 | `page_links` (backlinks), `notifications`, `user_totp` and recovery codes, `templates` |
-| V2 | `page_labels`, `audit_log`, `api_tokens`, `webhooks` |
+| V2 | `page_labels`, `audit_log`, `api_tokens`, `webhooks`, `workspace_plugins` (content plugins offered, and enabled per member), `user_plugins` (user plugins, per user for the whole instance) (ADR 0016) |
