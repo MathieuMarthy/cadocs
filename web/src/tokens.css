@@ -15,6 +15,7 @@
   --selection-ink: var(--bg);
   --mark: light-dark(#ffdccb, #3f2516);
   --ok: light-dark(#2e7d32, #6ccb6f);
+  --danger: light-dark(#b3261e, #ff7b72);
   --shadow-offset: 5px 5px 0 var(--ink);
 
   --presence-1: #f5b83d;
@@ -43,6 +44,7 @@
   --topbar-height: 56px;
   --row-height: 30px;
   --control-height: 34px;
+  --icon-size: 16px;
 }
 
 /* A choice in the interface overrides the system. See `web/src/lib/theme.svelte.ts`. */

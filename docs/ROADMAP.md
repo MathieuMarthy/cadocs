@@ -61,6 +61,9 @@ Steps, one session each. Each step adds the migration for the tables it needs, a
 - [x] **Step 10:** `cadocs-jobs` and the reader outside a room: `jobs`, worker, retries, purge of sessions, tokens and the trash, `CADOCS_DOC_READS`. Done when a crash during a job, retries and the read bound are tested.
 - [x] **Step 11:** Svelte shell: routing, setup, login, invitation and reset pages, account, instance administration, light and dark themes, phone layout, the source code link, `4401`, `4403` and `4404` shown in the page. Done when Playwright goes from first run to an empty workspace.
 - [x] **Step 12:** Navigation: spaces, lazy tree with drag and drop, trash, recent pages, live updates from the events socket. Done when two browsers see each other's tree changes.
+- [ ] **Step 12a:** Icons and action menus (ADR 0017). The Lucide icons of [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md#iconography) as inline SVG with their ISC notice in `web/public/licenses`, an icon button, and an action menu with arrow keys, Enter and Escape. The tree gets `plus` and `ellipsis`, removed from layout when not hovered or focused, so labels use the full width, and loses the space numbers. One verb per action everywhere: `move to trash`, `restore`, `delete forever`. Moving to trash shows `moved to trash` with an `undo` that restores. Labels lose their capitals. Comes first, before step 14. Done when Playwright moves a page to trash from its menu by keyboard alone, undoes it, and checks that a tree label is as wide as its row allows.
+- [ ] **Step 12b:** Shell. The sidebar stays on screen and scrolls its tree alone. Under 840px it becomes a drawer behind the `menu` button, so a page shows first. The footer becomes a user menu (account, theme, log out), with the source link and license on one line (ADR 0010). The breadcrumb links its parents, drops the repeated workspace on the workspace home, and shows no workspace on account and administration. Opening a page opens its ancestors in the tree. A page keeps the shell while it loads instead of flashing a bare `loading…`. Names users typed keep their case: only interface words are lowercase. Done when Playwright, at 390px wide, opens a nested page from the drawer, and a page opened by its address shows selected in the tree.
+- [ ] **Step 12c:** Screens. Home: no role line, relative dates with the exact one as `title`, recent pages as plain titles with their space, `new space` moved to a `plus` beside the `spaces` label, and empty states that offer the next action. Page: a title that wraps, presence shown from two people, an `ellipsis` menu in the top bar (copy link, move to trash). Trash: reached from the space menu, titled with the space in the breadcrumb, plain wording (`restoring a page also restores its subpages`). Account: separate profile and password forms, the current password asked only by the password form, account deletion in `danger`. Administration: an `ellipsis` menu per user, a `(you)` mark and no self-demotion or self-deletion offered, status badges, a copy button for the reset link. Done when Playwright goes through each screen in both themes, and the self actions are absent for the current admin.
 - [ ] **Step 13:** Administration screens: workspace settings, members, invitations, space settings and grants. Comes after step 14, which brings the page view. Done when Playwright invites a user and changes their role, and the open page reacts.
 - [ ] **Step 14:** Editor, first blocks: read-only mode from the role, slash menu, headings, lists, tasks, code with syntax highlighting, quotes, dividers, links, Markdown shortcuts. Blocks, slash menu and shortcuts come from an internal registry, and `enableContentCheck` is on, with a reload banner (ADR 0016). Done when each block works in Playwright with two browsers, and a tab whose schema lacks a block leaves that block intact for the others.
 - [ ] **Step 15:** Editor, other blocks: callouts, toggles, tables, links to pages, table of contents. Done when each block works in Playwright with two browsers.
@@ -83,7 +86,10 @@ Steps keep their numbers, but this order wins over them: the next step is the fi
 | Wave | Steps | Needs |
 | --- | --- | --- |
 | 1 | 9, 10, 11 | Nothing left |
-| 2 | 12, 14 | 12: 9 and 11. 14: 11 |
+| 2 | 12 | 9 and 11 |
+| 2a | 12a | 12 |
+| 2b | 12b, 12c | 12a |
+| 2c | 14 | 11, and 12a for its icons and menus |
 | 3 | 13, 15 | 13: 14. 15: 14, and 12 for picking a page to link to |
 | 4 | 16 | 15, for the schema comparison test |
 | 5 | 17, 18, 19 | 10 and 16. 17 and 19 also need 14 for their blocks and screens |
@@ -98,6 +104,7 @@ When steps run in parallel:
 - **Migrations:** agree on the numbers before starting, since two branches would otherwise both take the next one. This matters most in wave 5.
 - **Steps 9 and 10:** both touch `lib.rs` and `DocRegistry`. When they meet, check that the trash purge job publishes the same events as `purge_page`.
 - **Steps 12 and 14:** both touch the Svelte routes.
+- **Steps 12b and 12c:** both touch `Shell.svelte` and `base.css`. 12b owns the shell, 12c the screens inside it.
 - **Idle RSS:** a step only measures its own branch, so measure again after each merge to see the combined drift.
 
 Exit criteria:
