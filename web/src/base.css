@@ -47,12 +47,42 @@ body {
   color: var(--muted);
 }
 
-.breadcrumb .current {
+/* Parents give way first, down to a few letters, then the title. */
+.breadcrumb > * {
+  flex: 0 1 auto;
+  min-width: 3ch;
   overflow: hidden;
-  color: var(--ink);
-  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.breadcrumb > .sep {
+  flex: none;
+  min-width: 0;
+}
+
+.breadcrumb a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.breadcrumb .current {
+  flex-shrink: 0.2;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* The sidebar's buttons on a narrow window. */
+.drawer-close {
+  display: none;
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+}
+
+.drawer-button {
+  display: none;
+  margin-left: calc(-1 * var(--space-2));
 }
 
 .topbar-end {
@@ -265,16 +295,20 @@ h2 {
 
 .shell {
   display: flex;
-  flex-wrap: wrap;
   min-height: 100vh;
 }
 
+/* On screen while the page scrolls: the tree scrolls alone, the footer stays. */
 .sidebar {
+  position: sticky;
+  top: 0;
   display: flex;
   flex: 0 0 var(--sidebar-width);
   flex-direction: column;
   gap: var(--space-6);
   min-width: 0;
+  height: 100vh;
+  height: 100dvh;
   padding: var(--space-3);
   border-right: 1px solid var(--line);
   background: var(--panel);
@@ -283,11 +317,48 @@ h2 {
   line-height: 1.4;
 }
 
+.sidebar-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 calc(-1 * var(--space-3));
+  padding: 0 var(--space-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .sidebar-end {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
   margin-top: auto;
+}
+
+.user-button {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-button:hover,
+.user-button[aria-expanded="true"] {
+  background: var(--selection);
+  color: var(--selection-ink);
+}
+
+/* The source link and the license on one line. */
+.source-line {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.source-line .meta {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .selector summary {
@@ -470,13 +541,6 @@ h2 {
   font-weight: 500;
 }
 
-.user-name {
-  overflow: hidden;
-  padding: 0 var(--space-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .column {
   flex: 1 1 0;
   min-width: 0;
@@ -633,7 +697,7 @@ h2 {
   }
 
   .breadcrumb {
-    flex: 1 1 60%;
+    flex: 1 1 0;
   }
 
   .topbar-end {
@@ -641,14 +705,29 @@ h2 {
     width: 100%;
   }
 
-  .sidebar {
-    flex-basis: 100%;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+  .drawer-button,
+  .drawer-close {
+    display: inline-flex;
   }
 
-  .column {
-    flex-basis: 100%;
+  /* A drawer over the content, closed until the menu button opens it. */
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    display: none;
+    width: min(var(--sidebar-width), calc(100vw - var(--space-10)));
+    border-right-color: var(--ink);
+    box-shadow: var(--shadow-offset);
+  }
+
+  .drawer-open .sidebar {
+    display: flex;
+  }
+
+  /* Room for the close button at the right of the selector. */
+  .sidebar .selector summary {
+    padding-right: var(--control-height);
   }
 
   .content {

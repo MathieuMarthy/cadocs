@@ -186,6 +186,27 @@ async fn a_page_answers_its_metadata_and_the_role_of_the_caller() {
 }
 
 #[tokio::test]
+async fn a_page_names_its_ancestors_root_first() {
+    let (api, owner, _, space) = space().await;
+    let top = api.page(&owner, &space, None).await;
+    let middle = api.page(&owner, &space, Some(&top)).await;
+    let page = api.page(&owner, &space, Some(&middle)).await;
+    sqlx::query("UPDATE pages SET title = 'Top' WHERE id = ?1")
+        .bind(&top)
+        .execute(&api.db)
+        .await
+        .unwrap();
+
+    let read = api.read(&owner, &page).await;
+    let expected = json!([{ "id": top, "title": "Top" }, { "id": middle, "title": "" }]);
+    assert_eq!((read.status, &read.body["ancestors"]), (200, &expected));
+    assert_eq!(api.read(&owner, &top).await.body["ancestors"], json!([]));
+    // Only the single read carries them, not the lists.
+    let tree = api.get(&owner, &format!("/spaces/{space}/tree")).await;
+    assert_eq!(tree.body["items"][0].get("ancestors"), None);
+}
+
+#[tokio::test]
 async fn a_slug_only_works_in_its_workspace() {
     let (api, owner, ws, space) = space().await;
     let reply = api.create(&owner, &space, json!({})).await;

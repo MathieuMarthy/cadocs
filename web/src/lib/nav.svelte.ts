@@ -40,6 +40,17 @@ export interface PageRow {
   updated_at: string;
 }
 
+/** A page above another, as `GET /pages/{id}` names it, the root first. */
+export interface Crumb {
+  id: string;
+  title: string;
+}
+
+/** What `GET /pages/{id}` answers. */
+export interface PageView extends PageRow {
+  ancestors: Crumb[];
+}
+
 /** Where a dragged page lands: the fields of `POST /pages/{page}/move`. */
 export interface Place {
   space_id: string;
@@ -370,6 +381,11 @@ export class Nav {
 /** The one workspace whose tree shows, kept while screens come and go. */
 let current: { key: string; nav: Nav; users: number; idle: ReturnType<typeof setTimeout> | null } | null =
   null;
+
+/** The workspace whose tree showed last for `user`, which a screen can show while it loads. */
+export function lastWorkspace(user: string) {
+  return current?.key.startsWith(`${user}/`) ? current.nav.workspace : null;
+}
 
 /**
  * The navigation of `workspace` for `user`, with its socket open until every caller releases it.

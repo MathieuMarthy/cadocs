@@ -16,8 +16,8 @@ pub use accounts::{
 };
 pub use jobs::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob};
 pub use pages::{
-    DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, MovedPage, NewPage, PageMove, PageRecord,
-    PageStore, Placement,
+    DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, MovedPage, NewPage, PageCrumb, PageMove,
+    PageRecord, PageStore, Placement,
 };
 pub use spaces::{
     Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore, WorkspaceReach,

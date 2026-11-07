@@ -38,7 +38,7 @@
   }
 </script>
 
-<Shell title="account">
+<Shell title="account" crumbWorkspace={false}>
   <h1>account</h1>
   <form onsubmit={submit}>
     <Field label="name" bind:value={name} autocomplete="name" required problem={form.field("name")} />

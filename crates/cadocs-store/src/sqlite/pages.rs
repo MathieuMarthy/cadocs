@@ -7,8 +7,8 @@ use super::spaces::{self, HAS_ROLE, space_access};
 use super::workspaces::authorize as authorize_workspace;
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
-    DateCursor, MAX_PAGE_DEPTH, MovedPage, NewPage, PageMove, PageRecord, PageSite, PageStore,
-    Placement, StoreError,
+    DateCursor, MAX_PAGE_DEPTH, MovedPage, NewPage, PageCrumb, PageMove, PageRecord, PageSite,
+    PageStore, Placement, StoreError,
 };
 
 /// A page with all that resolution needs to know about the user `?1`.
@@ -287,6 +287,38 @@ impl PageStore for SqliteStore {
     async fn page(&self, page_id: &str, actor: &str) -> Result<Option<PageRecord>, StoreError> {
         let mut reader = self.reader.acquire().await?;
         Ok(readable(select_page(&mut reader, page_id, actor).await?))
+    }
+
+    async fn page_with_ancestors(
+        &self,
+        page_id: &str,
+        actor: &str,
+    ) -> Result<Option<(PageRecord, Vec<PageCrumb>)>, StoreError> {
+        let mut reader = self.reader.acquire().await?;
+        let Some(found) = readable(select_page(&mut reader, page_id, actor).await?) else {
+            return Ok(None);
+        };
+        let Some(parent_id) = found.parent_id.as_deref() else {
+            return Ok(Some((found, Vec::new())));
+        };
+        // Pages above a live page are live and in its space, so its role covers them.
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "WITH RECURSIVE above(id, title, parent_id, depth) AS (
+                 SELECT id, title, parent_id, 0 FROM pages WHERE id = ?1
+                 UNION ALL
+                 SELECT p.id, p.title, p.parent_id, above.depth + 1
+                 FROM pages p JOIN above ON p.id = above.parent_id
+             )
+             SELECT id, title FROM above ORDER BY depth DESC",
+        )
+        .bind(parent_id)
+        .fetch_all(&mut *reader)
+        .await?;
+        let crumbs = rows
+            .into_iter()
+            .map(|(id, title)| PageCrumb { id, title })
+            .collect();
+        Ok(Some((found, crumbs)))
     }
 
     async fn page_scope(&self, page_id: &str, actor: &str) -> Result<Option<Scope>, StoreError> {

@@ -114,7 +114,7 @@ One set: **Lucide** 0.460.0 (ISC license, compatible with AGPL-3.0), redrawn wit
 
 ## Components
 
-The shell uses the buttons, fields, breadcrumb and workspace selector. The others are the reference for the next steps. The icons, the action menu, the drawer and the lowercase labels came with ADR 0017. Step 12a brought the icons, the icon button, the action menu, the notice and the tree in line; steps 12b and 12c do the shell and the screens.
+The shell uses the buttons, fields, breadcrumb and workspace selector. The others are the reference for the next steps. The icons, the action menu, the drawer and the lowercase labels came with ADR 0017. Step 12a brought the icons, the icon button, the action menu, the notice and the tree in line; step 12b brought the sticky sidebar, the drawer, the user menu and the linked breadcrumb; step 12c does the screens.
 
 ### Page content
 

@@ -18,7 +18,7 @@
   onDestroy(held.release);
 
   const space = $derived(nav.spaces.find((item) => item.slug === slug) ?? null);
-  const title = $derived(space ? `trash of ${space.name.toLowerCase()}` : "trash");
+  const title = $derived(space ? `trash of ${space.name}` : "trash");
 
   let items = $state<PageRow[] | null>(null);
   let next = $state<string | null>(null);

@@ -10,8 +10,8 @@ use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
 use cadocs_collab::{Authorizer, Event, PageEvent};
 use cadocs_store::{
-    AccountStore, DateCursor, DocStore, MAX_TITLE_CHARS, NewPage, PageMove, PageRecord, PageStore,
-    Placement, now_ms,
+    AccountStore, DateCursor, DocStore, MAX_TITLE_CHARS, NewPage, PageCrumb, PageMove, PageRecord,
+    PageStore, Placement, now_ms,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -82,6 +82,29 @@ impl From<PageRecord> for PageBody {
             deleted_by: page.deleted_by,
             created_at: page.created_at,
             updated_at: page.updated_at,
+        }
+    }
+}
+
+/// What `GET /pages/{page}` answers: the page, and what a breadcrumb needs above it.
+#[derive(Serialize)]
+struct PageWithAncestors {
+    #[serde(flatten)]
+    page: PageBody,
+    ancestors: Vec<CrumbBody>,
+}
+
+#[derive(Serialize)]
+struct CrumbBody {
+    id: String,
+    title: String,
+}
+
+impl From<PageCrumb> for CrumbBody {
+    fn from(crumb: PageCrumb) -> Self {
+        Self {
+            id: crumb.id,
+            title: crumb.title,
         }
     }
 }
@@ -160,10 +183,16 @@ async fn read<S: PageStore, A>(
     State(state): State<AppState<S, A>>,
     Extension(current): Extension<CurrentSession>,
     PathParam(page): PathParam,
-) -> Result<Json<PageBody>, ApiError> {
-    let found = state.store.page(&page, &current.user.id).await?;
-    let page = found.ok_or_else(|| ApiError::new(ErrorCode::NotFound))?;
-    Ok(Json(page.into()))
+) -> Result<Json<PageWithAncestors>, ApiError> {
+    let found = state
+        .store
+        .page_with_ancestors(&page, &current.user.id)
+        .await?;
+    let (page, ancestors) = found.ok_or_else(|| ApiError::new(ErrorCode::NotFound))?;
+    Ok(Json(PageWithAncestors {
+        page: page.into(),
+        ancestors: ancestors.into_iter().map(Into::into).collect(),
+    }))
 }
 
 #[derive(Deserialize)]

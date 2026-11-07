@@ -76,7 +76,7 @@
   }
 </script>
 
-<Shell title="admin">
+<Shell title="admin" crumbWorkspace={false}>
   <h1>admin</h1>
 
   <h2>users</h2>

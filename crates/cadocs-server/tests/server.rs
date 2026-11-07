@@ -24,9 +24,9 @@ use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Credentials, DateCursor, DocEdit, DocStore,
     FirstUser, Grant, Invitation, InvitationPreview, InvitedUser, Member, Membership, MovedPage,
     NewGrant, NewInvitation, NewPage, NewPasswordReset, NewSession, NewSpace, NewWorkspace,
-    PageMove, PageRecord, PageSite, PageStore, SessionStanding, Snapshot, Space, SpaceChanges,
-    SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, UpdateBasis, UserChanges,
-    UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
+    PageCrumb, PageMove, PageRecord, PageSite, PageStore, SessionStanding, Snapshot, Space,
+    SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, UpdateBasis,
+    UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -112,6 +112,14 @@ impl PageStore for FlakyStore {
 
     async fn page(&self, page_id: &str, actor: &str) -> Result<Option<PageRecord>, StoreError> {
         self.inner.page(page_id, actor).await
+    }
+
+    async fn page_with_ancestors(
+        &self,
+        page_id: &str,
+        actor: &str,
+    ) -> Result<Option<(PageRecord, Vec<PageCrumb>)>, StoreError> {
+        self.inner.page_with_ancestors(page_id, actor).await
     }
 
     async fn page_scope(&self, page_id: &str, actor: &str) -> Result<Option<Scope>, StoreError> {

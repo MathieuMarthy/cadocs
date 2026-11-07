@@ -21,9 +21,16 @@
   import Icon from "./Icon.svelte";
   import IconButton from "./IconButton.svelte";
 
-  /** The `ellipsis` button and the action menu it opens below it, aligned to its right. */
-  let { label, items, class: extra = "" }: { label: string; items: MenuItem[]; class?: string } =
-    $props();
+  /**
+   * The `ellipsis` button and the action menu it opens below it, aligned to its right. With
+   * `text`, the button shows that text instead, as the user menu shows the user's name.
+   */
+  let {
+    label,
+    items,
+    text,
+    class: extra = "",
+  }: { label: string; items: MenuItem[]; text?: string; class?: string } = $props();
 
   const id = $props.id();
   let open = $state(false);
@@ -133,17 +140,29 @@
   {/if}
 {/snippet}
 
-<IconButton
-  bind:element={button}
-  class={extra}
-  icon="ellipsis"
-  verb="more actions"
-  {label}
-  aria-haspopup="menu"
-  aria-expanded={open}
-  aria-controls={open ? id : undefined}
-  onclick={() => (open ? hide() : void show())}
-/>
+{#if text}
+  <button
+    bind:this={button}
+    class="menu-trigger {extra}"
+    type="button"
+    aria-haspopup="menu"
+    aria-expanded={open}
+    aria-controls={open ? id : undefined}
+    onclick={() => (open ? hide() : void show())}>{text}</button
+  >
+{:else}
+  <IconButton
+    bind:element={button}
+    class={extra}
+    icon="ellipsis"
+    verb="more actions"
+    {label}
+    aria-haspopup="menu"
+    aria-expanded={open}
+    aria-controls={open ? id : undefined}
+    onclick={() => (open ? hide() : void show())}
+  />
+{/if}
 {#if open}
   <!-- svelte-ignore a11y_interactive_supports_focus -->
   <div

@@ -41,7 +41,7 @@
     );
   });
 
-  const spaceName = (id: string) => nav.space(id)?.name.toLowerCase() ?? "";
+  const spaceName = (id: string) => nav.space(id)?.name ?? "";
 
   const creating = new Form();
   let name = $state("");
@@ -57,7 +57,7 @@
   }
 </script>
 
-<Shell title={workspace.name.toLowerCase()} {workspace}>
+<Shell title={workspace.name} {workspace} crumbWorkspace={false}>
   <h1>{workspace.name}</h1>
   <p class="meta">your role: {workspace.role}</p>
 

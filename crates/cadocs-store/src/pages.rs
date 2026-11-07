@@ -66,6 +66,13 @@ pub struct PageRecord {
     pub updated_at: i64,
 }
 
+/// A page above another, as a breadcrumb names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageCrumb {
+    pub id: String,
+    pub title: String,
+}
+
 /// A page after a move, and the space it left, the same one for a move inside a space.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MovedPage {
@@ -93,6 +100,13 @@ pub trait PageStore: Send + Sync + 'static {
         page_id: &str,
         actor: &str,
     ) -> impl Future<Output = Result<Option<PageRecord>, StoreError>> + Send;
+
+    /// The page and the pages above it, the root first. `None` unless the user can read the page.
+    fn page_with_ancestors(
+        &self,
+        page_id: &str,
+        actor: &str,
+    ) -> impl Future<Output = Result<Option<(PageRecord, Vec<PageCrumb>)>, StoreError>> + Send;
 
     /// What an open socket on this page is worth now, trash included. `None` once the row is gone.
     fn page_scope(

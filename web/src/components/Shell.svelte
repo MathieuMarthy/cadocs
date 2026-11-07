@@ -1,11 +1,26 @@
+<script lang="ts" module>
+  /** A breadcrumb segment above the title: a link when it leads somewhere. */
+  export interface Crumb {
+    label: string;
+    href?: string;
+  }
+
+  /** Where the tree was scrolled, kept while screens each mount their own shell. */
+  let treeScroll = 0;
+</script>
+
 <script lang="ts">
-  import type { Snippet } from "svelte";
+  import { tick, type Snippet } from "svelte";
 
   import { api, type Workspace } from "../lib/api";
   import { Form } from "../lib/form.svelte";
   import { acquireNav, type Nav } from "../lib/nav.svelte";
   import { route } from "../lib/router.svelte";
   import { app, signOut } from "../lib/session.svelte";
+  import { nextTheme, theme } from "../lib/theme.svelte";
+  import type { IconName } from "./Icon.svelte";
+  import IconButton from "./IconButton.svelte";
+  import Menu, { type MenuItem } from "./Menu.svelte";
   import Source from "./Source.svelte";
   import Tree from "./Tree.svelte";
 
@@ -13,6 +28,7 @@
     title,
     workspace = null,
     crumbs = [],
+    crumbWorkspace = true,
     end,
     bare = false,
     guess = true,
@@ -21,7 +37,9 @@
     title: string;
     workspace?: Workspace | null;
     /** Breadcrumb segments between the workspace and the title. */
-    crumbs?: string[];
+    crumbs?: Crumb[];
+    /** The breadcrumb starts with the workspace: not on its home, nor outside it. */
+    crumbWorkspace?: boolean;
     /** What sits at the right of the top bar. */
     end?: Snippet;
     /** The content brings its own layout, as the page view does. */
@@ -51,17 +69,84 @@
   async function logOut() {
     if (await leaving.run(() => api("POST", "/auth/logout"))) signOut();
   }
+
+  const themeIcon: Record<string, IconName> = { light: "sun", dark: "moon", auto: "sun-moon" };
+
+  const userItems = $derived<MenuItem[]>([
+    { icon: "user", label: "account", href: "/account" },
+    { icon: themeIcon[theme.current]!, label: `theme: ${theme.current}`, select: nextTheme },
+    { icon: "log-out", label: "log out", select: () => void logOut() },
+  ]);
+
+  // The drawer of a narrow window: closed by default, and after every move to another address.
+  const drawerId = $props.id();
+  let drawer = $state(false);
+  let sidebar = $state<HTMLElement>();
+  let opener = $state<HTMLButtonElement>();
+
+  $effect(() => {
+    void route.path;
+    void route.search;
+    drawer = false;
+  });
+
+  async function openDrawer() {
+    drawer = true;
+    await tick();
+    sidebar?.querySelector(".tree-row.selected")?.scrollIntoView({ block: "nearest" });
+    sidebar?.querySelector<HTMLElement>("summary, a, button")?.focus();
+  }
+
+  function closeDrawer(refocus: boolean) {
+    drawer = false;
+    if (refocus) opener?.focus();
+  }
+
+  $effect(() => {
+    if (!drawer) return;
+    const key = (event: KeyboardEvent) => {
+      // An open menu takes Escape for itself.
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector('.menu[role="menu"]')) return;
+      closeDrawer(true);
+    };
+    const press = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target || sidebar?.contains(target) || opener?.contains(target)) return;
+      // A menu of the sidebar sits in the top layer, outside it.
+      if (target instanceof Element && target.closest(".menu")) return;
+      closeDrawer(false);
+    };
+    window.addEventListener("keydown", key);
+    window.addEventListener("pointerdown", press, true);
+    return () => {
+      window.removeEventListener("keydown", key);
+      window.removeEventListener("pointerdown", press, true);
+    };
+  });
+
+  /** The tree keeps its scroll from one screen to the next. */
+  function keepScroll(element: HTMLElement) {
+    element.scrollTop = treeScroll;
+    const save = () => (treeScroll = element.scrollTop);
+    element.addEventListener("scroll", save, { passive: true });
+    return () => element.removeEventListener("scroll", save);
+  }
 </script>
 
 <svelte:head><title>{title} · cadocs</title></svelte:head>
 
-<div class="shell">
-  <aside class="sidebar">
+<div class="shell" class:drawer-open={drawer}>
+  <aside bind:this={sidebar} id={drawerId} class="sidebar">
+    <!-- The drawer covers the menu button of the top bar, so it closes from here. -->
+    <IconButton class="drawer-close" icon="x" verb="close the sidebar" onclick={() => closeDrawer(true)} />
     <details class="selector">
       <summary>
         <span class="logo" aria-hidden="true"></span>
         <span class="selector-name">cadocs</span>
-        <span class="selector-current">{current?.name.toLowerCase() ?? "no workspace"} ▾</span>
+        <span class="selector-current">
+          {current?.name ?? (guess ? "no workspace" : "…")} ▾
+        </span>
       </summary>
       <ul class="rows">
         {#each session.workspaces as item (item.id)}
@@ -71,7 +156,7 @@
               href="/w/{item.slug}"
               aria-current={route.path === `/w/${item.slug}` ? "page" : undefined}
             >
-              {item.name.toLowerCase()}
+              {item.name}
             </a>
           </li>
         {/each}
@@ -92,21 +177,14 @@
       </ul>
     {/if}
 
-    {#if nav}<Tree {nav} />{/if}
+    <div class="sidebar-scroll" {@attach keepScroll}>
+      {#if nav}<Tree {nav} />{/if}
+    </div>
 
-    <nav class="sidebar-group" aria-label="settings">
-      <div class="label">settings</div>
-      <ul class="rows">
-        <li>
-          <a
-            class="row"
-            href="/account"
-            aria-current={route.path === "/account" ? "page" : undefined}
-          >
-            account
-          </a>
-        </li>
-        {#if session.user.is_instance_admin}
+    {#if session.user.is_instance_admin}
+      <nav class="sidebar-group" aria-label="settings">
+        <div class="label">settings</div>
+        <ul class="rows">
           <li>
             <a
               class="row"
@@ -116,24 +194,37 @@
               admin
             </a>
           </li>
-        {/if}
-      </ul>
-    </nav>
+        </ul>
+      </nav>
+    {/if}
 
     <div class="sidebar-end">
-      <div class="user-name">{session.user.name}</div>
       {#if leaving.problem}<p class="problem" role="alert">{leaving.problem}</p>{/if}
-      <div><button class="button secondary" type="button" onclick={logOut}>log out</button></div>
-      <Source />
+      <Menu label="user menu" text={session.user.name} items={userItems} class="row user-button" />
+      <Source withTheme={false} />
     </div>
   </aside>
 
   <div class="column">
     <header class="topbar">
+      <IconButton
+        bind:element={opener}
+        class="drawer-button"
+        icon="menu"
+        verb="open the sidebar"
+        aria-expanded={drawer}
+        aria-controls={drawerId}
+        onclick={() => (drawer ? closeDrawer(false) : void openDrawer())}
+      />
       <nav class="breadcrumb" aria-label="location">
-        {#if current}<span>{current.name.toLowerCase()}</span><span class="sep">/</span>{/if}
-        {#each crumbs as crumb, index (index)}<span>{crumb}</span><span class="sep">/</span>{/each}
-        <span class="current">{title}</span>
+        {#if current && crumbWorkspace}
+          <a href="/w/{current.slug}">{current.name}</a><span class="sep">/</span>
+        {/if}
+        {#each crumbs as crumb, index (index)}
+          {#if crumb.href}<a href={crumb.href}>{crumb.label}</a>{:else}<span>{crumb.label}</span>{/if}
+          <span class="sep">/</span>
+        {/each}
+        <span class="current" aria-current="page">{title}</span>
       </nav>
       {#if end}<div class="topbar-end">{@render end()}</div>{/if}
     </header>

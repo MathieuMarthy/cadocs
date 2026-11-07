@@ -4,7 +4,7 @@
   import Shell from "../components/Shell.svelte";
   import { openPage } from "../editor/collab";
   import { api, ApiError } from "../lib/api";
-  import { acquireNav, type Nav, type PageRow } from "../lib/nav.svelte";
+  import { acquireNav, lastWorkspace, type Nav, type PageView } from "../lib/nav.svelte";
   import { app, sessionEnded } from "../lib/session.svelte";
   import Message from "./Message.svelte";
 
@@ -19,12 +19,17 @@
   let presence = $state<HTMLElement>()!;
   let name = $state("");
   /** What REST said about the page, which places it in the shell. It may come late. */
-  let row = $state<PageRow | null>(null);
+  let row = $state<PageView | null>(null);
   /** REST did not refuse the page, so the editor shows, even if REST failed for a moment. */
   let showing = $state(false);
 
+  const known = (id: string | undefined) =>
+    app.session?.workspaces.find((item) => item.id === id) ?? null;
+  /** Until the first read answers, the tree that showed stays, so a click in it does not flash. */
   const workspace = $derived(
-    app.session?.workspaces.find((item) => item.id === row?.workspace_id) ?? null,
+    row || showing
+      ? known(row?.workspace_id)
+      : known(app.session ? lastWorkspace(app.session.user.id)?.id : undefined),
   );
 
   /** The navigation the shell keeps for this workspace, which names the space. */
@@ -35,21 +40,45 @@
     nav = held.nav;
     return () => held.release();
   });
-  const spaceName = $derived((row && nav?.space(row.space_id)?.name.toLowerCase()) ?? "");
+  const spaceName = $derived((row && nav?.space(row.space_id)?.name) ?? "");
+  const crumbs = $derived([
+    ...(spaceName ? [{ label: spaceName }] : []),
+    ...(row?.ancestors ?? []).map((crumb) => ({
+      label: crumb.title || "untitled",
+      href: `/?page=${crumb.id}`,
+    })),
+  ]);
+
+  /** The tree opens down to this page once, so its row shows, and is left alone after that. */
+  let revealed = false;
+  $effect(() => {
+    if (!row || !nav || revealed || nav.workspace.id !== row.workspace_id) return;
+    revealed = true;
+    const space = row.space_id;
+    nav.expand(space, space);
+    for (const crumb of row.ancestors) nav.expand(crumb.id, space);
+  });
 
   /** A string, so that reading the page again does not ask for it again. */
   const spaceId = $derived(row?.space_id ?? null);
+  /** The last change read for, so an effect that runs for another reason reads nothing. */
+  let seen: { nav: Nav; space: string; version: number } | null = null;
   $effect(() => {
     if (!spaceId || !nav) return;
     // A change to the pages of its space may have moved this one: the breadcrumb reads it again.
-    if (!nav.versions.get(spaceId)) return;
-    void check();
+    const version = nav.versions.get(spaceId);
+    if (!version) return;
+    if (seen?.nav === nav && seen.space === spaceId && seen.version === version) return;
+    const first = seen === null;
+    seen = { nav, space: spaceId, version };
+    // The first sight of a version only learns it: the page was just read.
+    if (!first) void check();
   });
 
   /** A socket cannot read the status of a failed upgrade, so REST says what went wrong. */
   async function check() {
     try {
-      row = await api<PageRow>("GET", `/pages/${id}`);
+      row = await api<PageView>("GET", `/pages/${id}`);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) return false;
       if (error instanceof ApiError && error.status === 404) {
@@ -124,15 +153,11 @@
 {#if gone}
   <Message title={gone} />
 {:else if !showing}
-  <p class="meta" role="status" style="padding: var(--space-4)">loading…</p>
+  <Shell title="loading…" {workspace} guess={false} crumbWorkspace={false}>
+    <p class="meta" role="status">loading…</p>
+  </Shell>
 {:else}
-  <Shell
-    title={name || row?.title || "untitled"}
-    {workspace}
-    guess={false}
-    crumbs={spaceName ? [spaceName] : []}
-    bare
-  >
+  <Shell title={name || row?.title || "untitled"} {workspace} guess={false} {crumbs} bare>
     {#snippet end()}
       <span bind:this={status} class="status" role="status"></span>
       <div bind:this={presence} class="presence"></div>

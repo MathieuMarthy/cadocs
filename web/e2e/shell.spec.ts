@@ -5,6 +5,12 @@ import { expect, type Page } from "@playwright/test";
 import { asOwner, logIn, memberPage, test } from "./fixtures.ts";
 import { PASSWORD, type TestServer } from "./server.ts";
 
+/** Logs out from the user menu of the sidebar footer. */
+async function logOut(page: Page, name = "Ada") {
+  await page.getByRole("button", { name, exact: true }).click();
+  await page.getByRole("menuitem", { name: "log out" }).click();
+}
+
 async function submitLogin(page: Page, email: string, password: string) {
   await page.getByLabel("email").fill(email);
   await page.getByLabel("password").fill(password);
@@ -36,7 +42,7 @@ test("first run goes from setup to an empty workspace, and login comes back to i
   await page.reload();
   await expect(page.getByRole("heading", { name: "Acme Docs" })).toBeVisible();
 
-  await page.getByRole("button", { name: "log out" }).click();
+  await logOut(page);
   await expect(page).toHaveURL(`${server.url}/login`);
   await submitLogin(page, "ada@example.org", "wrong password");
   await expect(page.getByRole("alert")).toContainText("wrong email or password");
@@ -98,7 +104,7 @@ test("logging out with no server says so, and stays logged in", async ({ page, s
   await page.goto(`${server.url}/w/tests`);
   await expect(page.getByRole("heading", { name: "Tests" })).toBeVisible();
   await page.route("**/api/v1/auth/logout", (request) => request.abort());
-  await page.getByRole("button", { name: "log out" }).click();
+  await logOut(page);
   await expect(page.getByRole("alert")).toContainText("unreachable");
   await expect(page).toHaveURL(`${server.url}/w/tests`);
 });
@@ -163,7 +169,7 @@ test("an invitation lands in its workspace, beside one of the same name", async 
 
   await logIn(page, server, grace.token);
   await page.goto(link);
-  await page.getByRole("button", { name: "join tests" }).click();
+  await page.getByRole("button", { name: "join Tests" }).click();
   await expect(page).toHaveURL(`${server.url}/w/${second.slug}`);
 });
 
@@ -173,7 +179,7 @@ test("a new person joins with an invitation link", async ({ page, server }) => {
   await expect(page.getByText("grace@example.org")).toBeVisible();
   await page.getByLabel("name", { exact: true }).fill("Grace");
   await page.getByLabel("password").fill(PASSWORD);
-  await page.getByRole("button", { name: "join tests" }).click();
+  await page.getByRole("button", { name: "join Tests" }).click();
   await expect(page).toHaveURL(`${server.url}/w/tests`);
 
   await page.goto(link);
@@ -189,7 +195,7 @@ test("someone with an account logs in, then joins", async ({ page, server, brows
   await page.goto(link);
   await page.getByRole("link", { name: "log in" }).click();
   await submitLogin(page, "grace@example.org", PASSWORD);
-  await page.getByRole("button", { name: "join tests" }).click();
+  await page.getByRole("button", { name: "join Tests" }).click();
   await expect(page).toHaveURL(`${server.url}/w/tests`);
 
   const other = await (await browser.newContext()).newPage();
@@ -303,12 +309,12 @@ test("an instance admin creates a workspace and switches to it", async ({ page, 
   await page.getByRole("button", { name: "create workspace" }).click();
   await expect(page).toHaveURL(`${server.url}/w/second`);
 
-  await page.getByText("second ▾").click();
-  await page.getByRole("link", { name: "tests" }).click();
+  await page.getByText("Second ▾").click();
+  await page.getByRole("link", { name: "Tests", exact: true }).click();
   await expect(page).toHaveURL(`${server.url}/w/tests`);
   await expect(page.getByRole("heading", { name: "Tests" })).toBeVisible();
   const spaces = page.getByRole("navigation", { name: "spaces" });
-  await expect(spaces.getByRole("button", { name: "pages/", exact: true })).toBeVisible();
+  await expect(spaces.getByRole("button", { name: "Pages/", exact: true })).toBeVisible();
 });
 
 test("a session that ends while the shell is open leads to login", async ({ page, server }) => {
@@ -349,23 +355,61 @@ test("the theme follows the system until it is chosen, and stays chosen", async 
   await expect.poll(background).toBe(dark);
 });
 
-test("a phone gets the sidebar above the content, with no sideways scroll", async ({
-  page,
-  server,
-}) => {
+test("a phone shows the content first, with no sideways scroll", async ({ page, server }) => {
   await page.setViewportSize({ width: 360, height: 700 });
   await asOwner(page, server);
 
   for (const path of ["/w/tests", "/account", "/admin"]) {
     await page.goto(`${server.url}${path}`);
-    await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible();
-    const sidebar = await page.getByRole("complementary").boundingBox();
-    const main = await page.getByRole("main").boundingBox();
-    expect(sidebar!.y + sidebar!.height).toBeLessThanOrEqual(main!.y);
+    await expect(page.getByRole("main").getByRole("heading").first()).toBeInViewport();
+    await expect(page.getByRole("complementary")).toBeHidden();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(overflow, path).toBe(0);
+  }
+});
+
+test("the user menu leads to the account, changes the theme and logs out", async ({
+  page,
+  server,
+}) => {
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/tests`);
+  const sidebar = page.getByRole("complementary");
+
+  // The source link and the license share one line under the menu.
+  const source = sidebar.getByRole("link", { name: "source" });
+  const license = sidebar.getByText(/agpl-3\.0/);
+  const [a, b] = [await source.boundingBox(), await license.boundingBox()];
+  expect(Math.abs(a!.y + a!.height / 2 - (b!.y + b!.height / 2))).toBeLessThan(2);
+
+  const user = sidebar.getByRole("button", { name: "Ada", exact: true });
+  await user.click();
+  await page.getByRole("menuitem", { name: "account" }).click();
+  await expect(page).toHaveURL(`${server.url}/account`);
+
+  await user.click();
+  await page.getByRole("menuitem", { name: "theme: auto" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(user).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menuitem", { name: "account" })).toBeFocused();
+  await expect(page.getByRole("menuitem", { name: "theme: light" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await logOut(page);
+  await expect(page).toHaveURL(`${server.url}/login`);
+});
+
+test("the breadcrumb names the workspace once, and none outside it", async ({ page, server }) => {
+  await asOwner(page, server);
+  const crumbs = page.getByRole("navigation", { name: "location" });
+  await page.goto(`${server.url}/w/tests`);
+  await expect(crumbs).toHaveText(/^\s*Tests\s*$/);
+  for (const [path, title] of [["/account", "account"], ["/admin", "admin"]]) {
+    await page.goto(`${server.url}${path}`);
+    await expect(crumbs).toHaveText(new RegExp(`^\\s*${title}\\s*$`));
   }
 });
 

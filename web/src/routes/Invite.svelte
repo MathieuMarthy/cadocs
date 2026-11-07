@@ -42,7 +42,7 @@
 {#await api<Invitation>("GET", path)}
   <Solo title="invitation"><p class="meta" role="status">loading…</p></Solo>
 {:then invitation}
-  <Solo title="join {invitation.workspace_name.toLowerCase()}">
+  <Solo title="join {invitation.workspace_name}">
     <p class="meta">
       invitation for {invitation.email}, as {invitation.role}.
     </p>
@@ -54,7 +54,7 @@
         disabled={form.busy}
         onclick={() => accept({}, invitation.workspace_id)}
       >
-        join {invitation.workspace_name.toLowerCase()}
+        join {invitation.workspace_name}
       </button>
     {:else if app.session}
       <p class="notice">
@@ -90,7 +90,7 @@
           <p class="problem" role="alert">email {form.field("email")}</p>
         {/if}
         <button class="button" disabled={form.busy}>
-          join {invitation.workspace_name.toLowerCase()}
+          join {invitation.workspace_name}
         </button>
       </form>
     {/if}

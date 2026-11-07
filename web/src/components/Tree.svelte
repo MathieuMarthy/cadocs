@@ -12,7 +12,7 @@
   const drag = $state<Drag>({ page: null, element: null, over: null, zone: null });
   let problem = $state<string | null>(null);
 
-  const label = (space: Space) => space.name.toLowerCase();
+  const label = (space: Space) => space.name;
 
   async function attempt(action: () => Promise<unknown>) {
     problem = null;

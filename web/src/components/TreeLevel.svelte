@@ -48,6 +48,9 @@
 
   const name = (page: PageRow) => page.title || "untitled";
 
+  /** The row of the page on screen scrolls into the tree when it appears. */
+  const reveal = (row: HTMLElement) => row.scrollIntoView({ block: "nearest" });
+
   /** The page the address shows, which its row marks. */
   const shown = $derived(shownPage());
 
@@ -148,6 +151,7 @@
           if (drag.over === page.id) drag.over = null;
         }}
         ondrop={(event) => drop(event, page, index)}
+        {@attach shown === page.id ? reveal : null}
       >
         <span class="tree-prefix">{lines}{last ? "└─ " : "├─ "}</span>
         {#if page.has_children}
