@@ -334,6 +334,107 @@ h2 {
   font-weight: 500;
 }
 
+/* Tree of spaces and pages */
+
+.tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.tree > .label {
+  padding: 0 var(--space-2);
+}
+
+.tree .rows .rows {
+  margin: 0;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  min-height: var(--row-height);
+  margin: 0;
+  padding: 0 var(--space-2);
+  white-space: nowrap;
+}
+
+.tree-row[data-drop="before"] {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+.tree-row[data-drop="after"] {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+.tree-row[data-drop="inside"] {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.tree-prefix {
+  flex: none;
+  color: var(--muted);
+  white-space: pre;
+}
+
+.tree-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.tree-toggle,
+.tree-action,
+.tree-more {
+  flex: none;
+  min-width: 18px;
+  height: var(--row-height);
+  padding: 0 var(--space-1);
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tree-more {
+  padding: 0;
+}
+
+.tree-toggle:hover,
+.tree-action:hover,
+.tree-more:hover {
+  color: var(--ink);
+}
+
+.tree-actions {
+  display: flex;
+  flex: none;
+  opacity: 0;
+}
+
+.tree-row:hover .tree-actions,
+.tree-row:focus-within .tree-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .tree-actions {
+    opacity: 1;
+  }
+}
+
 .user-name {
   overflow: hidden;
   padding: 0 var(--space-2);

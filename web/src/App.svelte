@@ -7,6 +7,7 @@
   import ResetPassword from "./routes/ResetPassword.svelte";
   import Setup from "./routes/Setup.svelte";
   import Shell from "./components/Shell.svelte";
+  import Trash from "./routes/Trash.svelte";
   import Workspace from "./routes/Workspace.svelte";
   import type { Workspace as WorkspaceRow } from "./lib/api";
   import { navigate, route, safeNext } from "./lib/router.svelte";
@@ -17,6 +18,7 @@
     | { name: "setup" | "login" | "account" | "admin" | "home" | "not-found" }
     | { name: "invite" | "reset"; token: string }
     | { name: "workspace"; workspace: WorkspaceRow }
+    | { name: "trash"; workspace: WorkspaceRow; space: string }
     | { name: "page"; id: string };
 
   function resolve(path: string, search: string): View {
@@ -52,9 +54,12 @@
     }
     if (first === "account" && !second) return { name: "account" };
     if (first === "admin" && !second && session.user.is_instance_admin) return { name: "admin" };
-    if (first === "w" && second && rest.length === 0) {
+    if (first === "w" && second) {
       const workspace = session.workspaces.find((item) => item.slug === second);
-      if (workspace) return { name: "workspace", workspace };
+      if (workspace && rest.length === 0) return { name: "workspace", workspace };
+      if (workspace && rest[0] === "trash" && rest[1] && rest.length === 2) {
+        return { name: "trash", workspace, space: rest[1] };
+      }
     }
     return { name: "not-found" };
   }
@@ -85,7 +90,11 @@
 {:else if view.name === "admin"}
   <Admin />
 {:else if view.name === "workspace"}
-  <Workspace workspace={view.workspace} />
+  {#key view.workspace.id}<Workspace workspace={view.workspace} />{/key}
+{:else if view.name === "trash"}
+  {#key `${view.workspace.id}/${view.space}`}
+    <Trash workspace={view.workspace} slug={view.space} />
+  {/key}
 {:else if view.name === "page"}
   {#await import("./routes/Page.svelte") then { default: Page }}
     {#key view.id}<Page id={view.id} />{/key}

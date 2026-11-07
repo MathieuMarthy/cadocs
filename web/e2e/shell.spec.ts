@@ -1,41 +1,9 @@
 // The application shell in a real browser, on the embedded front end of the real binary.
 
-import { type Browser, expect, type Page, test as base } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
-import { type Member, PASSWORD, TestServer } from "./server.ts";
-
-const test = base.extend<{ server: TestServer; errors: Error[] }>({
-  server: async ({}, use) => {
-    const server = await TestServer.start();
-    await use(server);
-    await server.dispose();
-  },
-  errors: [
-    async ({ page }, use) => {
-      const errors: Error[] = [];
-      page.on("pageerror", (error) => errors.push(error));
-      await use(errors);
-      expect(errors).toEqual([]);
-    },
-    { auto: true },
-  ],
-});
-
-/** Logs this browser in with a token, as a person who logged in earlier. */
-async function logIn(page: Page, server: TestServer, token: string) {
-  await page.context().addCookies([{ name: "session", value: token, url: server.url }]);
-}
-
-async function asOwner(page: Page, server: TestServer) {
-  await logIn(page, server, (await server.session()).token);
-}
-
-/** A browser of its own, logged in as `member`. */
-async function memberPage(browser: Browser, server: TestServer, member: Member) {
-  const page = await (await browser.newContext()).newPage();
-  await logIn(page, server, member.token);
-  return page;
-}
+import { asOwner, logIn, memberPage, test } from "./fixtures.ts";
+import { PASSWORD, type TestServer } from "./server.ts";
 
 async function submitLogin(page: Page, email: string, password: string) {
   await page.getByLabel("email").fill(email);
@@ -339,7 +307,8 @@ test("an instance admin creates a workspace and switches to it", async ({ page, 
   await page.getByRole("link", { name: "tests" }).click();
   await expect(page).toHaveURL(`${server.url}/w/tests`);
   await expect(page.getByRole("heading", { name: "Tests" })).toBeVisible();
-  await expect(page.getByText("pages")).toBeVisible();
+  const spaces = page.getByRole("navigation", { name: "spaces" });
+  await expect(spaces.getByRole("button", { name: "pages/", exact: true })).toBeVisible();
 });
 
 test("a session that ends while the shell is open leads to login", async ({ page, server }) => {
@@ -348,8 +317,8 @@ test("a session that ends while the shell is open leads to login", async ({ page
   await expect(page.getByRole("heading", { name: "Tests" })).toBeVisible();
   await server.call("POST", "/auth/logout");
 
-  await page.getByRole("link", { name: "admin" }).click();
-  await expect(page).toHaveURL(/\/login\?next=%2Fadmin/);
+  // The events socket closes with 4401, so nothing needs a click to find out.
+  await expect(page).toHaveURL(/\/login\?next=%2Fw%2Ftests/);
   await expect(page.getByRole("status")).toContainText("session ended");
 });
 

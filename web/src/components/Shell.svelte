@@ -3,9 +3,11 @@
 
   import { api, type Workspace } from "../lib/api";
   import { Form } from "../lib/form.svelte";
+  import { acquireNav, type Nav } from "../lib/nav.svelte";
   import { route } from "../lib/router.svelte";
   import { app, signOut } from "../lib/session.svelte";
   import Source from "./Source.svelte";
+  import Tree from "./Tree.svelte";
 
   let {
     title,
@@ -15,6 +17,18 @@
 
   const session = $derived(app.session!);
   const current = $derived(workspace ?? session.workspaces[0] ?? null);
+
+  let nav = $state<Nav | null>(null);
+
+  $effect(() => {
+    if (!current) {
+      nav = null;
+      return;
+    }
+    const held = acquireNav(session.user.id, current);
+    nav = held.nav;
+    return () => held.release();
+  });
 
   const leaving = new Form();
 
@@ -47,6 +61,8 @@
         {/each}
       </ul>
     </details>
+
+    {#if nav}<Tree {nav} />{/if}
 
     <nav aria-label="main">
       <ul class="rows">
