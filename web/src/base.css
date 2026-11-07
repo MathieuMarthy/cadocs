@@ -132,8 +132,6 @@ h2 {
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.4;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
 }
 
 .notice,
@@ -175,6 +173,12 @@ h2 {
   border-color: transparent;
   color: var(--muted);
   font-weight: 400;
+}
+
+.button.danger,
+.icon-button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .button:disabled {
@@ -401,7 +405,6 @@ h2 {
 }
 
 .tree-toggle,
-.tree-action,
 .tree-more {
   flex: none;
   min-width: 18px;
@@ -420,49 +423,51 @@ h2 {
 }
 
 .tree-toggle:hover,
-.tree-action:hover,
 .tree-more:hover {
   color: var(--ink);
 }
 
+/* Removed, not hidden, so the label keeps the full width of its row. */
 .tree-actions {
-  display: flex;
+  display: none;
   flex: none;
   align-items: center;
-  gap: var(--space-1);
   margin-left: var(--space-1);
-  font-size: 12px;
-  opacity: 0;
 }
 
-.tree-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+/* An open menu keeps them: focus leaves the button before it reaches the menu. */
+.tree-row:hover .tree-actions,
+.tree-row:focus-within .tree-actions,
+.tree-row:has([aria-expanded="true"]) .tree-actions {
+  display: flex;
+}
+
+.tree-row .icon-button {
+  width: var(--row-height);
+  height: var(--row-height);
+}
+
+@media (hover: none) {
+  .tree-actions {
+    display: flex;
+  }
+
+  .tree-row:not(:focus-within) .tree-plus {
+    display: none;
+  }
 }
 
 .tree-row.selected,
 .tree-row.selected .tree-label,
 .tree-row.selected .tree-prefix,
 .tree-row.selected .tree-toggle,
-.tree-row.selected .tree-action {
+.tree-row.selected .icon-button {
   background: var(--selection);
   color: var(--selection-ink);
 }
 
 .tree-row.selected .tree-label {
   font-weight: 500;
-}
-
-.tree-row:hover .tree-actions,
-.tree-row:focus-within .tree-actions {
-  opacity: 1;
-}
-
-@media (hover: none) {
-  .tree-actions {
-    opacity: 1;
-  }
 }
 
 .user-name {
@@ -481,6 +486,107 @@ h2 {
   max-width: calc(var(--measure) + 2 * var(--space-8));
   margin: 0 auto;
   padding: var(--space-14) var(--space-8);
+}
+
+/* Icons, icon buttons, action menu and notice (ADR 0017) */
+
+.icon {
+  flex: none;
+  width: var(--icon-size);
+  height: var(--icon-size);
+}
+
+.icon-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-button:hover,
+.icon-button[aria-expanded="true"] {
+  color: var(--ink);
+}
+
+.icon-button:disabled {
+  cursor: default;
+}
+
+.menu {
+  /* A popover sits in the top layer, so no scrolling sidebar clips it. */
+  position: fixed;
+  inset: auto;
+  min-width: 180px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--ink);
+  background: var(--bg);
+  box-shadow: var(--shadow-offset);
+  color: var(--ink);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.menu-item .icon {
+  color: var(--muted);
+}
+
+.menu-item.danger,
+.menu-item.danger .icon {
+  color: var(--danger);
+}
+
+.menu-item:focus,
+.menu-item:focus .icon {
+  outline: 0;
+  background: var(--selection);
+  color: var(--selection-ink);
+}
+
+.menu-rule {
+  border-top: 1px solid var(--line);
+}
+
+.notice-region {
+  position: fixed;
+  bottom: var(--space-4);
+  left: var(--space-4);
+  z-index: 10;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 0 0 var(--space-3);
+  border: 1px solid var(--ink);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
 }
 
 /* Lists of records */

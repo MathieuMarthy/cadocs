@@ -2,6 +2,13 @@
 
 export const route = $state({ path: location.pathname, search: location.search });
 
+/** Bumped to mount the page view again, as after its page comes back from the trash. */
+export const reopened = $state({ count: 0 });
+
+/** The page the address shows, if any. */
+export const shownPage = () =>
+  route.path === "/" ? new URLSearchParams(route.search).get("page") : null;
+
 function sync() {
   route.path = location.pathname;
   route.search = location.search;

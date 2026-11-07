@@ -6,11 +6,12 @@
   import Login from "./routes/Login.svelte";
   import ResetPassword from "./routes/ResetPassword.svelte";
   import Setup from "./routes/Setup.svelte";
+  import Notice from "./components/Notice.svelte";
   import Shell from "./components/Shell.svelte";
   import Trash from "./routes/Trash.svelte";
   import Workspace from "./routes/Workspace.svelte";
   import type { Workspace as WorkspaceRow } from "./lib/api";
-  import { navigate, route, safeNext } from "./lib/router.svelte";
+  import { navigate, reopened, route, safeNext } from "./lib/router.svelte";
   import { app, boot } from "./lib/session.svelte";
 
   type View =
@@ -97,7 +98,7 @@
   {/key}
 {:else if view.name === "page"}
   {#await import("./routes/Page.svelte") then { default: Page }}
-    {#key view.id}<Page id={view.id} />{/key}
+    {#key `${view.id}/${reopened.count}`}<Page id={view.id} />{/key}
   {:catch}
     <Message title="page failed to load">
       <button class="button" type="button" onclick={() => location.reload()}>reload</button>
@@ -111,3 +112,6 @@
 {:else if view.name === "not-found"}
   <Message title="not found" />
 {/if}
+
+<!-- Outside every screen, so a screen that changes under it keeps the notice. -->
+<Notice />

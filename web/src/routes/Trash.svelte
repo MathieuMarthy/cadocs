@@ -2,6 +2,7 @@
   import { onDestroy } from "svelte";
 
   import Confirm from "../components/Confirm.svelte";
+  import IconButton from "../components/IconButton.svelte";
   import Shell from "../components/Shell.svelte";
   import { api, type Page, type Workspace } from "../lib/api";
   import { describe } from "../lib/form.svelte";
@@ -69,7 +70,7 @@
   {:else if !space}
     <p class="notice">no such space</p>
   {:else}
-    <p class="meta">trashed pages come back with what was under them.</p>
+    <p class="meta">restoring a page also restores its subpages.</p>
     {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
     {#if items === null}
       {#if !problem}<p class="meta" role="status">loading…</p>{/if}
@@ -81,15 +82,19 @@
           <li class="record">
             <span class="record-who">
               {page.title || "untitled"}
-              <span>trashed {new Date(page.deleted_at ?? page.updated_at).toLocaleString()}</span>
+              <span>moved to trash {new Date(page.deleted_at ?? page.updated_at).toLocaleString()}</span>
             </span>
             {#if canEdit(page.role)}
-              <button class="button secondary" type="button" onclick={() => restore(page)}>
-                restore
-              </button>
+              <IconButton icon="rotate-ccw" verb="restore" onclick={() => restore(page)} />
             {/if}
             {#if page.role === "admin"}
-              <Confirm label="purge" confirm="purge for good" onconfirm={() => purge(page)} />
+              <Confirm
+                label="delete forever"
+                confirm="delete forever"
+                icon="x"
+                danger
+                onconfirm={() => purge(page)}
+              />
             {/if}
           </li>
         {/each}

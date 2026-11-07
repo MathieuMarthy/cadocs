@@ -1,8 +1,11 @@
 <script lang="ts">
+  import IconButton from "./IconButton.svelte";
+  import Menu from "./Menu.svelte";
   import TreeLevel, { type Drag, fromTree } from "./TreeLevel.svelte";
   import { describe } from "../lib/form.svelte";
   import { canEdit, type Nav, type PageRow, type Place, type Space } from "../lib/nav.svelte";
-  import { navigate } from "../lib/router.svelte";
+  import { notify } from "../lib/notice.svelte";
+  import { navigate, reopened, shownPage } from "../lib/router.svelte";
 
   let { nav }: { nav: Nav } = $props();
 
@@ -28,7 +31,15 @@
   }
 
   const move = (page: PageRow, place: Place) => void attempt(() => nav.move(page, place));
-  const trash = (page: PageRow) => void attempt(() => nav.trash(page));
+  const trash = (page: PageRow) =>
+    void attempt(async () => {
+      await nav.trash(page);
+      notify("moved to trash", async () => {
+        await nav.restore(page);
+        // The page view gave up on it: open it again.
+        if (shownPage() === page.id) reopened.count += 1;
+      });
+    });
 
   /** A page dropped on a space goes last at its root. */
   function overSpace(event: DragEvent, space: Space) {
@@ -57,7 +68,7 @@
     <p class="meta">no spaces</p>
   {/if}
   <ul class="rows">
-    {#each nav.spaces as space, index (space.id)}
+    {#each nav.spaces as space (space.id)}
       {@const open = nav.open.has(space.id)}
       {@const root = nav.loaded(space.id, null)}
       <li>
@@ -71,7 +82,6 @@
           }}
           ondrop={(event) => dropOnSpace(event, space)}
         >
-          <span class="tree-prefix">{`${String(index + 1).padStart(2, "0")} `}</span>
           <button
             class="tree-label"
             type="button"
@@ -80,17 +90,23 @@
           >
           {#if canEdit(space.role)}
             <span class="tree-actions">
-              <button
-                class="tree-action"
-                type="button"
-                aria-label="new page in {label(space)}"
-                onclick={() => create(space.id, null)}>+</button
-              >
-              <a
-                class="tree-action"
-                href="/w/{nav.workspace.slug}/trash/{space.slug}"
-                aria-label="trash of {label(space)}">trash</a
-              >
+              <IconButton
+                class="tree-plus"
+                icon="plus"
+                verb="new page"
+                label="new page in {label(space)}"
+                onclick={() => create(space.id, null)}
+              />
+              <Menu
+                label="more actions for {label(space)}"
+                items={[
+                  {
+                    icon: "trash-2",
+                    label: "open the trash",
+                    href: `/w/${nav.workspace.slug}/trash/${space.slug}`,
+                  },
+                ]}
+              />
             </span>
           {/if}
         </div>

@@ -15,6 +15,23 @@ const spaceButton = (page: Page, name: string) =>
 /** The labels of the page links of the tree, in order. */
 const pageLabels = (page: Page) => tree(page).locator("a[href^='/?page=']").allTextContents();
 
+/** A button of a tree row, there even while the row's actions are out of layout. */
+const rowButton = (page: Page, name: string) =>
+  tree(page).getByRole("button", { name, exact: true, includeHidden: true });
+
+/** Points at a tree row, which shows its actions, and clicks one of them. */
+async function press(page: Page, name: string) {
+  const button = rowButton(page, name);
+  await button.locator("xpath=ancestor::div[@role='group'][1]").hover();
+  await button.click();
+}
+
+/** Opens the action menu of a tree row and picks `action`, with the mouse. */
+async function pick(page: Page, name: string, action: string) {
+  await press(page, `more actions for ${name}`);
+  await page.getByRole("menuitem", { name: action, exact: true }).click();
+}
+
 /** A page at the root of the first space, with a title, created over REST. */
 async function newPage(server: TestServer, title: string, parent_id?: string) {
   const { spaceId } = await server.session();
@@ -40,7 +57,7 @@ test("two browsers see each other's tree changes", async ({ page, server, browse
   await expect(tree(other).getByText("no pages")).toBeVisible();
 
   // A new page opens, and the other browser sees it arrive, then its title.
-  await tree(page).getByRole("button", { name: "new page in pages" }).click();
+  await press(page, "new page in pages");
   await expect(page).toHaveURL(/\?page=/);
   const runbooks = new URL(page.url()).searchParams.get("page")!;
   await expect(pageLink(other, "untitled")).toBeVisible();
@@ -61,14 +78,14 @@ test("two browsers see each other's tree changes", async ({ page, server, browse
   await expect(pageLink(other, "Deploy")).toBeVisible();
 
   // A child page made from the tree lands under its parent, for both. The drop opened Runbooks.
-  await tree(page).getByRole("button", { name: "new page in Deploy" }).click();
+  await press(page, "new page in Deploy");
   await expect(page).toHaveURL(/\?page=/);
   await expect(pageLink(other, "Deploy/")).toBeVisible();
   await tree(other).getByRole("button", { name: "expand Deploy" }).click();
   await expect(pageLink(other, "untitled")).toBeVisible();
 });
 
-test("pages reorder by drag and drop, and the trash restores and purges", async ({
+test("pages reorder by drag and drop, and the trash restores and deletes forever", async ({
   page,
   server,
   browser,
@@ -88,26 +105,26 @@ test("pages reorder by drag and drop, and the trash restores and purges", async 
   });
   await expect.poll(() => pageLabels(other)).toEqual(["One", "Two"]);
 
-  await tree(page).getByRole("button", { name: "trash Two" }).click();
+  await pick(page, "Two", "move to trash");
   await expect.poll(() => pageLabels(other)).toEqual(["One"]);
 
   // The member restores it from the trash of the space.
-  await tree(other).getByRole("link", { name: "trash of pages" }).click();
+  await pick(other, "pages", "open the trash");
   await expect(other).toHaveURL(`${server.url}/w/tests/trash/pages`);
   const trashed = other.getByRole("main").getByRole("listitem").filter({ hasText: "Two" });
   await trashed.getByRole("button", { name: "restore" }).click();
   await expect(trashed).toBeHidden();
   await expect.poll(() => pageLabels(page)).toEqual(["One", "Two"]);
 
-  // Only a space admin purges: the member gets no button, the owner does.
-  await tree(page).getByRole("button", { name: "trash One" }).click();
+  // Only a space admin deletes forever: the member gets no button, the owner does.
+  await pick(page, "One", "move to trash");
   const gone = other.getByRole("main").getByRole("listitem").filter({ hasText: "One" });
   await expect(gone).toBeVisible();
-  await expect(gone.getByRole("button", { name: "purge" })).toHaveCount(0);
+  await expect(gone.getByRole("button", { name: "delete forever" })).toHaveCount(0);
   await page.goto(`${server.url}/w/tests/trash/pages`);
   const purged = page.getByRole("main").getByRole("listitem").filter({ hasText: "One" });
-  await purged.getByRole("button", { name: "purge" }).click();
-  await purged.getByRole("button", { name: "purge for good" }).click();
+  await purged.getByRole("button", { name: "delete forever" }).click();
+  await purged.getByRole("button", { name: "delete forever" }).click();
   await expect(purged).toBeHidden();
   await expect(gone).toBeHidden();
   await expect(server.call("GET", `/pages/${one}`)).rejects.toThrow(/404/);
@@ -137,8 +154,9 @@ test("a new space reaches the readers it is granted to", async ({ page, server, 
   });
   await expect(space.getByText("no pages")).toBeVisible();
   await expect(tree(other).getByText("no pages")).toHaveCount(2);
-  await expect(space.getByRole("button", { name: "new page in handbook" })).toHaveCount(0);
-  await expect(tree(other).getByRole("button", { name: "new page in pages" })).toHaveCount(1);
+  const create = (name: string) => ({ name, includeHidden: true });
+  await expect(space.getByRole("button", create("new page in handbook"))).toHaveCount(0);
+  await expect(tree(other).getByRole("button", create("new page in pages"))).toHaveCount(1);
 });
 
 test("recent pages follow changes, and the tree survives a server restart", async ({
@@ -177,12 +195,73 @@ test("the tree shows over REST even when the events socket never opens", async (
 test("a demoted editor loses the page actions of the tree", async ({ page, server, browser }) => {
   await newPage(server, "Kept");
   const { member, other } = await twoBrowsers(page, server, browser);
-  await expect(tree(other).getByRole("button", { name: "trash Kept" })).toHaveCount(1);
+  await pick(other, "Kept", "copy link");
+  await expect(other.getByRole("menuitem", { name: "move to trash" })).toHaveCount(0);
+  await press(other, "more actions for Kept");
+  await expect(other.getByRole("menuitem", { name: "move to trash" })).toHaveCount(1);
+  await other.keyboard.press("Escape");
+  await expect(other.getByRole("menu")).toHaveCount(0);
   const { spaceId } = await server.session();
   const grants = [{ user_id: member.id, role: "viewer" }];
   await server.call("PUT", `/spaces/${spaceId}/grants`, { grants });
-  await expect(tree(other).getByRole("button", { name: "new page in pages" })).toHaveCount(0);
-  await expect(tree(other).getByRole("button", { name: "trash Kept" })).toHaveCount(0);
+  await expect(rowButton(other, "new page in pages")).toHaveCount(0);
+  await press(other, "more actions for Kept");
+  await expect(other.getByRole("menuitem", { name: "copy link" })).toBeVisible();
+  await expect(other.getByRole("menuitem", { name: "move to trash" })).toHaveCount(0);
+});
+
+test("a page moves to trash from its menu by keyboard alone, and undo brings it back", async ({
+  page,
+  server,
+}) => {
+  await newPage(server, "Engineering handbook");
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/tests`);
+  await spaceButton(page, "pages/").click();
+  const link = pageLink(page, "Engineering handbook");
+  await expect(link).toBeVisible();
+  // The space has no number in front of it any more.
+  await expect(tree(page).getByText(/^01/)).toHaveCount(0);
+
+  // Out of hover and focus, the actions take no width: the label reaches the end of its row.
+  await page.mouse.move(800, 400);
+  const fit = await link.evaluate((label) => {
+    const row = label.closest(".tree-row")!;
+    const end = row.getBoundingClientRect().right - parseFloat(getComputedStyle(row).paddingRight);
+    return { gap: end - label.getBoundingClientRect().right, cut: label.scrollWidth > label.clientWidth };
+  });
+  expect(Math.abs(fit.gap)).toBeLessThan(1);
+  expect(fit.cut).toBe(false);
+
+  // Tab reaches the row's buttons, Escape closes the menu and gives focus back to its button.
+  const more = tree(page).getByRole("button", { name: "more actions for Engineering handbook" });
+  await link.focus();
+  await page.keyboard.press("Tab");
+  await expect(tree(page).getByRole("button", { name: "new page in Engineering handbook" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(more).toBeFocused();
+  await expect(more).toHaveAttribute("title", "more actions");
+  await page.keyboard.press("Enter");
+  const menu = page.getByRole("menu");
+  await expect(menu.getByRole("menuitem").first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(more).toBeFocused();
+
+  // Arrows move through the menu, and Enter picks.
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("ArrowDown");
+  const trash = menu.getByRole("menuitem", { name: "move to trash" });
+  await expect(trash).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(link).toBeHidden();
+  const notice = page.getByRole("status").filter({ hasText: "moved to trash" });
+  await expect(notice).toBeVisible();
+  const undo = notice.getByRole("button", { name: "undo" });
+  await expect(undo).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(link).toBeVisible();
+  await expect(notice).toBeHidden();
 });
 
 test("a page opens beside the tree, selected in it", async ({ page, server }) => {
@@ -251,4 +330,28 @@ test("a page trashed while open closes its socket", async ({ page, server }) => 
   await server.call("DELETE", `/pages/${id}`);
   await expect(page.getByRole("heading", { name: /page (not found|deleted)/ })).toBeVisible();
   await expect.poll(() => open).toBe(0);
+});
+
+test("a page trashed while open comes back with undo, and the notice then goes", async ({
+  page,
+  server,
+}) => {
+  const id = await newPage(server, "Open one");
+  await newPage(server, "Other");
+  await asOwner(page, server);
+  await page.goto(`${server.url}/?page=${id}`);
+  await expect(page.getByRole("banner").getByRole("status")).toContainText("synced");
+  await spaceButton(page, "pages/").click();
+
+  await pick(page, "Open one", "move to trash");
+  await expect(page.getByRole("heading", { name: "page deleted" })).toBeVisible();
+  const notice = page.getByRole("status").filter({ hasText: "moved to trash" });
+  await notice.getByRole("button", { name: "undo" }).click();
+  await expect(page.getByLabel("page title")).toHaveValue("Open one");
+
+  // Focus given to undo does not hold the notice: it leaves on its own.
+  await pick(page, "Other", "move to trash");
+  await page.mouse.move(800, 400);
+  await expect(notice).toBeVisible();
+  await expect(notice).toBeHidden({ timeout: 15_000 });
 });

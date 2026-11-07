@@ -20,9 +20,12 @@
 </script>
 
 <script lang="ts">
+  import IconButton from "./IconButton.svelte";
+  import Menu, { type MenuItem } from "./Menu.svelte";
   import Self from "./TreeLevel.svelte";
   import { canEdit, type Level, type Nav, type Place } from "../lib/nav.svelte";
-  import { route } from "../lib/router.svelte";
+  import { notify } from "../lib/notice.svelte";
+  import { shownPage } from "../lib/router.svelte";
 
   let {
     nav,
@@ -46,7 +49,29 @@
   const name = (page: PageRow) => page.title || "untitled";
 
   /** The page the address shows, which its row marks. */
-  const shown = $derived(route.path === "/" ? new URLSearchParams(route.search).get("page") : null);
+  const shown = $derived(shownPage());
+
+  async function copyLink(page: PageRow) {
+    try {
+      await navigator.clipboard.writeText(new URL(`/?page=${page.id}`, location.origin).href);
+      notify("link copied");
+    } catch {
+      notify("could not copy the link");
+    }
+  }
+
+  function actions(page: PageRow): MenuItem[] {
+    const items: MenuItem[] = [{ icon: "link", label: "copy link", select: () => copyLink(page) }];
+    if (canEdit(page.role)) {
+      items.push({
+        icon: "trash-2",
+        label: "move to trash",
+        destructive: true,
+        select: () => ontrash(page),
+      });
+    }
+    return items;
+  }
 
   function zoneOf(event: DragEvent): Zone {
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -142,22 +167,18 @@
           ondragstart={(event) => start(event, page)}
           ondragend={end}>{name(page)}{page.has_children ? "/" : ""}</a
         >
-        {#if canEdit(page.role)}
-          <span class="tree-actions">
-            <button
-              class="tree-action"
-              type="button"
-              aria-label="new page in {name(page)}"
-              onclick={() => oncreate(page.space_id, page.id)}>+</button
-            >
-            <button
-              class="tree-action"
-              type="button"
-              aria-label="trash {name(page)}"
-              onclick={() => ontrash(page)}>rm</button
-            >
-          </span>
-        {/if}
+        <span class="tree-actions">
+          {#if canEdit(page.role)}
+            <IconButton
+              class="tree-plus"
+              icon="plus"
+              verb="new page"
+              label="new page in {name(page)}"
+              onclick={() => oncreate(page.space_id, page.id)}
+            />
+          {/if}
+          <Menu label="more actions for {name(page)}" items={actions(page)} />
+        </span>
       </div>
       {#if open && children}
         <Self

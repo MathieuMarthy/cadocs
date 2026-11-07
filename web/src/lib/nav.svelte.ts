@@ -360,6 +360,11 @@ export class Nav {
     await api("DELETE", `/pages/${page.id}`);
     this.spaceChanged(page.space_id);
   }
+
+  async restore(page: PageRow) {
+    await api("POST", `/pages/${page.id}/restore`);
+    this.spaceChanged(page.space_id);
+  }
 }
 
 /** The one workspace whose tree shows, kept while screens come and go. */
