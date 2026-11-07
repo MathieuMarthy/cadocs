@@ -24,7 +24,8 @@ use axum::http::StatusCode;
 use axum::middleware::{from_fn_with_state, map_response};
 use axum::routing::{any, get};
 use cadocs_collab::{Authorizer, DocRegistry};
-use cadocs_store::{AccountStore, DocStore, PageStore, SpaceStore, WorkspaceStore};
+use cadocs_jobs::{Cleanup, JobConfig, JobQueue, Worker};
+use cadocs_store::{AccountStore, DocStore, JobStore, PageStore, SpaceStore, WorkspaceStore};
 use rust_embed::RustEmbed;
 use tokio::net::TcpListener;
 use tokio::sync::{Notify, oneshot, watch};
@@ -100,6 +101,23 @@ impl<S, A> AppState<S, A> {
     pub fn access_changed(&self) {
         self.access.notify_one();
     }
+}
+
+/// Starts the worker, which runs until the process ends: a job it cuts short runs again at the next
+/// start. The queue is for whatever adds jobs.
+pub fn start_jobs<S: DocStore + JobStore, A>(
+    state: &AppState<S, A>,
+    config: JobConfig,
+) -> JobQueue<S> {
+    let queue = JobQueue::new(state.store.clone());
+    let cleanup = Cleanup::new(
+        state.store.clone(),
+        state.registry.clone(),
+        state.access.clone(),
+        config.trash_retention,
+    );
+    tokio::spawn(Worker::new(queue.clone(), Arc::new(cleanup), config).run());
+    queue
 }
 
 /// Rechecks every socket after each change, and on a timer for what no request announces: a session

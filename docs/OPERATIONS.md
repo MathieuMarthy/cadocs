@@ -31,7 +31,7 @@ Environment variables only, so no config file format has to be parsed or documen
 | `CADOCS_PING_SECS` **P** | `30` | Ping interval |
 | `CADOCS_SOCKET_RECHECK_SECS` **P** | `60` | Time between two checks of every open socket: the longest a socket outlives its session, or a change made by a command beside the server. A change made through the API closes sockets at once |
 | `CADOCS_PING_TIMEOUT_SECS` **P** | `90` | Silence before a socket closes, and the longest a single send may take. Must be above `CADOCS_PING_SECS` |
-| `CADOCS_DOC_READS` | `2` | Concurrent document reads outside a room ([ARCHITECTURE.md](ARCHITECTURE.md#reading-a-document-outside-a-room)) |
+| `CADOCS_DOC_READS` | `2` | Concurrent document reads outside a room, at least 1 ([ARCHITECTURE.md](ARCHITECTURE.md#reading-a-document-outside-a-room)) |
 
 ### Content
 
@@ -40,7 +40,7 @@ Environment variables only, so no config file format has to be parsed or documen
 | `CADOCS_SESSION_DAYS` **P** | `30` | Session lifetime, 1 to 3650, extended by use |
 | `CADOCS_MAX_UPLOAD_MB` | `25` | Largest attachment |
 | `CADOCS_WORKSPACE_QUOTA_MB` | `0` | Attachment storage per workspace, `0` for no limit |
-| `CADOCS_TRASH_DAYS` | `30` | Time in the trash before purging |
+| `CADOCS_TRASH_DAYS` | `30` | Time in the trash before purging, 1 to 3650. The purge runs at start and then every hour |
 | `CADOCS_REVISION_PAUSE_SECS` | `120` | Pause in editing that creates a revision |
 | `CADOCS_REVISION_MAX_SECS` | `600` | Longest editing time without a revision |
 | `CADOCS_REVISION_KEEP_DAYS` | `30` | All revisions are kept this long. After that, one per day remains |

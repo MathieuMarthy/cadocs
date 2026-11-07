@@ -11,7 +11,7 @@ use cadocs_server::cli::{self, Command};
 use cadocs_server::config::Config;
 use cadocs_server::password::Passwords;
 use cadocs_server::session::new_password_reset;
-use cadocs_server::{AppState, data_dir, serve};
+use cadocs_server::{AppState, data_dir, serve, start_jobs};
 use cadocs_store::{AccountStore, DocStore, SqliteStore};
 use tokio::net::TcpListener;
 use tokio::task::spawn_blocking;
@@ -86,6 +86,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
         config.http,
     );
     tokio::spawn(return_freed_memory(registry, state.passwords.clone()));
+    start_jobs(&state, config.jobs);
 
     let listener = TcpListener::bind(config.bind)
         .await

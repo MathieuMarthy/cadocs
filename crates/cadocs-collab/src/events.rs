@@ -32,6 +32,7 @@ pub enum SpaceEvent {
     Updated,
     Trashed,
     Restored,
+    Purged,
 }
 
 impl PageEvent {
@@ -54,6 +55,7 @@ impl SpaceEvent {
             Self::Updated => "space.updated",
             Self::Trashed => "space.trashed",
             Self::Restored => "space.restored",
+            Self::Purged => "space.purged",
         }
     }
 }

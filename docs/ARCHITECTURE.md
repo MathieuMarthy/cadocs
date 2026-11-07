@@ -106,7 +106,7 @@ Loaded rooms are capped by `CADOCS_MAX_ROOMS`. At the cap, the oldest idle room 
 
 Indexing, exports, revisions and public pages need a document's content with no client connected. They go through one reader instead of creating a room:
 
-- If the room is loaded, the reader takes a short read of its `Doc`, which includes unflushed edits.
+- If the room is loaded, the reader encodes its `Doc` under the room lock, which includes unflushed edits, and works on a private copy, so a slow reader holds up no edit. A room that is unloading is waited for, because it still holds edits the store lacks.
 - Otherwise it builds a temporary `Doc` from the snapshot and updates, and drops it after use. It writes nothing and is never registered.
 - A semaphore (`CADOCS_DOC_READS`) bounds how many of these exist at once, so a crawler on public pages waits instead of raising RAM.
 
@@ -117,6 +117,8 @@ Anything that writes to a document (imports, title changes through REST, revisio
 The `jobs` table is the queue: `INSERT` to enqueue, one worker task to claim with a conditional `UPDATE`, retries with backoff. An in-memory `Notify` wakes the worker immediately, and a slow poll covers jobs left over from a restart. Jobs are idempotent, because a crash may run one twice.
 
 Job types: reindex a page for search, create a revision, purge expired sessions and tokens, thin old revisions, purge the trash, delete orphaned files.
+
+Recurring jobs are queued at start and then every hour, with their kind as their key. A job that fails is retried after 30 seconds, then twice as long each time, up to five runs. A claim counts as a run, so a job that kills the process also ends as `failed`. A panic is a failure, and costs the worker nothing.
 
 ### Search
 

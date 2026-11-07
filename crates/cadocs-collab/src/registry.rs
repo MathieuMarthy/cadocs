@@ -7,14 +7,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cadocs_core::permissions::{SocketMode, SocketOutcome, SpaceRole};
-use cadocs_store::{DocEdit, DocStore, StoreError, StoredUpdate};
+use cadocs_store::{DocEdit, DocStore, StoreError, StoredDoc, StoredUpdate};
 use tokio::sync::{Notify, Semaphore, watch};
 use tokio::time::{Instant, sleep, sleep_until};
 use tracing::warn;
+use yrs::Doc;
 
 use crate::connection::Connection;
 use crate::events::{Event, EventConnection, EventHubs, PageEvent};
-use crate::room::{Room, Transition, lock};
+use crate::room::{Room, Transition, lock, rebuild};
 use crate::{Authorizer, CLOSE_GOING_AWAY, CollabConfig, CollabError, Seat};
 
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
@@ -39,6 +40,8 @@ struct Inner<S> {
     rooms: Mutex<Rooms>,
     /// Page and events sockets alike.
     sockets: Arc<Semaphore>,
+    /// Documents built outside a room, and what they are built from.
+    reads: Semaphore,
     events: Arc<EventHubs>,
     failing_rooms: AtomicUsize,
     unloaded: Notify,
@@ -91,12 +94,14 @@ impl<S: DocStore> DocRegistry<S> {
     pub fn new(store: Arc<S>, config: CollabConfig) -> Self {
         let sockets = Arc::new(Semaphore::new(config.max_sockets));
         let events = Arc::new(EventHubs::new(config.send_queue));
+        let reads = Semaphore::new(config.doc_reads);
         Self {
             inner: Arc::new(Inner {
                 store,
                 config,
                 rooms: Mutex::default(),
                 sockets,
+                reads,
                 events,
                 failing_rooms: AtomicUsize::new(0),
                 unloaded: Notify::new(),
@@ -159,6 +164,60 @@ impl<S: DocStore> DocRegistry<S> {
     ) -> Result<(), CollabError> {
         self.enter(doc_id, |room| room.set_title(title, user_id))
             .await?
+    }
+
+    /// Hands `action` a private copy of a document, with no client needed. A loaded room gives its
+    /// edits, flushed or not, and only for as long as it takes to encode them, so a slow `action`
+    /// holds up no room. Otherwise the copy comes from the store: no room is made, nothing is
+    /// written, and `CADOCS_MAX_ROOMS` does not apply. A read waits its turn past `doc_reads`.
+    pub async fn read<T>(
+        &self,
+        doc_id: &str,
+        action: impl FnOnce(&Doc) -> T,
+    ) -> Result<T, CollabError> {
+        let _turn = self
+            .inner
+            .reads
+            .acquire()
+            .await
+            .expect("this semaphore is never closed");
+        let stored = self.latest(doc_id).await?;
+        // The guard is for the commit of the transaction, as in `Inner::load`.
+        let built = catch_unwind(AssertUnwindSafe(|| rebuild(doc_id, &stored)));
+        drop(stored);
+        let corrupt = || CollabError::CorruptDocument {
+            doc_id: doc_id.to_owned(),
+        };
+        let (doc, _) = built.map_err(|_| corrupt())??;
+        Ok(action(&doc))
+    }
+
+    /// The latest state of a document. An unload still holds edits the store lacks, so it is waited
+    /// for. A load is not: the store has all it will read.
+    async fn latest(&self, doc_id: &str) -> Result<StoredDoc, CollabError> {
+        loop {
+            let unloading = {
+                let rooms = lock(&self.inner.rooms);
+                if rooms.closing {
+                    return Err(CollabError::ShuttingDown);
+                }
+                match rooms.slots.get(doc_id) {
+                    Some(Slot::Live(room)) => Ok(room.clone()),
+                    Some(Slot::Unloading(transition)) => Err(Some(transition.clone())),
+                    Some(Slot::Loading(_)) | None => Err(None),
+                }
+            };
+            match unloading {
+                Ok(room) => return room.read(),
+                Err(None) => return Ok(self.inner.store.load(doc_id).await?),
+                // A failed unload leaves the room live, and the next turn reads it.
+                Err(Some(transition)) => {
+                    if let Err(CollabError::ShuttingDown) = outcome(transition).await {
+                        return Err(CollabError::ShuttingDown);
+                    }
+                }
+            }
+        }
     }
 
     /// Runs `action` once on the live room of a document, under the lock that keeps it live.

@@ -26,7 +26,7 @@ cadocs/
 
 `cadocs-bench` is outside `default-members`, so a plain `cargo build --release` does not build it. Built together, its dependency features would unify into the server's and change the shipped binary. Use `--workspace` for tests and clippy, and `-p` to build it.
 
-The prototype contains `core`, `store`, `collab`, `server` and `bench`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
+The prototype contains `core`, `store`, `collab`, `server` and `bench`, and step 10 of the MVP added `jobs`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
 
 ## Selected crates
 

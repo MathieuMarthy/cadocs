@@ -323,7 +323,7 @@ CREATE INDEX jobs_due ON jobs(status, run_at);
 CREATE UNIQUE INDEX jobs_dedup ON jobs(dedup_key) WHERE dedup_key IS NOT NULL AND status = 'pending';
 ```
 
-A finished job is deleted. A job that exhausts its attempts stays as `failed`, for inspection. At startup, `running` jobs are reset to `pending`, because only one process exists (ADR 0006).
+A finished job is deleted. A job that exhausts its attempts stays as `failed` for 30 days, for inspection. At startup, `running` jobs are reset to `pending`, because only one process exists (ADR 0006), and those out of attempts become `failed`. `jobs_dedup` only covers `pending`, so a change during a run queues another run. A retry or a reset that finds a pending job with its key gives way to it.
 
 ## Search
 

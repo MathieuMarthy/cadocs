@@ -8,6 +8,7 @@ use std::time::Duration;
 use anyhow::{Context, ensure};
 use axum::http::{HeaderMap, Uri, header};
 use cadocs_collab::CollabConfig;
+use cadocs_jobs::JobConfig;
 
 use crate::client_ip::TrustedProxies;
 
@@ -17,6 +18,8 @@ const MAX_COUNT: usize = 1 << 24;
 const SECS_PER_DAY: u64 = 24 * 60 * 60;
 const DEFAULT_SESSION_DAYS: u64 = 30;
 const MAX_SESSION_DAYS: u64 = 3650;
+const DEFAULT_TRASH_DAYS: u64 = 30;
+const MAX_TRASH_DAYS: u64 = 3650;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -26,6 +29,7 @@ pub struct Config {
     pub http: HttpConfig,
     pub collab: CollabConfig,
     pub socket: SocketConfig,
+    pub jobs: JobConfig,
 }
 
 /// What the HTTP layer knows about how the server is reached.
@@ -146,11 +150,16 @@ impl Config {
                 max_sockets: read.value("CADOCS_MAX_SOCKETS", collab.max_sockets)?,
                 max_frame_bytes: read.value("CADOCS_MAX_FRAME_BYTES", collab.max_frame_bytes)?,
                 send_queue: read.value("CADOCS_SEND_QUEUE", collab.send_queue)?,
+                doc_reads: read.value("CADOCS_DOC_READS", collab.doc_reads)?,
             },
             socket: SocketConfig {
                 ping: read.secs("CADOCS_PING_SECS", socket.ping)?,
                 ping_timeout: read.secs("CADOCS_PING_TIMEOUT_SECS", socket.ping_timeout)?,
                 recheck: read.secs("CADOCS_SOCKET_RECHECK_SECS", socket.recheck)?,
+            },
+            jobs: JobConfig {
+                trash_retention: read.trash_retention()?,
+                ..JobConfig::default()
             },
         };
         config.validate()?;
@@ -184,6 +193,10 @@ impl Config {
             "CADOCS_SEND_QUEUE must be between 1 and {MAX_COUNT}"
         );
         ensure!(
+            (1..=MAX_COUNT).contains(&self.collab.doc_reads),
+            "CADOCS_DOC_READS must be between 1 and {MAX_COUNT}"
+        );
+        ensure!(
             !self.socket.ping.is_zero(),
             "CADOCS_PING_SECS must not be 0"
         );
@@ -202,6 +215,15 @@ impl Config {
 struct Reader<F>(F);
 
 impl<F: Fn(&str) -> Option<String>> Reader<F> {
+    fn trash_retention(&self) -> anyhow::Result<Duration> {
+        let days = self.value("CADOCS_TRASH_DAYS", DEFAULT_TRASH_DAYS)?;
+        ensure!(
+            (1..=MAX_TRASH_DAYS).contains(&days),
+            "CADOCS_TRASH_DAYS must be between 1 and {MAX_TRASH_DAYS}"
+        );
+        Ok(Duration::from_secs(days * SECS_PER_DAY))
+    }
+
     fn session_lifetime(&self) -> anyhow::Result<Duration> {
         let days = self.value("CADOCS_SESSION_DAYS", DEFAULT_SESSION_DAYS)?;
         ensure!(
@@ -379,6 +401,11 @@ mod tests {
         assert_eq!(config.collab.max_sockets, 512);
         assert_eq!(config.collab.max_frame_bytes, 8_388_608);
         assert_eq!(config.collab.send_queue, 256);
+        assert_eq!(config.collab.doc_reads, 2);
+        assert_eq!(
+            config.jobs.trash_retention,
+            Duration::from_secs(30 * 86_400)
+        );
         assert_eq!(config.socket.ping, Duration::from_secs(30));
         assert_eq!(config.socket.ping_timeout, Duration::from_secs(90));
     }
@@ -398,6 +425,8 @@ mod tests {
             ("CADOCS_MAX_SOCKETS", "3"),
             ("CADOCS_MAX_FRAME_BYTES", "512"),
             ("CADOCS_SEND_QUEUE", "4"),
+            ("CADOCS_DOC_READS", "5"),
+            ("CADOCS_TRASH_DAYS", "9"),
             ("CADOCS_PING_SECS", "6"),
             ("CADOCS_PING_TIMEOUT_SECS", "7"),
         ])
@@ -418,6 +447,8 @@ mod tests {
         assert_eq!(config.collab.max_sockets, 3);
         assert_eq!(config.collab.max_frame_bytes, 512);
         assert_eq!(config.collab.send_queue, 4);
+        assert_eq!(config.collab.doc_reads, 5);
+        assert_eq!(config.jobs.trash_retention, Duration::from_secs(9 * 86_400));
         assert_eq!(config.socket.ping, Duration::from_secs(6));
         assert_eq!(config.socket.ping_timeout, Duration::from_secs(7));
     }
@@ -443,6 +474,8 @@ mod tests {
             "CADOCS_PING_TIMEOUT_SECS",
             "CADOCS_MAX_SOCKETS",
             "CADOCS_SEND_QUEUE",
+            "CADOCS_DOC_READS",
+            "CADOCS_TRASH_DAYS",
         ] {
             assert!(config(&[(name, &huge)]).is_err(), "{name}");
         }
@@ -455,6 +488,8 @@ mod tests {
         assert!(config(&[("CADOCS_SOCKET_RECHECK_SECS", "18446744073709551615")]).is_err());
         assert!(config(&[("CADOCS_FLUSH_INTERVAL_MS", "0")]).is_err());
         assert!(config(&[("CADOCS_SEND_QUEUE", "0")]).is_err());
+        assert!(config(&[("CADOCS_DOC_READS", "0")]).is_err());
+        assert!(config(&[("CADOCS_TRASH_DAYS", "0")]).is_err());
         assert!(
             config(&[
                 ("CADOCS_PING_SECS", "30"),

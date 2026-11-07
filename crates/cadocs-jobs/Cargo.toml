@@ -1,0 +1,17 @@
+[package]
+name = "cadocs-jobs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cadocs-collab.workspace = true
+cadocs-store.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+sqlx.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }

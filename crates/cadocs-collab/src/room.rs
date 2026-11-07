@@ -143,6 +143,37 @@ pub(crate) struct RoomState {
     pub(crate) unload: Option<watch::Sender<Transition>>,
 }
 
+/// Builds a document from what is stored, and tells whether a row had to be skipped. This can panic
+/// when its transaction commits, so a caller holds a guard.
+pub(crate) fn rebuild(doc_id: &str, stored: &StoredDoc) -> Result<(Doc, bool), CollabError> {
+    let corrupt = || CollabError::CorruptDocument {
+        doc_id: doc_id.to_owned(),
+    };
+    let doc = Doc::new();
+    let mut skipped_row = false;
+    {
+        let mut txn = doc.transact_mut();
+        if let Some(snapshot) = &stored.snapshot {
+            let update: Update = decode_untrusted(&snapshot.state).map_err(|_| corrupt())?;
+            let applied = catch_unwind(AssertUnwindSafe(|| txn.apply_update(update)));
+            if !matches!(applied, Ok(Ok(()))) {
+                return Err(corrupt());
+            }
+        }
+        for row in &stored.updates {
+            let update: Update = decode_untrusted(&row.data).map_err(|_| corrupt())?;
+            // A stored update can turn out invalid once its dependency arrives. Refusing the
+            // whole document for it would let one bad frame lock everybody out.
+            let applied = catch_unwind(AssertUnwindSafe(|| txn.apply_update(update)));
+            if !matches!(applied, Ok(Ok(()))) {
+                warn!(%doc_id, seq = row.seq, "skipped a stored update that cannot be applied");
+                skipped_row = true;
+            }
+        }
+    }
+    Ok((doc, skipped_row))
+}
+
 impl RoomState {
     fn others(&mut self, except: u64) -> impl Iterator<Item = &mut Client> {
         self.clients
@@ -271,33 +302,9 @@ impl Room {
         stored: StoredDoc,
         config: CollabConfig,
     ) -> Result<Arc<Self>, CollabError> {
-        let corrupt = || CollabError::CorruptDocument {
-            doc_id: doc_id.clone(),
-        };
-        let doc = Doc::new();
         let last_seq = stored.last_seq();
         let stored_updates = stored.updates.len();
-        let mut skipped_row = false;
-        {
-            let mut txn = doc.transact_mut();
-            if let Some(snapshot) = &stored.snapshot {
-                let update: Update = decode_untrusted(&snapshot.state).map_err(|_| corrupt())?;
-                let applied = catch_unwind(AssertUnwindSafe(|| txn.apply_update(update)));
-                if !matches!(applied, Ok(Ok(()))) {
-                    return Err(corrupt());
-                }
-            }
-            for row in &stored.updates {
-                let update: Update = decode_untrusted(&row.data).map_err(|_| corrupt())?;
-                // A stored update can turn out invalid once its dependency arrives. Refusing the
-                // whole document for it would let one bad frame lock everybody out.
-                let applied = catch_unwind(AssertUnwindSafe(|| txn.apply_update(update)));
-                if !matches!(applied, Ok(Ok(()))) {
-                    warn!(%doc_id, seq = row.seq, "skipped a stored update that cannot be applied");
-                    skipped_row = true;
-                }
-            }
-        }
+        let (doc, skipped_row) = rebuild(&doc_id, &stored)?;
 
         let applied = Arc::new(Mutex::new(None));
         let sink = applied.clone();
@@ -615,6 +622,21 @@ impl Room {
 
     /// The state to compact, covering every stored `seq`. It may also hold edits still queued:
     /// these keep a higher `seq`, so a later flush is accepted and replaying them changes nothing.
+    /// The document as it stands, for a reader. What waits for a dependency is not part of it, and
+    /// a merge could lose a delete (see `snapshot`).
+    pub(crate) fn read(&self) -> Result<StoredDoc, CollabError> {
+        let state = self.state();
+        let encoded = catch_unwind(AssertUnwindSafe(|| state.encode_applied()));
+        drop(state);
+        let state = encoded.map_err(|_| CollabError::CorruptDocument {
+            doc_id: self.doc_id.clone(),
+        })?;
+        Ok(StoredDoc {
+            snapshot: Some(Snapshot { state, upto_seq: 0 }),
+            updates: Vec::new(),
+        })
+    }
+
     pub(crate) fn snapshot(&self) -> Option<Snapshot> {
         let state = self.state();
         if state.stored_updates == 0 || state.skipped_row {

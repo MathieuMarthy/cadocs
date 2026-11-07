@@ -309,7 +309,7 @@ Events are hints. The client refetches through REST, and refetches the tree afte
 | Type | Fields | Meaning |
 | --- | --- | --- |
 | `page.created`, `page.moved`, `page.renamed`, `page.trashed`, `page.restored`, `page.purged` | `space`, `page` | The tree or the trash changed. A move across spaces is sent to both |
-| `space.created`, `space.updated`, `space.trashed`, `space.restored` | `space` | The space list changed. A reader of a new space may also get `access.changed` |
+| `space.created`, `space.updated`, `space.trashed`, `space.restored`, `space.purged` | `space` | The space list changed. A reader of a new space may also get `access.changed` |
 | `access.changed` | none | The user's permissions changed, reload the space list |
 | `notification` | `id` | A new notification (V1) |
 | `resync` | none | Events were dropped because the client lagged, reload everything shown |

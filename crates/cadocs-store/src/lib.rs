@@ -1,6 +1,7 @@
 //! Store traits and their SQLite implementation (ADR 0002).
 
 mod accounts;
+mod jobs;
 mod pages;
 mod spaces;
 mod sqlite;
@@ -13,6 +14,7 @@ pub use accounts::{
     AccountStore, ActiveSession, AdminChanges, Credentials, FirstUser, Membership,
     NewPasswordReset, NewSession, SessionStanding, UpdateBasis, User, UserChanges, UserRecord,
 };
+pub use jobs::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob};
 pub use pages::{
     DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, MovedPage, NewPage, PageMove, PageRecord,
     PageStore, Placement,

@@ -4,8 +4,9 @@
 use std::sync::Arc;
 
 use cadocs_collab::{DocRegistry, PageAuthorizer};
+use cadocs_jobs::JobQueue;
 use cadocs_server::config::Config;
-use cadocs_server::{AppState, serve};
+use cadocs_server::{AppState, serve, start_jobs};
 use cadocs_store::SqliteStore;
 use rust_embed::Embed;
 use serde_json::{Value, json};
@@ -28,6 +29,7 @@ pub struct Api {
     pub db: SqlitePool,
     pub store: Arc<SqliteStore>,
     pub registry: DocRegistry<SqliteStore>,
+    pub queue: JobQueue<SqliteStore>,
     _stop: oneshot::Sender<()>,
     _dir: TempDir,
 }
@@ -102,6 +104,7 @@ pub async fn start_tuned(public_url: &str, proxies: &str, settings: &[(&str, &st
         config.socket,
         config.http,
     );
+    let queue = start_jobs(&state, config.jobs);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -117,6 +120,7 @@ pub async fn start_tuned(public_url: &str, proxies: &str, settings: &[(&str, &st
         db,
         store,
         registry,
+        queue,
         _stop: stop,
         _dir: dir,
     }

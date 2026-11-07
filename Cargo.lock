@@ -241,6 +241,19 @@ name = "cadocs-core"
 version = "0.1.0"
 
 [[package]]
+name = "cadocs-jobs"
+version = "0.1.0"
+dependencies = [
+ "cadocs-collab",
+ "cadocs-store",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "cadocs-server"
 version = "0.1.0"
 dependencies = [
@@ -249,6 +262,7 @@ dependencies = [
  "axum",
  "cadocs-collab",
  "cadocs-core",
+ "cadocs-jobs",
  "cadocs-store",
  "futures-util",
  "getrandom 0.4.3",

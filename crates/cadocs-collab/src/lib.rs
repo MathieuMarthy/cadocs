@@ -53,6 +53,8 @@ pub struct CollabConfig {
     pub max_frame_bytes: usize,
     /// Queued frames per socket.
     pub send_queue: usize,
+    /// Documents read at once outside a room.
+    pub doc_reads: usize,
 }
 
 impl Default for CollabConfig {
@@ -66,6 +68,7 @@ impl Default for CollabConfig {
             max_sockets: 512,
             max_frame_bytes: 8 * 1024 * 1024,
             send_queue: 256,
+            doc_reads: 2,
         }
     }
 }
