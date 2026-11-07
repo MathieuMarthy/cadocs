@@ -235,7 +235,7 @@ test("the account page changes the name and checks the current password", async 
   await page.goto(`${server.url}/account`);
   await page.getByLabel("name", { exact: true }).fill("Ada Lovelace");
   await page.getByRole("button", { name: "save" }).click();
-  await expect(page.getByRole("status")).toContainText("saved");
+  await expect(page.getByRole("main").getByRole("status")).toContainText("saved");
   await expect(page.getByRole("complementary")).toContainText("Ada Lovelace");
 
   await page.getByLabel("new password").fill("a brand new password");
@@ -388,7 +388,7 @@ test("every screen links to the source code", async ({ page, server }) => {
 test.describe("an open page reacts to its socket closing", () => {
   async function openPage(page: Page, server: TestServer) {
     await page.goto(`${server.url}/?page=${await server.page("doc")}`);
-    await expect(page.getByRole("status")).toContainText("synced");
+    await expect(page.getByRole("banner").getByRole("status")).toContainText("synced");
   }
 
   test("4401: the session ended, so it goes to login and comes back", async ({ page, server }) => {

@@ -57,7 +57,7 @@ async function withPage(browser: Browser, server: TestServer, use: (page: Page) 
 
 const editor = (page: Page) => page.getByLabel("page content");
 const title = (page: Page) => page.getByLabel("page title");
-const status = (page: Page) => page.getByRole("status");
+const status = (page: Page) => page.getByRole("banner").getByRole("status");
 const paragraphs = (page: Page) => editor(page).locator("p");
 
 async function expectOnline(page: Page, count: number) {

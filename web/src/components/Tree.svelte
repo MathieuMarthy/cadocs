@@ -71,7 +71,7 @@
           }}
           ondrop={(event) => dropOnSpace(event, space)}
         >
-          <span class="tree-prefix">{String(index + 1).padStart(2, "0")} </span>
+          <span class="tree-prefix">{`${String(index + 1).padStart(2, "0")} `}</span>
           <button
             class="tree-label"
             type="button"
@@ -89,7 +89,7 @@
               <a
                 class="tree-action"
                 href="/w/{nav.workspace.slug}/trash/{space.slug}"
-                aria-label="trash of {label(space)}">⌫</a
+                aria-label="trash of {label(space)}">trash</a
               >
             </span>
           {/if}

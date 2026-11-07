@@ -22,6 +22,7 @@
 <script lang="ts">
   import Self from "./TreeLevel.svelte";
   import { canEdit, type Level, type Nav, type Place } from "../lib/nav.svelte";
+  import { route } from "../lib/router.svelte";
 
   let {
     nav,
@@ -43,6 +44,9 @@
   } = $props();
 
   const name = (page: PageRow) => page.title || "untitled";
+
+  /** The page the address shows, which its row marks. */
+  const shown = $derived(route.path === "/" ? new URLSearchParams(route.search).get("page") : null);
 
   function zoneOf(event: DragEvent): Zone {
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -111,6 +115,7 @@
       <div
         id="tree-{page.id}"
         class="tree-row"
+        class:selected={shown === page.id}
         role="group"
         data-drop={drag.over === page.id ? drag.zone : undefined}
         ondragover={(event) => over(event, page, index)}
@@ -132,6 +137,7 @@
         <a
           class="tree-label"
           href="/?page={page.id}"
+          aria-current={shown === page.id ? "page" : undefined}
           draggable={canEdit(page.role)}
           ondragstart={(event) => start(event, page)}
           ondragend={end}>{name(page)}{page.has_children ? "/" : ""}</a
@@ -148,7 +154,7 @@
               class="tree-action"
               type="button"
               aria-label="trash {name(page)}"
-              onclick={() => ontrash(page)}>×</button
+              onclick={() => ontrash(page)}>rm</button
             >
           </span>
         {/if}

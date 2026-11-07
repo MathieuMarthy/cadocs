@@ -343,8 +343,15 @@ h2 {
   min-width: 0;
 }
 
-.tree > .label {
+.tree > .label,
+.sidebar-group > .label {
   padding: 0 var(--space-2);
+}
+
+.sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 .tree .rows .rows {
@@ -421,7 +428,30 @@ h2 {
 .tree-actions {
   display: flex;
   flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: var(--space-1);
+  font-size: 12px;
   opacity: 0;
+}
+
+.tree-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tree-row.selected,
+.tree-row.selected .tree-label,
+.tree-row.selected .tree-prefix,
+.tree-row.selected .tree-toggle,
+.tree-row.selected .tree-action {
+  background: var(--selection);
+  color: var(--selection-ink);
+}
+
+.tree-row.selected .tree-label {
+  font-weight: 500;
 }
 
 .tree-row:hover .tree-actions,

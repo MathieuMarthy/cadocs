@@ -12,11 +12,27 @@
   let {
     title,
     workspace = null,
+    crumbs = [],
+    end,
+    bare = false,
+    guess = true,
     children,
-  }: { title: string; workspace?: Workspace | null; children: Snippet } = $props();
+  }: {
+    title: string;
+    workspace?: Workspace | null;
+    /** Breadcrumb segments between the workspace and the title. */
+    crumbs?: string[];
+    /** What sits at the right of the top bar. */
+    end?: Snippet;
+    /** The content brings its own layout, as the page view does. */
+    bare?: boolean;
+    /** Without a `workspace`, show the first one. A page whose workspace is unknown shows none. */
+    guess?: boolean;
+    children: Snippet;
+  } = $props();
 
   const session = $derived(app.session!);
-  const current = $derived(workspace ?? session.workspaces[0] ?? null);
+  const current = $derived(workspace ?? (guess ? (session.workspaces[0] ?? null) : null));
 
   let nav = $state<Nav | null>(null);
 
@@ -62,21 +78,25 @@
       </ul>
     </details>
 
+    {#if current}
+      <ul class="rows">
+        <li>
+          <a
+            class="row"
+            href="/w/{current.slug}"
+            aria-current={route.path === `/w/${current.slug}` ? "page" : undefined}
+          >
+            home
+          </a>
+        </li>
+      </ul>
+    {/if}
+
     {#if nav}<Tree {nav} />{/if}
 
-    <nav aria-label="main">
+    <nav class="sidebar-group" aria-label="settings">
+      <div class="label">settings</div>
       <ul class="rows">
-        {#if current}
-          <li>
-            <a
-              class="row"
-              href="/w/{current.slug}"
-              aria-current={route.path === `/w/${current.slug}` ? "page" : undefined}
-            >
-              workspace
-            </a>
-          </li>
-        {/if}
         <li>
           <a
             class="row"
@@ -112,11 +132,17 @@
     <header class="topbar">
       <nav class="breadcrumb" aria-label="location">
         {#if current}<span>{current.name.toLowerCase()}</span><span class="sep">/</span>{/if}
-        <span class="current">{title.toLowerCase()}</span>
+        {#each crumbs as crumb, index (index)}<span>{crumb}</span><span class="sep">/</span>{/each}
+        <span class="current">{title}</span>
       </nav>
+      {#if end}<div class="topbar-end">{@render end()}</div>{/if}
     </header>
-    <main class="content">
+    {#if bare}
       {@render children()}
-    </main>
+    {:else}
+      <main class="content">
+        {@render children()}
+      </main>
+    {/if}
   </div>
 </div>

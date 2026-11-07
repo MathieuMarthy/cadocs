@@ -57,7 +57,7 @@
   }
 </script>
 
-<Shell title={workspace.name} {workspace}>
+<Shell title={workspace.name.toLowerCase()} {workspace}>
   <h1>{workspace.name}</h1>
   <p class="meta">your role: {workspace.role}</p>
 

@@ -184,3 +184,71 @@ test("a demoted editor loses the page actions of the tree", async ({ page, serve
   await expect(tree(other).getByRole("button", { name: "new page in pages" })).toHaveCount(0);
   await expect(tree(other).getByRole("button", { name: "trash Kept" })).toHaveCount(0);
 });
+
+test("a page opens beside the tree, selected in it", async ({ page, server }) => {
+  await newPage(server, "Guide");
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/tests`);
+  const sidebar = page.getByRole("complementary");
+  await expect(sidebar.getByText("settings", { exact: true })).toBeVisible();
+  await spaceButton(page, "pages/").click();
+
+  await pageLink(page, "Guide").click();
+  await expect(page).toHaveURL(/\?page=/);
+  await expect(page.getByLabel("page title")).toHaveValue("Guide");
+  await expect(pageLink(page, "Guide")).toHaveAttribute("aria-current", "page");
+  const crumbs = page.getByRole("navigation", { name: "location" });
+  await expect(crumbs).toHaveText(/tests\s*\/\s*pages\s*\/\s*Guide/);
+
+  // The way back to the workspace stays in the sidebar.
+  await sidebar.getByRole("link", { name: "home" }).click();
+  await expect(page).toHaveURL(`${server.url}/w/tests`);
+  await expect(pageLink(page, "Guide")).not.toHaveAttribute("aria-current", "page");
+});
+
+test("a page whose first read fails waits to know its workspace", async ({ page, server }) => {
+  const other = await server.call("POST", "/workspaces", { name: "Second" });
+  const space = await server.call("POST", `/workspaces/${other.id}/spaces`, { name: "Notes" });
+  const created = await server.call("POST", `/spaces/${space.id}/pages`, {});
+  await server.call("PATCH", `/pages/${created.id}`, { title: "Elsewhere" });
+  await asOwner(page, server);
+  let failures = 2;
+  await page.route(`**/api/v1/pages/${created.id}`, (request) =>
+    failures-- > 0 ? request.abort() : request.continue(),
+  );
+  await page.goto(`${server.url}/?page=${created.id}`);
+  const crumbs = page.getByRole("navigation", { name: "location" });
+  // Never the first workspace's shell, then its own once a read answers.
+  await expect(page.getByLabel("page content")).toBeVisible();
+  await expect(crumbs).not.toContainText("tests");
+  await expect(crumbs).toHaveText(/second\s*\/\s*notes\s*\/\s*Elsewhere/);
+  await expect(tree(page).getByRole("button", { name: "notes/", exact: true })).toBeVisible();
+});
+
+test("the breadcrumb follows a page moved to another space", async ({ page, server }) => {
+  const id = await newPage(server, "Wanderer");
+  const { workspaceId } = await server.session();
+  const target = await server.call("POST", `/workspaces/${workspaceId}/spaces`, { name: "Archive" });
+  await asOwner(page, server);
+  await page.goto(`${server.url}/?page=${id}`);
+  const crumbs = page.getByRole("navigation", { name: "location" });
+  await expect(crumbs).toHaveText(/pages\s*\/\s*Wanderer/);
+  await server.call("POST", `/pages/${id}/move`, { space_id: target.id });
+  await expect(crumbs).toHaveText(/archive\s*\/\s*Wanderer/);
+});
+
+test("a page trashed while open closes its socket", async ({ page, server }) => {
+  const id = await newPage(server, "Doomed");
+  await asOwner(page, server);
+  let open = 0;
+  page.on("websocket", (socket) => {
+    if (!socket.url().includes("/ws/pages/")) return;
+    open += 1;
+    socket.on("close", () => (open -= 1));
+  });
+  await page.goto(`${server.url}/?page=${id}`);
+  await expect(page.getByRole("banner").getByRole("status")).toContainText("synced");
+  await server.call("DELETE", `/pages/${id}`);
+  await expect(page.getByRole("heading", { name: /page (not found|deleted)/ })).toBeVisible();
+  await expect.poll(() => open).toBe(0);
+});
