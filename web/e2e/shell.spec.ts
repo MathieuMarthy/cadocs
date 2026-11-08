@@ -127,7 +127,8 @@ test("a reset link used in another person's session leaves that session alone", 
   await server.addMember("grace@example.org");
   await asOwner(page, server);
   await page.goto(`${server.url}/admin`);
-  await adminRow(page, "grace@example.org").getByRole("button", { name: "reset link" }).click();
+  await adminRow(page, "grace@example.org").getByRole("button", { name: "more actions for Grace" }).click();
+  await page.getByRole("menuitem", { name: "new reset link" }).click();
   await page.goto(await page.getByLabel("one-time link").inputValue());
   await page.getByLabel("new password").fill("a brand new password");
   await page.getByRole("button", { name: "set password" }).click();
@@ -212,7 +213,8 @@ test("an admin makes a reset link, and it sets a new password", async ({
   await server.addMember("grace@example.org");
   await asOwner(page, server);
   await page.goto(`${server.url}/admin`);
-  await adminRow(page, "grace@example.org").getByRole("button", { name: "reset link" }).click();
+  await adminRow(page, "grace@example.org").getByRole("button", { name: "more actions for Grace" }).click();
+  await page.getByRole("menuitem", { name: "new reset link" }).click();
   const link = await page.getByLabel("one-time link").inputValue();
 
   const other = await (await browser.newContext()).newPage();
@@ -239,15 +241,17 @@ test("the account page changes the name and checks the current password", async 
 }) => {
   await asOwner(page, server);
   await page.goto(`${server.url}/account`);
-  await page.getByLabel("name", { exact: true }).fill("Ada Lovelace");
-  await page.getByRole("button", { name: "save" }).click();
-  await expect(page.getByRole("main").getByRole("status")).toContainText("saved");
+  const profile = page.getByRole("form", { name: "profile" });
+  await profile.getByLabel("name", { exact: true }).fill("Ada Lovelace");
+  await profile.getByRole("button", { name: "save" }).click();
+  await expect(profile.getByRole("status")).toContainText("saved");
   await expect(page.getByRole("complementary")).toContainText("Ada Lovelace");
 
-  await page.getByLabel("new password").fill("a brand new password");
-  await page.getByLabel("current password").fill("wrong password");
-  await page.getByRole("button", { name: "save" }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  const login = page.getByRole("form", { name: "email and password" });
+  await login.getByLabel("new password").fill("a brand new password");
+  await login.getByLabel("current password").fill("wrong password");
+  await login.getByRole("button", { name: "save" }).click();
+  await expect(login.getByRole("alert")).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("name", { exact: true })).toHaveValue("Ada Lovelace");
 });
@@ -257,7 +261,7 @@ test("an account deletes itself, after a confirmation", async ({ page, server, b
   const other = await memberPage(browser, server, grace);
   await other.goto(`${server.url}/account`);
   await other.getByRole("button", { name: "delete account" }).click();
-  await other.getByRole("button", { name: "yes, delete" }).click();
+  await other.getByRole("button", { name: "delete account" }).click();
   await expect(other).toHaveURL(`${server.url}/login`);
 
   await page.goto(`${server.url}/login`);
@@ -276,29 +280,30 @@ test("instance administration lists, disables and promotes users", async ({
   await page.getByRole("link", { name: "admin" }).click();
   await expect(page).toHaveURL(`${server.url}/admin`);
 
-  const self = adminRow(page, "ada@example.org");
-  await self.getByRole("button", { name: "remove admin" }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
-
   const row = adminRow(page, "grace@example.org");
-  await row.getByRole("button", { name: "make admin" }).click();
-  await expect(row.getByRole("button", { name: "remove admin" })).toBeVisible();
-  await row.getByRole("button", { name: "remove admin" }).click();
+  const act = async (name: string) => {
+    await row.getByRole("button", { name: "more actions for Grace" }).click();
+    await page.getByRole("menuitem", { name, exact: true }).click();
+  };
+  await act("make admin");
+  await expect(row.getByText("admin", { exact: true })).toBeVisible();
+  await act("remove admin");
+  await expect(row.getByText("admin", { exact: true })).toHaveCount(0);
 
   const other = await memberPage(browser, server, grace);
   await other.goto(`${server.url}/admin`);
   await expect(other.getByRole("heading", { name: "not found" })).toBeVisible();
   await expect(other.getByRole("link", { name: "admin" })).toHaveCount(0);
 
-  await row.getByRole("button", { name: "disable" }).click();
+  await act("disable");
   await expect(row.getByText("disabled")).toBeVisible();
   await other.reload();
   await expect(other).toHaveURL(/\/login/);
   await expect(other.getByRole("status")).toHaveCount(0);
 
-  await row.getByRole("button", { name: "enable" }).click();
-  await row.getByRole("button", { name: "delete" }).click();
-  await row.getByRole("button", { name: "yes, delete" }).click();
+  await act("enable");
+  await act("delete");
+  await row.getByRole("button", { name: "delete", exact: true }).click();
   await expect(adminRow(page, "grace@example.org")).toHaveCount(0);
 });
 

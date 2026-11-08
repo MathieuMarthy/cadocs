@@ -1,11 +1,12 @@
 <script lang="ts">
   import IconButton from "./IconButton.svelte";
   import Menu from "./Menu.svelte";
+  import NewSpace, { managesSpaces } from "./NewSpace.svelte";
   import TreeLevel, { type Drag, fromTree } from "./TreeLevel.svelte";
   import { describe } from "../lib/form.svelte";
   import { canEdit, type Nav, type PageRow, type Place, type Space } from "../lib/nav.svelte";
-  import { notify } from "../lib/notice.svelte";
-  import { navigate, reopened, shownPage } from "../lib/router.svelte";
+  import { trashPage } from "../lib/actions";
+  import { navigate } from "../lib/router.svelte";
 
   let { nav }: { nav: Nav } = $props();
 
@@ -13,6 +14,14 @@
   let problem = $state<string | null>(null);
 
   const label = (space: Space) => space.name;
+
+  /** The new space form, which opens under the label and gives focus back to its plus. */
+  let adding = $state(false);
+  let plus = $state<HTMLButtonElement>();
+  function closeAdding() {
+    adding = false;
+    queueMicrotask(() => plus?.focus());
+  }
 
   async function attempt(action: () => Promise<unknown>) {
     problem = null;
@@ -31,15 +40,7 @@
   }
 
   const move = (page: PageRow, place: Place) => void attempt(() => nav.move(page, place));
-  const trash = (page: PageRow) =>
-    void attempt(async () => {
-      await nav.trash(page);
-      notify("moved to trash", async () => {
-        await nav.restore(page);
-        // The page view gave up on it: open it again.
-        if (shownPage() === page.id) reopened.count += 1;
-      });
-    });
+  const trash = (page: PageRow) => void attempt(() => trashPage(nav, page));
 
   /** A page dropped on a space goes last at its root. */
   function overSpace(event: DragEvent, space: Space) {
@@ -59,7 +60,18 @@
 </script>
 
 <nav class="tree" aria-label="spaces">
-  <div class="label">spaces</div>
+  <div class="tree-head">
+    <span class="label">spaces</span>
+    {#if managesSpaces(nav.workspace) && !adding}
+      <IconButton
+        bind:element={plus}
+        icon="plus"
+        verb="new space"
+        onclick={() => (adding = true)}
+      />
+    {/if}
+  </div>
+  {#if adding}<NewSpace {nav} onclose={closeAdding} />{/if}
   {#if !nav.spacesLoaded}
     <p class="meta" role="status">loading…</p>
   {:else if nav.problem}

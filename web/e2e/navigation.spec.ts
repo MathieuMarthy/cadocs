@@ -133,12 +133,13 @@ test("pages reorder by drag and drop, and the trash restores and deletes forever
 test("a new space reaches the readers it is granted to", async ({ page, server, browser }) => {
   const { member, other } = await twoBrowsers(page, server, browser);
 
+  await tree(page).getByRole("button", { name: "new space" }).click();
   await page.getByLabel("space name").fill("Handbook");
-  await page.getByRole("button", { name: "+ new space" }).click();
+  await page.getByLabel("space name").press("Enter");
   await expect(spaceButton(page, "Handbook/")).toBeVisible();
   await expect(spaceButton(other, "Handbook/")).toBeHidden();
-  // A member cannot create a space, so the form is not there for them.
-  await expect(other.getByLabel("space name")).toHaveCount(0);
+  // A member cannot create a space, so the plus is not there for them.
+  await expect(tree(other).getByRole("button", { name: "new space" })).toHaveCount(0);
 
   const { workspaceId } = await server.session();
   const spaces = await server.call("GET", `/workspaces/${workspaceId}/spaces`);

@@ -45,7 +45,8 @@ export function renderAvatars(container: HTMLElement, awareness: Awareness) {
     avatar.textContent = user.name.slice(0, 1).toUpperCase();
     return [avatar];
   });
-  container.replaceChildren(...avatars);
+  // Alone on a page, one's own face says nothing.
+  container.replaceChildren(...(avatars.length > 1 ? avatars : []));
 }
 
 export function renderCaret(user: Record<string, unknown>) {

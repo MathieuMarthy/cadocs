@@ -41,7 +41,14 @@
 {:else if icon}
   <IconButton {icon} verb={label} {danger} {disabled} onclick={() => (asking = true)} />
 {:else}
-  <button class="button secondary" type="button" {disabled} onclick={() => (asking = true)}>
+  <button
+    class="button"
+    class:secondary={!danger}
+    class:danger
+    type="button"
+    {disabled}
+    onclick={() => (asking = true)}
+  >
     {label}
   </button>
 {/if}

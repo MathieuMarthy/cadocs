@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
 
-  import Confirm from "../components/Confirm.svelte";
   import Field from "../components/Field.svelte";
+  import IconButton from "../components/IconButton.svelte";
+  import Menu, { type MenuItem } from "../components/Menu.svelte";
   import Shell from "../components/Shell.svelte";
+  import { copy } from "../lib/actions";
   import { api, type Page, type Workspace } from "../lib/api";
   import { Form } from "../lib/form.svelte";
   import { navigate } from "../lib/router.svelte";
@@ -66,6 +68,47 @@
     });
   }
 
+  /** The user whose deletion waits for a second press. */
+  let deleting = $state<string | null>(null);
+
+  const isSelf = (user: AdminUser) => user.id === app.session?.user.id;
+
+  /** No one demotes, disables or deletes themselves from here: another admin does. */
+  function actions(user: AdminUser): MenuItem[] {
+    const reset: MenuItem = { icon: "link", label: "new reset link", select: () => void resetLink(user) };
+    if (isSelf(user)) return [reset];
+    return [
+      {
+        icon: "settings",
+        label: user.is_instance_admin ? "remove admin" : "make admin",
+        select: () => void change(user, { is_instance_admin: !user.is_instance_admin }),
+      },
+      {
+        icon: user.disabled_at ? "rotate-ccw" : "log-out",
+        label: user.disabled_at ? "enable" : "disable",
+        select: () => void change(user, { disabled: !user.disabled_at }),
+      },
+      reset,
+      {
+        icon: "trash-2",
+        label: "delete",
+        destructive: true,
+        danger: true,
+        select: () => (deleting = user.id),
+      },
+    ];
+  }
+
+  const focus = (element: HTMLElement) => element.focus();
+
+  /** Ends the deletion prompt, giving focus back to the user's menu button. */
+  async function stopDeleting(user: AdminUser, refocus: boolean) {
+    deleting = null;
+    if (!refocus) return;
+    await tick();
+    document.querySelector<HTMLElement>(`[data-user="${user.id}"] .record-menu`)?.focus();
+  }
+
   async function createWorkspace(event: SubmitEvent) {
     event.preventDefault();
     await creation.run(async () => {
@@ -84,48 +127,55 @@
   {#if action.problem}<p class="problem" role="alert">{action.problem}</p>{/if}
   <ul class="records">
     {#each users as user (user.id)}
-      <li class="record">
+      <li class="record" data-user={user.id}>
         <div class="record-who">
-          {user.name}
-          <span>
-            {user.email}{#if user.is_instance_admin}&nbsp;· admin{/if}{#if user.disabled_at}&nbsp;· disabled{/if}
-          </span>
+          {user.name}{#if isSelf(user)}&nbsp;<span class="you">(you)</span>{/if}
+          <span>{user.email}</span>
         </div>
-        <div class="actions">
-          <button
-            class="button secondary"
-            type="button"
-            disabled={action.busy}
-            onclick={() => change(user, { is_instance_admin: !user.is_instance_admin })}
+        <span class="badges">
+          {#if user.is_instance_admin}<span class="badge">admin</span>{/if}
+          {#if user.disabled_at}<span class="badge">disabled</span>{/if}
+        </span>
+        <Menu label="more actions for {user.name}" items={actions(user)} class="record-menu" />
+        {#if deleting === user.id}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="record-link actions"
+            onkeydown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              void stopDeleting(user, true);
+            }}
           >
-            {user.is_instance_admin ? "remove admin" : "make admin"}
-          </button>
-          <button
-            class="button secondary"
-            type="button"
-            disabled={action.busy}
-            onclick={() => change(user, { disabled: !user.disabled_at })}
-          >
-            {user.disabled_at ? "enable" : "disable"}
-          </button>
-          <button
-            class="button secondary"
-            type="button"
-            disabled={action.busy}
-            onclick={() => resetLink(user)}
-          >
-            reset link
-          </button>
-          <Confirm
-            label="delete"
-            confirm="yes, delete"
-            disabled={action.busy}
-            onconfirm={() => remove(user)}
-          />
-        </div>
+            <span class="meta">delete {user.name} for good?</span>
+            <button
+              class="button danger"
+              type="button"
+              disabled={action.busy}
+              onclick={() => {
+                void stopDeleting(user, false);
+                void remove(user);
+              }}
+              {@attach focus}>delete</button
+            >
+            <button
+              class="button secondary"
+              type="button"
+              onclick={() => void stopDeleting(user, true)}
+            >
+              cancel
+            </button>
+          </div>
+        {/if}
         {#if reset?.user === user.id}
-          <div class="record-link">
+          <div class="record-link reset-link">
             <Field label="one-time link" value={reset.link} readonly />
+            <IconButton
+              icon="copy"
+              verb="copy"
+              label="copy the reset link"
+              onclick={() => reset && void copy(reset.link)}
+            />
           </div>
         {/if}
       </li>

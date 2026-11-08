@@ -24,7 +24,7 @@
   import Menu, { type MenuItem } from "./Menu.svelte";
   import Self from "./TreeLevel.svelte";
   import { canEdit, type Level, type Nav, type Place } from "../lib/nav.svelte";
-  import { notify } from "../lib/notice.svelte";
+  import { copy, pageLink } from "../lib/actions";
   import { shownPage } from "../lib/router.svelte";
 
   let {
@@ -54,17 +54,8 @@
   /** The page the address shows, which its row marks. */
   const shown = $derived(shownPage());
 
-  async function copyLink(page: PageRow) {
-    try {
-      await navigator.clipboard.writeText(new URL(`/?page=${page.id}`, location.origin).href);
-      notify("link copied");
-    } catch {
-      notify("could not copy the link");
-    }
-  }
-
   function actions(page: PageRow): MenuItem[] {
-    const items: MenuItem[] = [{ icon: "link", label: "copy link", select: () => copyLink(page) }];
+    const items: MenuItem[] = [{ icon: "link", label: "copy link", select: () => void copy(pageLink(page.id)) }];
     if (canEdit(page.role)) {
       items.push({
         icon: "trash-2",

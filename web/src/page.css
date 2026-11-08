@@ -68,9 +68,12 @@
   padding: var(--space-14) var(--space-8);
 }
 
+/* A text area that grows with its lines, so a long title wraps. */
 .title {
   display: block;
   width: 100%;
+  overflow: hidden;
+  resize: none;
   margin: 0 0 18px;
   padding: 0;
   border: 0;

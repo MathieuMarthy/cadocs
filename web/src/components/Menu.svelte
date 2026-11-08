@@ -42,7 +42,11 @@
 
   const entries = () => [...(menu?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
 
-  async function show() {
+  /**
+   * A keyboard opening marks the first item. A pointer opening marks none, so no row looks
+   * chosen before the pointer reaches it; the menu holds focus and the arrows still work.
+   */
+  async function show(byKeyboard: boolean) {
     open = true;
     await tick();
     if (!menu || !button) return;
@@ -52,8 +56,12 @@
     const below = box.bottom + menu.offsetHeight <= window.innerHeight;
     menu.style.left = `${left}px`;
     menu.style.top = `${below ? box.bottom : Math.max(0, box.top - menu.offsetHeight)}px`;
-    entries()[0]?.focus();
+    if (byKeyboard) entries()[0]?.focus();
+    else menu.focus();
   }
+
+  /** A click from Enter or Space has no pointer position: `detail` is 0. */
+  const toggle = (event: MouseEvent) => (open ? hide() : void show(event.detail === 0));
 
   /** Closes the menu, giving focus back to its button unless it went elsewhere. */
   function hide(refocus = true) {
@@ -148,7 +156,7 @@
     aria-haspopup="menu"
     aria-expanded={open}
     aria-controls={open ? id : undefined}
-    onclick={() => (open ? hide() : void show())}>{text}</button
+    onclick={toggle}>{text}</button
   >
 {:else}
   <IconButton
@@ -160,16 +168,16 @@
     aria-haspopup="menu"
     aria-expanded={open}
     aria-controls={open ? id : undefined}
-    onclick={() => (open ? hide() : void show())}
+    onclick={toggle}
   />
 {/if}
 {#if open}
-  <!-- svelte-ignore a11y_interactive_supports_focus -->
   <div
     bind:this={menu}
     {id}
     class="menu"
     role="menu"
+    tabindex="-1"
     aria-label={label}
     popover="manual"
     onkeydown={key}

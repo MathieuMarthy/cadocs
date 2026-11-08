@@ -20,7 +20,7 @@ const FAILURES_BEFORE_CHECK = 3;
 
 interface Elements {
   editor: HTMLElement;
-  title: HTMLInputElement;
+  title: HTMLTextAreaElement;
   status: HTMLElement;
   presence: HTMLElement;
 }
@@ -59,7 +59,7 @@ export function openPage(page: string, elements: Elements, callbacks: Callbacks)
     editorProps: { attributes: { "aria-label": "page content" } },
   });
 
-  bindTitle(title, ydoc.getText("title"), (text) => {
+  const unbindTitle = bindTitle(title, ydoc.getText("title"), (text) => {
     document.title = text ? `${text} · cadocs` : "cadocs";
     callbacks.onName(text);
   });
@@ -124,6 +124,7 @@ export function openPage(page: string, elements: Elements, callbacks: Callbacks)
 
   return {
     destroy() {
+      unbindTitle();
       provider.destroy();
       editor.destroy();
       ydoc.destroy();

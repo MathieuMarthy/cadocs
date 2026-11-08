@@ -2,9 +2,44 @@ import type * as Y from "yjs";
 
 type Delta = Y.YTextEvent["delta"];
 
-/** Keeps a text input and a `Y.Text` equal, in both directions. */
-export function bindTitle(input: HTMLInputElement, text: Y.Text, onChange: (title: string) => void) {
+/** A title is one line, which wraps: a pasted line break becomes a space. */
+const oneLine = (value: string) => value.replace(/\r\n|[\r\n]/g, " ");
+
+/** Grows the field to its text, so a long title wraps instead of scrolling. */
+function fit(input: HTMLTextAreaElement) {
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight}px`;
+}
+
+/** Keeps a title field and a `Y.Text` equal, in both directions. */
+export function bindTitle(
+  input: HTMLTextAreaElement,
+  text: Y.Text,
+  onChange: (title: string) => void,
+) {
+  // The width changes with the window and the sidebar, and the lines with it.
+  let width = 0;
+  const resized = new ResizeObserver(([entry]) => {
+    const next = entry?.contentRect.width ?? 0;
+    if (next === width) return;
+    width = next;
+    fit(input);
+  });
+  resized.observe(input);
+  // The embedded font can arrive after the first fit, and wrap the lines differently.
+  void document.fonts.ready.then(() => fit(input));
+
   input.addEventListener("input", () => {
+    const flat = oneLine(input.value);
+    if (flat !== input.value) {
+      // The caret moves by what the text before it lost.
+      const before = (at: number) => oneLine(input.value.slice(0, at)).length;
+      const start = before(input.selectionStart);
+      const end = before(input.selectionEnd);
+      input.value = flat;
+      input.setSelectionRange(start, end);
+    }
+    fit(input);
     const { index, removed, inserted } = diff(text.toString(), input.value);
     text.doc?.transact(() => {
       if (removed > 0) text.delete(index, removed);
@@ -21,7 +56,10 @@ export function bindTitle(input: HTMLInputElement, text: Y.Text, onChange: (titl
     const end = shift(input.selectionEnd ?? 0, event.delta);
     input.value = title;
     input.setSelectionRange(start, end);
+    fit(input);
   });
+
+  return () => resized.disconnect();
 }
 
 /** The single replacement that turns `before` into `after`. */

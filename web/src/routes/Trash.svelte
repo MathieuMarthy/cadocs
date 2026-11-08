@@ -4,6 +4,7 @@
   import Confirm from "../components/Confirm.svelte";
   import IconButton from "../components/IconButton.svelte";
   import Shell from "../components/Shell.svelte";
+  import Time from "../components/Time.svelte";
   import { api, type Page, type Workspace } from "../lib/api";
   import { describe } from "../lib/form.svelte";
   import { acquireNav, canEdit, type PageRow } from "../lib/nav.svelte";
@@ -18,7 +19,7 @@
   onDestroy(held.release);
 
   const space = $derived(nav.spaces.find((item) => item.slug === slug) ?? null);
-  const title = $derived(space ? `trash of ${space.name}` : "trash");
+  const crumbs = $derived(space ? [{ label: space.name }] : []);
 
   let items = $state<PageRow[] | null>(null);
   let next = $state<string | null>(null);
@@ -63,14 +64,14 @@
   const purge = (page: PageRow) => act(() => api("DELETE", `/pages/${page.id}/purge`));
 </script>
 
-<Shell {title} {workspace}>
-  <h1>{title}</h1>
+<Shell title="trash" {workspace} {crumbs}>
+  <h1>trash</h1>
   {#if !nav.spacesLoaded}
     <p class="meta" role="status">loading…</p>
   {:else if !space}
     <p class="notice">no such space</p>
   {:else}
-    <p class="meta">restoring a page also restores its subpages.</p>
+    <p class="meta">restoring a page also restores its subpages</p>
     {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
     {#if items === null}
       {#if !problem}<p class="meta" role="status">loading…</p>{/if}
@@ -82,7 +83,7 @@
           <li class="record">
             <span class="record-who">
               {page.title || "untitled"}
-              <span>moved to trash {new Date(page.deleted_at ?? page.updated_at).toLocaleString()}</span>
+              <span>moved to trash <Time value={page.deleted_at ?? page.updated_at} /></span>
             </span>
             {#if canEdit(page.role)}
               <IconButton icon="rotate-ccw" verb="restore" onclick={() => restore(page)} />

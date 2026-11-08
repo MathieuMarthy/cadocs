@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick } from "svelte";
 
-  import Field from "../components/Field.svelte";
+  import NewSpace, { managesSpaces } from "../components/NewSpace.svelte";
   import Shell from "../components/Shell.svelte";
+  import Time from "../components/Time.svelte";
   import { api, type Page, type Workspace } from "../lib/api";
-  import { describe, Form } from "../lib/form.svelte";
-  import { acquireNav, type PageRow, type Space } from "../lib/nav.svelte";
+  import { describe } from "../lib/form.svelte";
+  import { acquireNav, canEdit, type PageRow, type Space } from "../lib/nav.svelte";
+  import { navigate } from "../lib/router.svelte";
   import { app } from "../lib/session.svelte";
 
   let { workspace }: { workspace: Workspace } = $props();
@@ -18,7 +20,7 @@
   const nav = held.nav;
   onDestroy(held.release);
 
-  const manages = $derived(workspace.role === "owner" || workspace.role === "admin");
+  const manages = $derived(managesSpaces(workspace));
 
   let recent = $state<PageRow[] | null>(null);
   let recentProblem = $state<string | null>(null);
@@ -43,23 +45,38 @@
 
   const spaceName = (id: string) => nav.space(id)?.name ?? "";
 
-  const creating = new Form();
-  let name = $state("");
+  /** Where the empty home's `new page` goes: the first space this user may write in. */
+  const writable = $derived(nav.spaces.find((space) => canEdit(space.role)) ?? null);
+  let adding = $state(false);
+  let addButton = $state<HTMLButtonElement>();
+  let problem = $state<string | null>(null);
+  /** A double click makes one page. */
+  let creating = $state(false);
 
-  async function createSpace(event: SubmitEvent) {
-    event.preventDefault();
-    const done = await creating.run(() =>
-      api<Space>("POST", `/workspaces/${workspace.id}/spaces`, { name }),
-    );
-    if (!done) return;
-    name = "";
-    await nav.loadSpaces();
+  async function firstPage(space: Space) {
+    if (creating) return;
+    creating = true;
+    problem = null;
+    try {
+      const page = await nav.create(space.id, null);
+      navigate(`/?page=${page.id}`);
+    } catch (error) {
+      problem = describe(error);
+    } finally {
+      creating = false;
+    }
+  }
+
+  /** The form gives focus back to the button that opened it. */
+  async function closeAdding() {
+    adding = false;
+    await tick();
+    addButton?.focus();
   }
 </script>
 
 <Shell title={workspace.name} {workspace} crumbWorkspace={false}>
   <h1>{workspace.name}</h1>
-  <p class="meta">your role: {workspace.role}</p>
 
   <section aria-labelledby="recent-heading">
     <h2 id="recent-heading">recent pages</h2>
@@ -69,38 +86,43 @@
       <p class="meta" role="status">loading…</p>
     {:else if nav.spaces.length === 0}
       <p class="notice">no spaces yet</p>
+      {#if !manages}
+        <p class="meta">a workspace admin can add one, or give you access to one.</p>
+      {:else if adding}
+        <NewSpace {nav} onclose={closeAdding} />
+      {:else}
+        <div class="actions">
+          <button bind:this={addButton} class="button" type="button" onclick={() => (adding = true)}>
+            new space
+          </button>
+        </div>
+      {/if}
     {:else if recent.length === 0}
       <p class="notice">no pages yet</p>
+      {#if writable}
+        {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
+        <div class="actions">
+          <button
+            class="button"
+            type="button"
+            disabled={creating}
+            onclick={() => firstPage(writable)}>new page</button
+          >
+        </div>
+      {:else}
+        <p class="meta">pages show here once someone writes one.</p>
+      {/if}
     {:else}
       <ul class="records">
         {#each recent as page (page.id)}
           <li class="record">
             <span class="record-who">
               <a href="/?page={page.id}">{page.title || "untitled"}</a>
-              <span>{spaceName(page.space_id)} · {new Date(page.updated_at).toLocaleString()}</span>
+              <span>{spaceName(page.space_id)} · <Time value={page.updated_at} /></span>
             </span>
           </li>
         {/each}
       </ul>
     {/if}
   </section>
-
-  {#if manages}
-    <section aria-labelledby="space-heading">
-      <h2 id="space-heading">new space</h2>
-      <form onsubmit={createSpace}>
-        <Field
-          label="space name"
-          bind:value={name}
-          problem={creating.field("name")}
-          required
-          autocomplete="off"
-        />
-        {#if creating.problem}<p class="problem" role="alert">{creating.problem}</p>{/if}
-        <div class="actions">
-          <button class="button" type="submit" disabled={creating.busy}>+ new space</button>
-        </div>
-      </form>
-    </section>
-  {/if}
 </Shell>

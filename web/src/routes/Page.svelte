@@ -1,10 +1,14 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
 
+  import Menu, { type MenuItem } from "../components/Menu.svelte";
   import Shell from "../components/Shell.svelte";
   import { openPage } from "../editor/collab";
+  import { copy, pageLink, trashPage } from "../lib/actions";
   import { api, ApiError } from "../lib/api";
-  import { acquireNav, lastWorkspace, type Nav, type PageView } from "../lib/nav.svelte";
+  import { describe } from "../lib/form.svelte";
+  import { acquireNav, canEdit, lastWorkspace, type Nav, type PageView } from "../lib/nav.svelte";
+  import { notify } from "../lib/notice.svelte";
   import { app, sessionEnded } from "../lib/session.svelte";
   import Message from "./Message.svelte";
 
@@ -14,7 +18,7 @@
   let gone = $state<string | null>(null);
 
   let editor = $state<HTMLElement>()!;
-  let title = $state<HTMLInputElement>()!;
+  let title = $state<HTMLTextAreaElement>()!;
   let status = $state<HTMLElement>()!;
   let presence = $state<HTMLElement>()!;
   let name = $state("");
@@ -57,6 +61,24 @@
     const space = row.space_id;
     nav.expand(space, space);
     for (const crumb of row.ancestors) nav.expand(crumb.id, space);
+  });
+
+  const shownTitle = $derived(name || row?.title || "untitled");
+
+  /** The top bar's menu: copy link for anyone, move to trash for those who may write. */
+  const actions = $derived.by<MenuItem[]>(() => {
+    const items: MenuItem[] = [{ icon: "link", label: "copy link", select: () => void copy(pageLink(id)) }];
+    const page = row;
+    const held = nav;
+    if (page && held && canEdit(page.role)) {
+      items.push({
+        icon: "trash-2",
+        label: "move to trash",
+        destructive: true,
+        select: () => trashPage(held, page).catch((error) => notify(describe(error))),
+      });
+    }
+    return items;
   });
 
   /** A string, so that reading the page again does not ask for it again. */
@@ -157,20 +179,22 @@
     <p class="meta" role="status">loading…</p>
   </Shell>
 {:else}
-  <Shell title={name || row?.title || "untitled"} {workspace} guess={false} {crumbs} bare>
+  <Shell title={shownTitle} {workspace} guess={false} {crumbs} bare>
     {#snippet end()}
       <span bind:this={status} class="status" role="status"></span>
       <div bind:this={presence} class="presence"></div>
+      <Menu label="more actions for {shownTitle}" items={actions} />
     {/snippet}
     <main class="page">
-      <input
+      <textarea
         bind:this={title}
         class="title"
-        type="text"
+        rows="1"
         placeholder="untitled"
         aria-label="page title"
         autocomplete="off"
-      />
+        spellcheck="false"
+      ></textarea>
       <div bind:this={editor}></div>
     </main>
   </Shell>

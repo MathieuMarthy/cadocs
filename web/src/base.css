@@ -72,15 +72,15 @@ body {
   font-weight: 500;
 }
 
-/* The sidebar's buttons on a narrow window. */
-.drawer-close {
+/* The sidebar's buttons on a narrow window. Two classes, to win over `.icon-button`. */
+.icon-button.drawer-close {
   display: none;
   position: absolute;
   top: var(--space-3);
   right: var(--space-3);
 }
 
-.drawer-button {
+.icon-button.drawer-button {
   display: none;
   margin-left: calc(-1 * var(--space-2));
 }
@@ -418,9 +418,31 @@ h2 {
   min-width: 0;
 }
 
-.tree > .label,
+.tree-head,
 .sidebar-group > .label {
   padding: 0 var(--space-2);
+}
+
+/* The label and its plus, on one row the height of the tree's. */
+.tree-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--row-height);
+  padding-right: 0;
+}
+
+.tree-head .icon-button {
+  width: var(--row-height);
+  height: var(--row-height);
+}
+
+.new-space {
+  padding: 0 var(--space-2) var(--space-2);
+}
+
+.new-space .field {
+  margin-bottom: var(--space-2);
 }
 
 .sidebar-group {
@@ -589,7 +611,8 @@ h2 {
   inset: auto;
   min-width: 180px;
   margin: 0;
-  padding: 0;
+  /* The active row stays inside the surface, so the menu reads as one piece in both themes. */
+  padding: var(--space-1);
   border: 1px solid var(--ink);
   background: var(--bg);
   box-shadow: var(--shadow-offset);
@@ -630,7 +653,12 @@ h2 {
   color: var(--selection-ink);
 }
 
+.menu:focus {
+  outline: 0;
+}
+
 .menu-rule {
+  margin: var(--space-1) 0;
   border-top: 1px solid var(--line);
 }
 
@@ -690,6 +718,38 @@ h2 {
   flex: 1 1 100%;
 }
 
+.record-who .you {
+  display: inline;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.badges {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.badge {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+/* The field and its copy button, on one line. */
+.reset-link {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+.reset-link .field {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
 @media (max-width: 840px) {
   .topbar {
     flex-wrap: wrap;
@@ -705,8 +765,8 @@ h2 {
     width: 100%;
   }
 
-  .drawer-button,
-  .drawer-close {
+  .icon-button.drawer-button,
+  .icon-button.drawer-close {
     display: inline-flex;
   }
 
