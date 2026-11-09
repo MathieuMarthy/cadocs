@@ -1,6 +1,6 @@
 <script lang="ts">
   import IconButton from "./IconButton.svelte";
-  import Menu from "./Menu.svelte";
+  import Menu, { type MenuItem } from "./Menu.svelte";
   import NewSpace, { managesSpaces } from "./NewSpace.svelte";
   import TreeLevel, { type Drag, fromTree } from "./TreeLevel.svelte";
   import { describe } from "../lib/form.svelte";
@@ -41,6 +41,14 @@
 
   const move = (page: PageRow, place: Place) => void attempt(() => nav.move(page, place));
   const trash = (page: PageRow) => void attempt(() => trashPage(nav, page));
+
+  /** Every reader reaches the settings, which show the grants; editors also reach the trash. */
+  function spaceItems(space: Space): MenuItem[] {
+    const base = `/w/${nav.workspace.slug}`;
+    const settings: MenuItem = { icon: "settings", label: "settings", href: `${base}/settings/${space.slug}` };
+    if (!canEdit(space.role)) return [settings];
+    return [{ icon: "trash-2", label: "open the trash", href: `${base}/trash/${space.slug}` }, settings];
+  }
 
   /** A page dropped on a space goes last at its root. */
   function overSpace(event: DragEvent, space: Space) {
@@ -100,8 +108,8 @@
             aria-expanded={open}
             onclick={() => nav.toggle(space.id, space.id)}>{label(space)}/</button
           >
-          {#if canEdit(space.role)}
-            <span class="tree-actions">
+          <span class="tree-actions">
+            {#if canEdit(space.role)}
               <IconButton
                 class="tree-plus"
                 icon="plus"
@@ -109,18 +117,9 @@
                 label="new page in {label(space)}"
                 onclick={() => create(space.id, null)}
               />
-              <Menu
-                label="more actions for {label(space)}"
-                items={[
-                  {
-                    icon: "trash-2",
-                    label: "open the trash",
-                    href: `/w/${nav.workspace.slug}/trash/${space.slug}`,
-                  },
-                ]}
-              />
-            </span>
-          {/if}
+            {/if}
+            <Menu label="more actions for {label(space)}" items={spaceItems(space)} />
+          </span>
         </div>
         {#if open && root}
           {#if root.loaded && root.items.length === 0 && !root.problem}

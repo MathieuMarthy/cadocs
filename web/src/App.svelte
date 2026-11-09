@@ -8,8 +8,10 @@
   import Setup from "./routes/Setup.svelte";
   import Notice from "./components/Notice.svelte";
   import Shell from "./components/Shell.svelte";
+  import SpaceSettings from "./routes/SpaceSettings.svelte";
   import Trash from "./routes/Trash.svelte";
   import Workspace from "./routes/Workspace.svelte";
+  import WorkspaceSettings from "./routes/WorkspaceSettings.svelte";
   import type { Workspace as WorkspaceRow } from "./lib/api";
   import { navigate, reopened, route, safeNext } from "./lib/router.svelte";
   import { app, boot } from "./lib/session.svelte";
@@ -18,7 +20,8 @@
     | { name: "redirect"; to: string }
     | { name: "setup" | "login" | "account" | "admin" | "home" | "not-found" }
     | { name: "invite" | "reset"; token: string }
-    | { name: "workspace"; workspace: WorkspaceRow }
+    | { name: "workspace" | "settings"; workspace: WorkspaceRow }
+    | { name: "space-settings"; workspace: WorkspaceRow; space: string }
     | { name: "trash"; workspace: WorkspaceRow; space: string }
     | { name: "page"; id: string };
 
@@ -61,6 +64,12 @@
       if (workspace && rest[0] === "trash" && rest[1] && rest.length === 2) {
         return { name: "trash", workspace, space: rest[1] };
       }
+      if (workspace && rest[0] === "settings" && rest.length === 1) {
+        return { name: "settings", workspace };
+      }
+      if (workspace && rest[0] === "settings" && rest[1] && rest.length === 2) {
+        return { name: "space-settings", workspace, space: rest[1] };
+      }
     }
     return { name: "not-found" };
   }
@@ -95,6 +104,12 @@
 {:else if view.name === "trash"}
   {#key `${view.workspace.id}/${view.space}`}
     <Trash workspace={view.workspace} slug={view.space} />
+  {/key}
+{:else if view.name === "settings"}
+  {#key view.workspace.id}<WorkspaceSettings workspace={view.workspace} />{/key}
+{:else if view.name === "space-settings"}
+  {#key `${view.workspace.id}/${view.space}`}
+    <SpaceSettings workspace={view.workspace} slug={view.space} />
   {/key}
 {:else if view.name === "page"}
   {#await import("./routes/Page.svelte") then { default: Page }}

@@ -239,7 +239,26 @@ h2 {
   font-size: 13px;
 }
 
-.field input[aria-invalid="true"] {
+.field select,
+.select {
+  display: block;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* A role picker in a list row takes its own width. */
+.select {
+  width: auto;
+}
+
+.field input[aria-invalid="true"],
+.field select[aria-invalid="true"] {
   border-color: var(--accent-text);
 }
 

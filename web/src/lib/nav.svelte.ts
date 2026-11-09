@@ -67,7 +67,7 @@ const RETRY_MS = [1000, 2000, 5000, 10000];
 export const canEdit = (role: string) => role === "editor" || role === "admin";
 
 /** Every item of a paginated list, up to `limit`. */
-async function collect<T>(path: string, limit: number) {
+export async function collect<T>(path: string, limit: number) {
   const items: T[] = [];
   let cursor: string | null = null;
   do {
@@ -214,8 +214,12 @@ export class Nav {
       case "space.trashed":
       case "space.restored":
       case "space.purged":
+        void this.loadSpaces();
+        break;
       case "access.changed":
         void this.loadSpaces();
+        // The workspace role, which the session carries, may be what changed.
+        void refreshSession().catch(() => {});
         break;
       case "resync":
         void this.reloadAll();

@@ -181,11 +181,22 @@
       {#if nav}<Tree {nav} />{/if}
     </div>
 
-    {#if session.user.is_instance_admin}
+    {#if current || session.user.is_instance_admin}
       <nav class="sidebar-group" aria-label="settings">
         <div class="label">settings</div>
         <ul class="rows">
-          <li>
+          {#if current}
+            <li>
+              <a
+                class="row"
+                href="/w/{current.slug}/settings"
+                aria-current={route.path === `/w/${current.slug}/settings` ? "page" : undefined}
+              >
+                workspace
+              </a>
+            </li>
+          {/if}
+          {#if session.user.is_instance_admin}<li>
             <a
               class="row"
               href="/admin"
@@ -193,7 +204,7 @@
             >
               admin
             </a>
-          </li>
+          </li>{/if}
         </ul>
       </nav>
     {/if}
