@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
 
   import Menu, { type MenuItem } from "../components/Menu.svelte";
   import Shell from "../components/Shell.svelte";
@@ -26,6 +26,10 @@
   let row = $state<PageView | null>(null);
   /** REST did not refuse the page, so the editor shows, even if REST failed for a moment. */
   let showing = $state(false);
+  /** The page holds content this version cannot show, so the editor stopped (ADR 0016). */
+  let stale = $state(false);
+  /** Read-only until a read says the role may write. */
+  const editable = $derived(row ? canEdit(row.role) : false);
 
   const known = (id: string | undefined) =>
     app.session?.workspaces.find((item) => item.id === id) ?? null;
@@ -98,9 +102,16 @@
   });
 
   /** A socket cannot read the status of a failed upgrade, so REST says what went wrong. */
+  /** Reads can overlap, and an older one answering last would bring back an older role. */
+  let reads = 0;
   async function check() {
+    const read = ++reads;
     try {
-      row = await api<PageView>("GET", `/pages/${id}`);
+      const answer = await api<PageView>("GET", `/pages/${id}`);
+      if (read !== reads) return true;
+      row = answer;
+      // Every read sets the mode, even to the one it had: a `4409` made the editor read-only.
+      page?.setEditable(canEdit(answer.role));
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) return false;
       if (error instanceof ApiError && error.status === 404) {
@@ -147,8 +158,13 @@
       if (!row) place();
       await tick();
       if (left) return;
-      page = openPage(id, { editor, title, status, presence }, {
+      const session = app.session;
+      if (!session) return;
+      const user = { id: session.user.id, name: session.user.name };
+      page = openPage(id, { editor, title, status, presence }, { user, editable: untrack(() => editable) }, {
         onName: (text) => (name = text),
+        onRoleChanged: () => void check(),
+        onContentError: () => (stale = true),
         onFinalClose(code) {
           page?.destroy();
           page = null;
@@ -186,6 +202,12 @@
       <Menu label="more actions for {shownTitle}" items={actions} />
     {/snippet}
     <main class="page">
+      {#if stale}
+        <div class="banner" role="alert">
+          <span>this page holds content this version cannot show. reload to edit it.</span>
+          <button type="button" class="button" onclick={() => location.reload()}>reload</button>
+        </div>
+      {/if}
       <textarea
         bind:this={title}
         class="title"

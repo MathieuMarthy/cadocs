@@ -59,7 +59,9 @@ Those subsets have no box-drawing characters, so the tree prefixes of the MVP ne
 
 **No capitals.** Section and field labels (`spaces`, `settings`, `email`) are lowercase like the rest of the interface: their 11px size and `muted` color set them apart. Nothing in the interface uses spaced capitals.
 
-**Numbered headings.** Every H2 starts with its two-digit number (`01`, `02`), on the baseline, 14px from the heading. There is no visible `##`. A CSS counter draws the number, so it is not part of the document.
+**Numbered headings.** Every heading starts with its number, on the baseline, 14px from the heading. Numbers count from the highest level used on the page: `01` and `02` at the top, `01.1` below, `01.1.1` under that. The top number has two digits. The editor sets them as an attribute, so they are not part of the document.
+
+**Markdown source.** Under the caret of a writer, a heading shows its `##` in `muted`, in place of its number, and a quote paragraph its `>`. Edited as text, the source is set in the block's own type (ADR 0018). A code block shows its language at the top right, in `meta` `muted`, or `auto` when it is guessed.
 
 ## Iconography
 
@@ -123,11 +125,13 @@ The shell uses the buttons, fields, breadcrumb and workspace selector. The other
 - H2 as described above, with a `space-10` top margin.
 - Checklist: `[x]` in `accent-text` with a struck, `muted` label when done, `[ ]` in `muted` otherwise.
 - Inline code and blocks on `panel`. Blocks have a `line` border, and the `$` prompt is `muted`.
+- Code highlighting adds no color: comments in `muted`, keywords, types and numbers in `accent-text`, strings in `ok`, titles at 600.
+- A page whose content this version cannot show gets a banner above the title: 1px `ink` border, mono 13px, and a `reload` button.
 
 ### Presence
 
 - Avatar: 26px square, mono 12px 600 initial, `presence-n` background, `presence-n-ink` text, 3px between avatars, a `title` with the name.
-- Remote caret: 2px vertical line in `presence-n`, with a label stuck above it (mono 11px, lowercase name, padding `0 6px`).
+- Remote caret: 2px vertical line in `presence-n`, with a label stuck above it (mono 11px, the name as its owner typed it, padding `0 6px`).
 - Colors follow order of arrival and loop after three. There is no central order, so each client takes the color the others use least when it joins.
 
 ### Button

@@ -1,6 +1,7 @@
 import type { Awareness } from "y-protocols/awareness";
 
 export interface User {
+  id: string;
   name: string;
   /** Which of the three presence colors this user shows in. */
   slot: number;
@@ -8,12 +9,8 @@ export interface User {
 
 const SLOTS = [1, 2, 3];
 
-export function newUser(): User {
-  return { name: `guest-${Math.floor(Math.random() * 900) + 100}`, slot: 1 };
-}
-
 /** Awareness states come from other clients, so nothing in them is trusted. */
-function readUser(state: Record<string, unknown>): User | null {
+function readUser(state: Record<string, unknown>): Omit<User, "id"> | null {
   const user = state.user as Partial<User> | undefined;
   if (typeof user?.name !== "string") return null;
   return { name: user.name, slot: slotOf(user) };
@@ -54,7 +51,8 @@ export function renderCaret(user: Record<string, unknown>) {
   caret.className = `remote-caret slot-${slotOf(user)}`;
   const label = document.createElement("span");
   label.className = "remote-caret-label";
-  label.textContent = String(user.name ?? "").toLowerCase();
+  // A name keeps the case its owner typed.
+  label.textContent = String(user.name ?? "");
   caret.append(label);
   return caret;
 }

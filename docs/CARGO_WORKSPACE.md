@@ -62,6 +62,8 @@ These never reach the server binary.
 
 `web/` has two npm dev dependencies for the same purpose: `@playwright/test` (Apache-2.0) for the browser tests, and `@types/node` to type-check them. Neither reaches `web/dist`. `svelte` (MIT) is a runtime dependency of the shell, and `@sveltejs/vite-plugin-svelte` (MIT) a build dependency. The shell is about 73 KB of JavaScript, 26 KB compressed, and TipTap stays in a chunk that only a page loads.
 
+The editor (step 14) adds, all MIT except `highlight.js` (BSD-3-Clause): the TipTap block packages it builds from its registry (`@tiptap/extension-heading`, `-blockquote`, `-horizontal-rule`, `-link`, `-list`, already pulled in by `@tiptap/starter-kit`), `@tiptap/suggestion` for the slash menu (it brings `@floating-ui/dom` to place it), and `@tiptap/extension-code-block-lowlight` with `lowlight` and `highlight.js` for code. Only 18 languages are registered (`web/src/editor/code.ts`) instead of `lowlight`'s 37 common ones. The page chunk went from 521 KB to 632 KB, 165 KB to 203 KB compressed. None of this reaches the server's memory: the binary serves it from the embedded files.
+
 ### Planned
 
 | Crate | Stage | Why | Cost note |
