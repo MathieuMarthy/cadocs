@@ -64,6 +64,8 @@ These never reach the server binary.
 
 The editor (step 14) adds, all MIT except `highlight.js` (BSD-3-Clause): the TipTap block packages it builds from its registry (`@tiptap/extension-heading`, `-blockquote`, `-horizontal-rule`, `-link`, `-list`, already pulled in by `@tiptap/starter-kit`), `@tiptap/suggestion` for the slash menu (it brings `@floating-ui/dom` to place it), and `@tiptap/extension-code-block-lowlight` with `lowlight` and `highlight.js` for code. Only 18 languages are registered (`web/src/editor/code.ts`) instead of `lowlight`'s 37 common ones. The page chunk went from 521 KB to 632 KB, 165 KB to 203 KB compressed. None of this reaches the server's memory: the binary serves it from the embedded files.
 
+Step 15 adds `@tiptap/extension-table` (it brings nothing new: `prosemirror-tables` already came with `@tiptap/pm`) and `@tiptap/extension-details` for toggles, both MIT. Callouts, links to pages and the table of contents are our own nodes, in `web/src/editor/blocks.ts` and `pagelink.ts`. `@tiptap/extension-table-of-contents` was left out: it writes an id onto every heading, which each tab would write into the shared document. The page chunk went to 706 KB, 226 KB compressed.
+
 ### Planned
 
 | Crate | Stage | Why | Cost note |

@@ -340,7 +340,7 @@ function readSource(tr: Transaction, pos: number, written: boolean) {
 }
 
 /** The label of each heading: `01`, then `01.1` below it, counted from the highest level used. */
-function headingNumbers(doc: Node) {
+export function headingNumbers(doc: Node) {
   const headings: { pos: number; node: Node }[] = [];
   doc.descendants((node, pos) => {
     if (node.type.name === "heading") headings.push({ pos, node });

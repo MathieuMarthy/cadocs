@@ -161,7 +161,12 @@
       const session = app.session;
       if (!session) return;
       const user = { id: session.user.id, name: session.user.name };
-      page = openPage(id, { editor, title, status, presence }, { user, editable: untrack(() => editable) }, {
+      const options = {
+        user,
+        editable: untrack(() => editable),
+        workspace: () => row?.workspace_id ?? null,
+      };
+      page = openPage(id, { editor, title, status, presence }, options, {
         onName: (text) => (name = text),
         onRoleChanged: () => void check(),
         onContentError: () => (stale = true),

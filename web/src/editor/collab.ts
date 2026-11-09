@@ -6,6 +6,7 @@ import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 
+import { forgetTitles, PagePicker } from "./pagelink";
 import { freeSlot, renderAvatars, renderCaret, renderSelection, type User } from "./presence";
 import { commandsOf, entries, extensionsOf } from "./registry";
 import { SlashMenu } from "./slash";
@@ -32,6 +33,8 @@ interface Options {
   user: Omit<User, "slot">;
   /** Whether the role allows writing, until `setEditable` says otherwise. */
   editable: boolean;
+  /** The page's workspace once known, whose pages `[[` offers. */
+  workspace: () => string | null;
 }
 
 interface Callbacks {
@@ -46,6 +49,8 @@ interface Callbacks {
 
 export function openPage(page: string, elements: Elements, options: Options, callbacks: Callbacks) {
   const { title, status, presence } = elements;
+  // Titles of linked pages are read again for each page, so renames show.
+  forgetTitles();
   const ydoc = new Y.Doc();
   const scheme = location.protocol === "https:" ? "wss" : "ws";
   // Tabs go through the server like any other client, instead of a BroadcastChannel shortcut.
@@ -81,6 +86,7 @@ export function openPage(page: string, elements: Elements, options: Options, cal
     extensions: [
       ...extensionsOf(entries),
       SlashMenu.configure({ commands: commandsOf(entries) }),
+      PagePicker.configure({ workspace: options.workspace }),
       Collaboration.configure({ document: ydoc }),
       CollaborationCaret.configure({
         provider,

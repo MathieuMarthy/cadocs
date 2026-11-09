@@ -322,6 +322,184 @@
   font-weight: 600;
 }
 
+/* Callout: a framed block with a 3px rule on its left, in the color of its kind. */
+.tiptap div[data-type="callout"] {
+  --kind: var(--ink);
+  --kind-text: var(--muted);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-4) var(--space-1);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--kind);
+  background: var(--panel);
+}
+.tiptap div[data-type="callout"][data-kind="warning"] {
+  --kind: var(--accent);
+  --kind-text: var(--accent-text);
+}
+.tiptap div[data-type="callout"][data-kind="danger"] {
+  --kind: var(--danger);
+  --kind-text: var(--danger);
+}
+.callout-head select {
+  margin: 0 0 var(--space-1) calc(-1 * var(--space-1));
+  padding: 0 var(--space-1);
+  border: 0;
+  background: transparent;
+  color: var(--kind-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.callout-head select:disabled {
+  appearance: none;
+  opacity: 1;
+  cursor: default;
+}
+.callout-head select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.callout-body > :last-child {
+  margin-bottom: var(--space-2);
+}
+
+/* Toggle: `▸` and `▾` before the summary, as in the tree. */
+.tiptap div[data-type="details"] {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+}
+.tiptap div[data-type="details"] > div {
+  flex: 1;
+  min-width: 0;
+}
+.tiptap div[data-type="details"] summary {
+  display: block;
+  font-weight: 500;
+  list-style: none;
+}
+.tiptap div[data-type="details"] summary::-webkit-details-marker {
+  display: none;
+}
+.tiptap div[data-type="detailsContent"] {
+  margin-top: var(--space-2);
+}
+.tiptap div[data-type="detailsContent"] > :last-child {
+  margin-bottom: 0;
+}
+.toggle-button {
+  flex: none;
+  width: 20px;
+  height: 1.7em;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  cursor: pointer;
+}
+.toggle-button:hover {
+  color: var(--ink);
+}
+.toggle-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Table: 1px rules, a header row on `panel`. */
+.tiptap .tableWrapper {
+  margin: 0 0 var(--space-4);
+  overflow-x: auto;
+}
+.tiptap table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.tiptap th,
+.tiptap td {
+  position: relative;
+  min-width: 80px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.tiptap th {
+  background: var(--panel);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+}
+.tiptap :is(th, td) > p {
+  margin: 0;
+}
+.tiptap .selectedCell::after {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+/* Link to a page: the page's title, underlined by a dotted rule so it reads apart from a web link. */
+.tiptap a.page-link {
+  color: var(--accent-text);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.tiptap a.page-link.page-link-missing {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.tiptap a.page-link.ProseMirror-selectednode {
+  background: var(--selection);
+  color: var(--selection-ink);
+}
+
+/* Table of contents: the headings with their numbers, in the interface's monospace. */
+.tiptap div[data-type="tableOfContents"] {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.tiptap div[data-type="tableOfContents"].ProseMirror-selectednode {
+  border-color: var(--ink);
+}
+.toc-label {
+  margin-bottom: var(--space-1);
+  color: var(--muted);
+  font-size: 11px;
+}
+.tiptap div[data-type="tableOfContents"] ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tiptap div[data-type="tableOfContents"] li {
+  padding: 2px 0 2px calc(var(--depth) * var(--space-4));
+}
+.tiptap div[data-type="tableOfContents"] a {
+  color: var(--ink);
+  text-decoration: none;
+}
+.tiptap div[data-type="tableOfContents"] a:hover {
+  text-decoration: underline;
+}
+.toc-number {
+  color: var(--accent-text);
+  font-weight: 500;
+}
+.toc-empty {
+  color: var(--muted);
+}
+
 /* The slash menu: the command menu of the design system. */
 
 .command-menu {

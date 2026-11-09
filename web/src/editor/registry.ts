@@ -2,16 +2,20 @@
 // The editor is built from this list alone, so a block is added here and nowhere else (ADR 0016).
 // Node and mark names are TipTap's defaults, which the Rust schema of step 16 must match.
 
-import { type AnyExtension, type ChainedCommands, InputRule } from "@tiptap/core";
+import { type AnyExtension, type ChainedCommands, type Editor, InputRule } from "@tiptap/core";
 import Blockquote from "@tiptap/extension-blockquote";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import Heading from "@tiptap/extension-heading";
 import HorizontalRule from "@tiptap/extension-horizontal-rule";
 import Link, { isAllowedUri } from "@tiptap/extension-link";
+import { DetailsContent, DetailsSummary } from "@tiptap/extension-details";
 import { BulletList, ListItem, OrderedList, TaskItem, TaskList } from "@tiptap/extension-list";
+import { TableKit } from "@tiptap/extension-table";
 import StarterKit from "@tiptap/starter-kit";
 
+import { Callout, TableOfContents, Toggle } from "./blocks";
 import { lowlight } from "./code";
+import { PageLink } from "./pagelink";
 import { MarkdownSource, quietInSource } from "./source";
 
 export interface SlashCommand {
@@ -23,6 +27,8 @@ export interface SlashCommand {
   keywords: string[];
   /** Applied once the typed `/query` is removed. */
   apply: (chain: ChainedCommands) => ChainedCommands;
+  /** Where the command applies, if not everywhere: the menu leaves it out elsewhere. */
+  when?: (editor: Editor) => boolean;
 }
 
 export interface Entry {
@@ -49,6 +55,15 @@ const markdownLink = Link.extend({
     ];
   },
 });
+
+const inTable = (editor: Editor) => editor.isActive("table");
+
+/** A command that changes the table under the caret. */
+const tableCommand = (
+  label: string,
+  keywords: string[],
+  apply: SlashCommand["apply"],
+): SlashCommand => ({ label, keywords, apply, when: inTable });
 
 const heading = (level: 1 | 2 | 3): SlashCommand => ({
   label: `heading ${level}`,
@@ -160,6 +175,72 @@ export const entries: Entry[] = [
     ],
   },
   {
+    name: "callout",
+    extensions: [Callout],
+    commands: [
+      {
+        label: "callout",
+        keywords: ["note", "warning", "danger", "admonition", "alert"],
+        apply: (chain) => chain.clearNodes().wrapIn("callout"),
+      },
+    ],
+  },
+  {
+    // Open or closed in each tab alone: `persist` is off, so opening writes nothing.
+    name: "toggle",
+    extensions: [Toggle, DetailsSummary, DetailsContent],
+    commands: [
+      {
+        label: "toggle",
+        keywords: ["details", "collapse", "fold"],
+        apply: (chain) => chain.clearNodes().setDetails(),
+      },
+    ],
+  },
+  {
+    // Column widths are not stored: `resizable` would write them into the document.
+    name: "table",
+    extensions: [TableKit.configure({ table: { resizable: false } })],
+    commands: [
+      {
+        label: "table",
+        keywords: ["grid"],
+        apply: (chain) => chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }),
+      },
+      tableCommand("add row below", ["insert"], (chain) => chain.addRowAfter()),
+      tableCommand("add row above", ["insert"], (chain) => chain.addRowBefore()),
+      tableCommand("add column right", ["insert"], (chain) => chain.addColumnAfter()),
+      tableCommand("add column left", ["insert"], (chain) => chain.addColumnBefore()),
+      tableCommand("delete row", ["remove"], (chain) => chain.deleteRow()),
+      tableCommand("delete column", ["remove"], (chain) => chain.deleteColumn()),
+      tableCommand("delete table", ["remove"], (chain) => chain.deleteTable()),
+    ],
+  },
+  {
+    // The picker that `[[` opens is added by `collab.ts`, which knows the workspace.
+    name: "pageLink",
+    extensions: [PageLink],
+    commands: [
+      {
+        label: "link to page",
+        hint: "[[",
+        keywords: ["page", "mention", "wiki"],
+        apply: (chain) => chain.insertContent("[["),
+      },
+    ],
+  },
+  {
+    name: "tableOfContents",
+    extensions: [TableOfContents],
+    commands: [
+      {
+        label: "table of contents",
+        keywords: ["toc", "contents", "outline"],
+        apply: (chain) => chain.insertContent({ type: "tableOfContents" }),
+      },
+    ],
+  },
+  {
     name: "link",
     extensions: [
       markdownLink.configure({
@@ -181,7 +262,7 @@ export const extensionsOf = (list: Entry[]) => list.flatMap((entry) => entry.ext
 
 export const commandsOf = (list: Entry[]) => list.flatMap((entry) => entry.commands ?? []);
 
-/** The commands whose label or keywords start with the query, in registry order. */
+/** The commands whose label, one of its words or a keyword starts with the query, in registry order. */
 export function findCommands(list: SlashCommand[], query: string) {
   const wanted = query.toLowerCase();
   return list.filter((command) =>
