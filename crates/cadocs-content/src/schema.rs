@@ -109,6 +109,18 @@ pub const NODES: &[NodeSpec] = &[
     block("tableHeader", "block+", "", CELL),
     block("tableOfContents", "", "block", &[]),
     block(
+        "image",
+        "",
+        "block",
+        &[("alt", Default::Null), ("id", Default::Null)],
+    ),
+    block(
+        "file",
+        "",
+        "block",
+        &[("id", Default::Null), ("name", Default::Null)],
+    ),
+    block(
         "plugin",
         "",
         "block",

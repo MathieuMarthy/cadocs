@@ -14,19 +14,21 @@ use axum::middleware::from_fn_with_state;
 use axum::routing::post;
 use cadocs_collab::{Authorizer, CollabConfig, DocRegistry, EventSeat, EventStanding, Seat};
 use cadocs_core::permissions::{Scope, SocketMode, SocketOutcome, WorkspaceRole};
+use cadocs_files::LocalFileStore;
 use cadocs_server::api;
 use cadocs_server::client_ip::TrustedProxies;
-use cadocs_server::config::{HttpConfig, PublicUrl, SocketConfig};
+use cadocs_server::config::{AttachmentLimits, HttpConfig, PublicUrl, SocketConfig};
 use cadocs_server::rate_limit::RateLimiter;
 use cadocs_server::session::{csrf_token, token_hash};
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
-    AccountStore, ActiveSession, AdminChanges, Credentials, DateCursor, DocEdit, DocStore,
-    FirstUser, Grant, Invitation, InvitationPreview, InvitedUser, Member, Membership, MovedPage,
-    NewGrant, NewInvitation, NewPage, NewPasswordReset, NewSession, NewSpace, NewWorkspace,
-    PageCrumb, PageMove, PageRecord, PageSite, PageStore, SessionStanding, Snapshot, Space,
-    SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, UpdateBasis,
-    UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
+    AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, Credentials,
+    DateCursor, DocEdit, DocStore, FirstUser, Grant, Invitation, InvitationPreview, InvitedUser,
+    Member, Membership, MovedPage, NewAttachment, NewGrant, NewInvitation, NewPage,
+    NewPasswordReset, NewSession, NewSpace, NewWorkspace, PageCrumb, PageMove, PageRecord,
+    PageSite, PageStore, SessionStanding, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore,
+    StoreError, StoredDoc, StoredUpdate, UpdateBasis, UploadTarget, UserChanges, UserRecord,
+    Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -201,6 +203,40 @@ impl PageStore for FlakyStore {
         self.inner
             .recent_pages(workspace_id, actor, after, limit)
             .await
+    }
+}
+
+impl AttachmentStore for FlakyStore {
+    async fn upload_target(&self, page_id: &str, actor: &str) -> Result<UploadTarget, StoreError> {
+        self.inner.upload_target(page_id, actor).await
+    }
+
+    async fn create_attachment(
+        &self,
+        new: &NewAttachment,
+        quota_bytes: Option<i64>,
+    ) -> Result<Attachment, StoreError> {
+        self.inner.create_attachment(new, quota_bytes).await
+    }
+
+    async fn attachment(&self, id: &str, actor: &str) -> Result<Option<Attachment>, StoreError> {
+        self.inner.attachment(id, actor).await
+    }
+
+    async fn delete_attachment(&self, id: &str, actor: &str) -> Result<(), StoreError> {
+        self.inner.delete_attachment(id, actor).await
+    }
+
+    async fn orphan_attachments(&self, limit: u32) -> Result<Vec<String>, StoreError> {
+        self.inner.orphan_attachments(limit).await
+    }
+
+    async fn forget_orphan(&self, id: &str) -> Result<bool, StoreError> {
+        self.inner.forget_orphan(id).await
+    }
+
+    async fn known_attachments(&self, ids: &[String]) -> Result<Vec<String>, StoreError> {
+        self.inner.known_attachments(ids).await
     }
 }
 
@@ -659,7 +695,17 @@ async fn state<A: Authorizer>(
         release_load: Arc::default(),
     });
     let registry = DocRegistry::new(store.clone(), collab);
-    AppState::new(registry, store, Arc::new(authorizer), socket, http())
+    let files = Arc::new(LocalFileStore::open(dir.path()).unwrap());
+    let limits = AttachmentLimits::default();
+    AppState::new(
+        registry,
+        store,
+        Arc::new(authorizer),
+        socket,
+        http(),
+        files,
+        limits,
+    )
 }
 
 struct Running {

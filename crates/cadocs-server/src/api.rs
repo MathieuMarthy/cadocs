@@ -1,6 +1,7 @@
 //! The REST API under `/api/v1`: its error shape and what every route shares (`docs/API.md`).
 
 mod admin;
+mod attachments;
 pub mod auth;
 mod invitations;
 mod pages;
@@ -23,7 +24,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::any;
 use axum::{Json, Router};
 use cadocs_collab::{Authorizer, CollabError};
-use cadocs_store::{AccountStore, DocStore, PageStore, SpaceStore, StoreError, WorkspaceStore};
+use cadocs_store::{
+    AccountStore, AttachmentStore, DocStore, PageStore, SpaceStore, StoreError, WorkspaceStore,
+};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -203,12 +206,15 @@ impl From<StoreError> for ApiError {
             StoreError::UnknownSibling => invalid("after", "unknown"),
             StoreError::OtherWorkspace => invalid("space_id", "other_workspace"),
             StoreError::NotAllowed => ApiError::new(ErrorCode::Forbidden),
+            StoreError::QuotaExceeded => ApiError::new(ErrorCode::TooLarge)
+                .with_message("The workspace has no room left for this file"),
             StoreError::UserNotFound
             | StoreError::WorkspaceNotFound
             | StoreError::MemberNotFound
             | StoreError::InvitationNotFound
             | StoreError::SpaceNotFound
-            | StoreError::PageNotFound => ApiError::new(ErrorCode::NotFound),
+            | StoreError::PageNotFound
+            | StoreError::AttachmentNotFound => ApiError::new(ErrorCode::NotFound),
             error => {
                 tracing::error!(%error, "storage failed");
                 ApiError::new(ErrorCode::Unavailable)
@@ -368,7 +374,7 @@ impl IntoResponse for ApiError {
 
 pub fn router<S, A>(state: &AppState<S, A>) -> Router<AppState<S, A>>
 where
-    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore,
+    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore + AttachmentStore,
     A: Authorizer,
 {
     // A nested fallback only sees paths below the root of the nest. `router` in `lib.rs` also
@@ -380,7 +386,8 @@ where
         .merge(workspaces::routes(state))
         .merge(invitations::routes(state))
         .merge(spaces::routes(state))
-        .merge(pages::routes(state));
+        .merge(pages::routes(state))
+        .merge(attachments::routes(state));
     finish(routes, state.http.clone())
 }
 

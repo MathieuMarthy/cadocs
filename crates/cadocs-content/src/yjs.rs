@@ -255,6 +255,14 @@ fn block<T: ReadTxn>(txn: &T, element: &XmlElementRef, found: &mut Vec<Block>) {
             ))
         }
         "tableOfContents" => Block::TableOfContents,
+        "image" => Block::Image {
+            id: string_attr(txn, element, "id").unwrap_or_default(),
+            alt: string_attr(txn, element, "alt"),
+        },
+        "file" => Block::File {
+            id: string_attr(txn, element, "id").unwrap_or_default(),
+            name: string_attr(txn, element, "name").unwrap_or_default(),
+        },
         "plugin" => Block::Plugin {
             kind: string_attr(txn, element, "kind").unwrap_or_default(),
             data: attr(txn, element, "data").map(|data| {
@@ -536,6 +544,18 @@ fn write_block<P: XmlFragment>(txn: &mut TransactionMut, parent: &P, block: &Blo
         }
         Block::TableOfContents => {
             element(txn, parent, "tableOfContents");
+        }
+        Block::Image { id, alt } => {
+            let node = element(txn, parent, "image");
+            if let Some(alt) = alt {
+                node.insert_attribute(txn, "alt", Any::from(alt.as_str()));
+            }
+            node.insert_attribute(txn, "id", Any::from(id.as_str()));
+        }
+        Block::File { id, name } => {
+            let node = element(txn, parent, "file");
+            node.insert_attribute(txn, "id", Any::from(id.as_str()));
+            node.insert_attribute(txn, "name", Any::from(name.as_str()));
         }
         Block::Plugin { kind, data, text } => {
             let node = element(txn, parent, "plugin");

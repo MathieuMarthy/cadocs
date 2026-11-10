@@ -17,6 +17,8 @@ fn every_node_gives_its_text() {
         "careful",
         "more\nhidden",
         "name\nvalue\na\n1",
+        "a diagram",
+        "report [final].pdf",
         "todo, done",
         "Last",
     ] {

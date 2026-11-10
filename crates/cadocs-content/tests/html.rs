@@ -36,6 +36,8 @@ fn every_node_renders() {
         "<details><summary>more</summary><p>hidden</p></details>",
         "<table><tbody><tr><th><p>name</p></th><th><p>value</p></th></tr><tr><td><p>a</p></td><td><p>1</p></td></tr></tbody></table>",
         r##"<nav class="toc" aria-label="table of contents"><ol><li data-depth="0"><a href="#h-01"><span class="toc-number">01</span> Title</a></li><li data-depth="1"><a href="#h-01.1"><span class="toc-number">01.1</span> Lists</a></li><li data-depth="2"><a href="#h-01.1.1"><span class="toc-number">01.1.1</span> Last</a></li></ol></nav>"##,
+        r#"<figure class="image"><img src="/api/v1/attachments/0190a0b0-0000-7000-8000-00000000000a" alt="a diagram"></figure>"#,
+        r#"<p class="file"><a class="file" href="/api/v1/attachments/0190a0b0-0000-7000-8000-00000000000f" download>report [final].pdf</a></p>"#,
         r#"<div class="plugin" data-kind="kanban/board">todo, done</div>"#,
         r#"<h3 id="h-01.1.1"><strong>Last</strong></h3>"#,
     ] {
@@ -137,6 +139,22 @@ fn a_page_the_reader_cannot_open_shows_no_title() {
         out,
         r#"<p><span class="page-link page-link-missing">page not found</span></p>"#
     );
+}
+
+#[test]
+fn attachment_ids_and_names_are_escaped() {
+    let out = html(vec![
+        Block::Image {
+            id: r#"a"&b/c"#.into(),
+            alt: Some(r#""><script>"#.into()),
+        },
+        Block::File {
+            id: "../x".into(),
+            name: "<script>".into(),
+        },
+    ]);
+    assert!(out.contains(r#"src="/api/v1/attachments/a%22%26b%2Fc" alt="&quot;&gt;&lt;script&gt;""#), "{out}");
+    assert!(out.contains(r#"href="/api/v1/attachments/..%2Fx" download>&lt;script&gt;</a>"#), "{out}");
 }
 
 #[test]

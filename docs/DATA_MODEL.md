@@ -289,6 +289,7 @@ CREATE TABLE attachments (
     created_at   BIGINT NOT NULL
 );
 CREATE INDEX attachments_workspace ON attachments(workspace_id);
+CREATE INDEX attachments_uploaded_by ON attachments(uploaded_by);  -- deleting a user
 
 CREATE TABLE attachment_refs (
     attachment_id TEXT NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
@@ -301,6 +302,8 @@ CREATE INDEX attachment_refs_page ON attachment_refs(page_id);
 An upload creates the first reference. The indexing job adds one for each attachment it finds in a page's content, so an image pasted into another page is readable there, after a short delay.
 
 Editing never removes a reference, because a revision may still show the file. References disappear when a page is purged or through `DELETE /attachments/{id}`. An attachment with no reference left is an orphan, and a job deletes it with its file. The cost is disk space: an image removed from a page stays stored until the page is purged or someone deletes the file. A revision restored after an explicit delete shows a placeholder.
+
+The `purge_orphan_files` job runs at start and every hour. It deletes each orphan's row, then its file, then any file with no row that is over an hour old: a crash between an upload's rename and its record, a deleted workspace, a failed delete, or a backup's files newer than its database leave such files. A younger one may be an upload about to record its row. The quota sums `size` over the workspace's rows, so a file with no row counts against nothing.
 
 A download needs read access to at least one referencing page. A public share serves a file only if a page covered by the share references it.
 

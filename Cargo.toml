@@ -7,6 +7,7 @@ default-members = [
     "crates/cadocs-collab",
     "crates/cadocs-content",
     "crates/cadocs-core",
+    "crates/cadocs-files",
     "crates/cadocs-jobs",
     "crates/cadocs-server",
     "crates/cadocs-store",
@@ -21,13 +22,16 @@ license = "AGPL-3.0-only"
 anyhow = "1"
 argon2 = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "password-hash"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
+bytes = { version = "1", default-features = false }
 cadocs-collab = { path = "crates/cadocs-collab" }
 cadocs-content = { path = "crates/cadocs-content" }
 cadocs-core = { path = "crates/cadocs-core" }
+cadocs-files = { path = "crates/cadocs-files" }
 cadocs-jobs = { path = "crates/cadocs-jobs" }
 cadocs-store = { path = "crates/cadocs-store" }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 getrandom = "0.4"
+percent-encoding = { version = "2", default-features = false, features = ["std"] }
 # Markdown import (ADR 0008). No `html` or `getopts`: cadocs renders HTML from its own AST.
 pulldown-cmark = { version = "0.13", default-features = false }
 rust-embed = "8"

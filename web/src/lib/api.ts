@@ -63,18 +63,12 @@ async function refusal(response: Response) {
   );
 }
 
-export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (body !== undefined) headers["content-type"] = "application/json";
+/** A call under `/api/v1` that answered 2xx, or the refusal as an `ApiError`. */
+async function call(method: string, path: string, headers: Record<string, string>, body?: BodyInit) {
   if (csrfToken && method !== "GET") headers["x-csrf-token"] = csrfToken;
-
   let response: Response;
   try {
-    response = await fetch(`/api/v1${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    response = await fetch(`/api/v1${path}`, { method, headers, body });
   } catch {
     throw new ApiError(0, "unreachable", "Server unreachable");
   }
@@ -83,5 +77,30 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
     if (error.code === "unauthenticated") onUnauthenticated();
     throw error;
   }
+  return response;
+}
+
+export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["content-type"] = "application/json";
+  const response = await call(method, path, headers, body === undefined ? undefined : JSON.stringify(body));
   return (response.status === 204 ? undefined : await response.json()) as T;
+}
+
+export interface Attachment {
+  id: string;
+  file_name: string;
+  content_type: string;
+  size: number;
+}
+
+/** Where an attachment is served, as the server's renderers link to it. */
+export const attachmentUrl = (id: string) => `/api/v1/attachments/${encodeURIComponent(id)}`;
+
+/** Sends `file` as the raw body, so the server streams it to disk with no parser in between. */
+export async function uploadAttachment(page: string, file: File): Promise<Attachment> {
+  const path = `/pages/${encodeURIComponent(page)}/attachments?name=${encodeURIComponent(file.name || "file")}`;
+  const headers = { "content-type": file.type || "application/octet-stream" };
+  const response = await call("POST", path, headers, file);
+  return (await response.json()) as Attachment;
 }

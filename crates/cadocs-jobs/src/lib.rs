@@ -14,7 +14,7 @@ use tokio::time::{MissedTickBehavior, interval, sleep};
 use tracing::warn;
 use uuid::Uuid;
 
-pub use cleanup::{Cleanup, PURGE_EXPIRED, PURGE_TRASH};
+pub use cleanup::{Cleanup, PURGE_EXPIRED, PURGE_ORPHAN_FILES, PURGE_TRASH};
 
 /// Whatever went wrong, for `last_error`.
 pub type JobError = Box<dyn Error + Send + Sync>;

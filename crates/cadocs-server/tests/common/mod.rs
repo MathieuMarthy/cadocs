@@ -1,9 +1,11 @@
 //! A real server over real sockets, for the tests of the REST API. Each test binary uses part of it.
 #![allow(dead_code)]
 
+use std::path::Path;
 use std::sync::Arc;
 
 use cadocs_collab::{DocRegistry, PageAuthorizer};
+use cadocs_files::{FileStore, LocalFileStore};
 use cadocs_jobs::JobQueue;
 use cadocs_server::config::Config;
 use cadocs_server::{AppState, serve, start_jobs};
@@ -39,6 +41,8 @@ pub struct Reply {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Value,
+    /// The body as sent, for what is not JSON.
+    pub bytes: Vec<u8>,
 }
 
 impl Reply {
@@ -84,6 +88,20 @@ pub async fn start_with(public_url: &str, proxies: &str) -> Api {
 
 /// `settings` are more environment variables.
 pub async fn start_tuned(public_url: &str, proxies: &str, settings: &[(&str, &str)]) -> Api {
+    start_custom(public_url, proxies, settings, None).await
+}
+
+/// A server whose attachments go to `files` instead of the data folder.
+pub async fn start_with_files(files: Arc<dyn FileStore>, settings: &[(&str, &str)]) -> Api {
+    start_custom(ORIGIN, "", settings, Some(files)).await
+}
+
+async fn start_custom(
+    public_url: &str,
+    proxies: &str,
+    settings: &[(&str, &str)],
+    files: Option<Arc<dyn FileStore>>,
+) -> Api {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("cadocs.db");
     let store = Arc::new(SqliteStore::open(&path).await.unwrap());
@@ -103,6 +121,8 @@ pub async fn start_tuned(public_url: &str, proxies: &str, settings: &[(&str, &st
         Arc::new(PageAuthorizer::new(store.clone())),
         config.socket,
         config.http,
+        files.unwrap_or_else(|| Arc::new(LocalFileStore::open(dir.path()).unwrap())),
+        config.attachments,
     );
     let queue = start_jobs(&state, config.jobs);
 
@@ -131,6 +151,11 @@ pub async fn start() -> Api {
 }
 
 impl Api {
+    /// The data folder.
+    pub fn dir(&self) -> &Path {
+        self._dir.path()
+    }
+
     pub async fn raw(
         &self,
         method: &str,
@@ -162,10 +187,12 @@ impl Api {
             .map(|line| line.split_once(": ").unwrap())
             .map(|(name, value)| (name.to_ascii_lowercase(), value.to_owned()))
             .collect();
+        let bytes = answer[split + 4..].to_vec();
         Reply {
             status: status.parse().unwrap(),
             headers,
-            body: serde_json::from_slice(&answer[split + 4..]).unwrap_or(Value::Null),
+            body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+            bytes,
         }
     }
 

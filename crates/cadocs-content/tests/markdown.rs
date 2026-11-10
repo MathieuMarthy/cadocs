@@ -50,6 +50,83 @@ fn every_node_round_trips_through_markdown() {
 }
 
 #[test]
+fn an_attachment_is_a_block_only_alone_in_its_paragraph() {
+    let image = "/api/v1/attachments/0190a0b0-0000-7000-8000-00000000000a";
+    assert_eq!(
+        from_markdown(&format!("![]({image})")).blocks,
+        [Block::Image {
+            id: "0190a0b0-0000-7000-8000-00000000000a".into(),
+            alt: None,
+        }]
+    );
+    // Beside text, or from elsewhere, an image is still its alternative text.
+    assert_eq!(
+        from_markdown(&format!("see ![chart]({image}) here")).blocks,
+        [para("see chart here")]
+    );
+    assert_eq!(
+        from_markdown("![chart](https://example.com/a.png)").blocks,
+        [para("chart")]
+    );
+    // Two images side by side are both kept, as text.
+    assert_eq!(
+        from_markdown(&format!("![a]({image})![b]({image})")).blocks,
+        [para("ab")]
+    );
+    assert_eq!(
+        from_markdown(&format!("![]({image})![b]({image})")).blocks,
+        [para("b")]
+    );
+    // An image in a link keeps the link.
+    assert_eq!(
+        from_markdown(&format!("[![a]({image})](https://example.com/)")).blocks,
+        [Block::Paragraph(vec![Inline::Text {
+            text: "a".into(),
+            marks: Marks {
+                link: Some(Link::new("https://example.com/", None)),
+                ..Marks::default()
+            },
+        }])]
+    );
+    let file = "/api/v1/attachments/0190a0b0-0000-7000-8000-00000000000f";
+    let link = |text: &str| Inline::Text {
+        text: text.into(),
+        marks: Marks {
+            link: Some(Link::new(file, None)),
+            ..Marks::default()
+        },
+    };
+    assert_eq!(
+        from_markdown(&format!("see [notes]({file})")).blocks,
+        [Block::Paragraph(vec![Inline::Text {
+            text: "see ".into(),
+            marks: Marks::default(),
+        }, link("notes")])]
+    );
+    assert_eq!(
+        from_markdown(&format!("[**notes**]({file})")).blocks,
+        [Block::Paragraph(vec![Inline::Text {
+            text: "notes".into(),
+            marks: Marks {
+                bold: true,
+                link: Some(Link::new(file, None)),
+                ..Marks::default()
+            },
+        }])]
+    );
+    round_trip(vec![
+        Block::Image {
+            id: "0190a0b0-0000-7000-8000-00000000000a".into(),
+            alt: Some("*not* [a] link".into()),
+        },
+        Block::File {
+            id: "0190a0b0-0000-7000-8000-00000000000f".into(),
+            name: "<u>*x*</u>".into(),
+        },
+    ]);
+}
+
+#[test]
 fn every_node_writes_its_convention() {
     let written = to_markdown(&every_node(), &titles);
     for part in [
@@ -65,6 +142,8 @@ fn every_node_writes_its_convention() {
         "<details>\n<summary>\n\nmore\n\n</summary>\n\nhidden\n\n</details>",
         "| name | value |\n| --- | --- |\n| a | 1 |",
         "[TOC]",
+        "![a diagram](/api/v1/attachments/0190a0b0-0000-7000-8000-00000000000a)",
+        "[report \\[final\\].pdf](/api/v1/attachments/0190a0b0-0000-7000-8000-00000000000f)",
         "todo, done",
         "### **Last**",
     ] {

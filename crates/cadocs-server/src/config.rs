@@ -19,6 +19,10 @@ const SECS_PER_DAY: u64 = 24 * 60 * 60;
 const DEFAULT_SESSION_DAYS: u64 = 30;
 const MAX_SESSION_DAYS: u64 = 3650;
 const DEFAULT_TRASH_DAYS: u64 = 30;
+const DEFAULT_MAX_UPLOAD_MB: u64 = 25;
+/// 1 TiB: far past any wiki, and still far from overflowing once in bytes.
+const MAX_MB: u64 = 1024 * 1024;
+const MIB: u64 = 1024 * 1024;
 const MAX_TRASH_DAYS: u64 = 3650;
 
 #[derive(Debug, Clone)]
@@ -30,6 +34,23 @@ pub struct Config {
     pub collab: CollabConfig,
     pub socket: SocketConfig,
     pub jobs: JobConfig,
+    pub attachments: AttachmentLimits,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttachmentLimits {
+    pub max_upload_bytes: u64,
+    /// What each workspace's attachments may take, `None` for no limit.
+    pub workspace_quota_bytes: Option<u64>,
+}
+
+impl Default for AttachmentLimits {
+    fn default() -> Self {
+        Self {
+            max_upload_bytes: DEFAULT_MAX_UPLOAD_MB * MIB,
+            workspace_quota_bytes: None,
+        }
+    }
 }
 
 /// What the HTTP layer knows about how the server is reached.
@@ -161,6 +182,7 @@ impl Config {
                 trash_retention: read.trash_retention()?,
                 ..JobConfig::default()
             },
+            attachments: read.attachment_limits()?,
         };
         config.validate()?;
         Ok(config)
@@ -222,6 +244,23 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
             "CADOCS_TRASH_DAYS must be between 1 and {MAX_TRASH_DAYS}"
         );
         Ok(Duration::from_secs(days * SECS_PER_DAY))
+    }
+
+    fn attachment_limits(&self) -> anyhow::Result<AttachmentLimits> {
+        let upload = self.value("CADOCS_MAX_UPLOAD_MB", DEFAULT_MAX_UPLOAD_MB)?;
+        ensure!(
+            (1..=MAX_MB).contains(&upload),
+            "CADOCS_MAX_UPLOAD_MB must be between 1 and {MAX_MB}"
+        );
+        let quota = self.value("CADOCS_WORKSPACE_QUOTA_MB", 0)?;
+        ensure!(
+            quota <= MAX_MB,
+            "CADOCS_WORKSPACE_QUOTA_MB must be at most {MAX_MB}"
+        );
+        Ok(AttachmentLimits {
+            max_upload_bytes: upload * MIB,
+            workspace_quota_bytes: (quota > 0).then_some(quota * MIB),
+        })
     }
 
     fn session_lifetime(&self) -> anyhow::Result<Duration> {
@@ -286,6 +325,34 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::ORIGIN, origin.parse().unwrap());
         headers
+    }
+
+    #[test]
+    fn attachments_take_25_mb_each_and_no_quota_unless_set_otherwise() {
+        let limits = config(&[]).unwrap().attachments;
+        assert_eq!(limits.max_upload_bytes, 25 * 1024 * 1024);
+        assert_eq!(limits.workspace_quota_bytes, None);
+
+        let set = config(&[
+            ("CADOCS_MAX_UPLOAD_MB", "2"),
+            ("CADOCS_WORKSPACE_QUOTA_MB", "10"),
+        ]);
+        let limits = set.unwrap().attachments;
+        assert_eq!(limits.max_upload_bytes, 2 * 1024 * 1024);
+        assert_eq!(limits.workspace_quota_bytes, Some(10 * 1024 * 1024));
+
+        for (name, refused) in [
+            ("CADOCS_MAX_UPLOAD_MB", "0"),
+            ("CADOCS_MAX_UPLOAD_MB", "1048577"),
+            ("CADOCS_WORKSPACE_QUOTA_MB", "1048577"),
+            ("CADOCS_WORKSPACE_QUOTA_MB", "-1"),
+        ] {
+            let error = config(&[(name, refused)]).unwrap_err();
+            assert!(
+                format!("{error:#}").contains(name),
+                "{name}={refused}: {error:#}"
+            );
+        }
     }
 
     #[test]

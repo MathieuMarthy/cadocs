@@ -7,8 +7,9 @@ use cadocs_bench::document::{EDITS, body_text, generate};
 use cadocs_bench::load::{LoadConfig, LoadReport, peers, run};
 use cadocs_bench::seed::{COMPACT_UPDATES, SESSION_TOKEN, SESSION_TOKEN_HASH, doc_id, seed};
 use cadocs_collab::{CollabConfig, DocRegistry, PageAuthorizer};
+use cadocs_files::LocalFileStore;
 use cadocs_server::client_ip::TrustedProxies;
-use cadocs_server::config::{HttpConfig, PublicUrl, SocketConfig};
+use cadocs_server::config::{AttachmentLimits, HttpConfig, PublicUrl, SocketConfig};
 use cadocs_server::session::token_hash;
 use cadocs_server::{AppState, serve};
 use cadocs_store::{DocStore, SqliteStore};
@@ -135,6 +136,8 @@ async fn start(dir: &TempDir) -> Server {
             trusted_proxies: TrustedProxies::default(),
             session_lifetime: Duration::from_secs(60),
         },
+        Arc::new(LocalFileStore::open(dir.path()).unwrap()),
+        AttachmentLimits::default(),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());

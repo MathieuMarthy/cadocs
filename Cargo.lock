@@ -210,6 +210,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cadocs-collab",
+ "cadocs-files",
  "cadocs-server",
  "cadocs-store",
  "futures-util",
@@ -251,11 +252,25 @@ name = "cadocs-core"
 version = "0.1.0"
 
 [[package]]
+name = "cadocs-files"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "cadocs-jobs"
 version = "0.1.0"
 dependencies = [
  "cadocs-collab",
+ "cadocs-files",
  "cadocs-store",
+ "futures-util",
  "sqlx",
  "tempfile",
  "tokio",
@@ -270,12 +285,15 @@ dependencies = [
  "anyhow",
  "argon2",
  "axum",
+ "bytes",
  "cadocs-collab",
  "cadocs-core",
+ "cadocs-files",
  "cadocs-jobs",
  "cadocs-store",
  "futures-util",
  "getrandom 0.4.3",
+ "percent-encoding",
  "rust-embed",
  "serde",
  "serde_json",

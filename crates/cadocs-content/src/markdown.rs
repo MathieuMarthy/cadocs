@@ -7,6 +7,8 @@
 //! | toggle | `<details>`, `<summary>` and `</summary>`, `</details>`, each on its own line |
 //! | table of contents | `[TOC]` alone in a paragraph |
 //! | link to a page | `[title](/?page=<id>)` |
+//! | image | `![alt](/api/v1/attachments/<id>)` alone in a paragraph |
+//! | file | `[name](/api/v1/attachments/<id>)` alone in a paragraph |
 //! | underline | `<u>` and `</u>` |
 //! | empty paragraph | `<br>` alone |
 //! | bold, italic, strike where `*` or `~` would not be read (`foo**(bar)**baz`) | `<strong>`, `<em>`, `<s>` |
@@ -15,8 +17,8 @@
 //! What is lost: a plugin block becomes its text, a table's spans and its first row's header
 //! flags (the first row is always the header), several blocks in a table cell become one line
 //! joined by `<br>`, an ordered list's `type`. Import reads `[!TIP]` and `[!IMPORTANT]` as notes,
-//! headings below level 3 as level 3, an image as its alternative text, and any other HTML as
-//! text. A link whose address [`crate::url::allowed`] refuses keeps only its text both ways.
+//! headings below level 3 as level 3, any other image as its alternative text, and any other HTML
+//! as text. A link whose address [`crate::url::allowed`] refuses keeps only its text both ways.
 
 use std::fmt::Write;
 
@@ -24,7 +26,7 @@ use pulldown_cmark::{
     Alignment, BlockQuoteKind, CodeBlockKind, Event, Options, Parser, Tag, TagEnd,
 };
 
-use crate::PageTitles;
+use crate::{ATTACHMENT_PATH, PageTitles};
 use crate::ast::*;
 use crate::url::allowed;
 
@@ -179,6 +181,18 @@ fn block(titles: &dyn PageTitles, block: &Block, alternate: bool) -> String {
         ),
         Block::Table(rows) => table(titles, rows),
         Block::TableOfContents => TOC.into(),
+        Block::Image { id, alt } => {
+            let mut out = "![".to_string();
+            escape(alt.as_deref().unwrap_or_default(), false, &mut out);
+            let _ = write!(out, "]({})", destination(&format!("{ATTACHMENT_PATH}{id}")));
+            out
+        }
+        Block::File { id, name } => {
+            let mut out = "[".to_string();
+            escape(name, false, &mut out);
+            let _ = write!(out, "]({})", destination(&format!("{ATTACHMENT_PATH}{id}")));
+            out
+        }
         Block::Plugin { text, .. } => {
             let content: Vec<Inline> = text
                 .split('\n')
@@ -608,6 +622,31 @@ fn inlines(titles: &dyn PageTitles, content: &[Inline], flow: Flow) -> String {
 
 // Import.
 
+/// The id in an attachment's address, as the renderers write it.
+fn attachment_id(href: &str) -> Option<String> {
+    let id = href.strip_prefix(ATTACHMENT_PATH)?;
+    (!id.is_empty() && !id.contains(['/', '?', '#'])).then(|| id.to_string())
+}
+
+/// A paragraph holding only a plain link to an attachment, as a file block is written.
+fn file_block(content: &[Inline]) -> Option<Block> {
+    let [Inline::Text { text, marks }] = content else {
+        return None;
+    };
+    let link = marks.link.as_ref()?;
+    let plain = Marks {
+        link: None,
+        ..marks.clone()
+    };
+    if !plain.is_empty() || link.title.is_some() {
+        return None;
+    }
+    Some(Block::File {
+        id: attachment_id(&link.href)?,
+        name: text.clone(),
+    })
+}
+
 /// The document a Markdown text describes. Never fails: what it cannot map stays as text.
 pub fn from_markdown(markdown: &str) -> Document {
     let options = Options::ENABLE_TABLES
@@ -691,6 +730,13 @@ struct Reader {
     /// Inside a link to a page: its text is replaced by the link.
     page: Option<String>,
     image: usize,
+    /// The inline content being read is a paragraph's, not a heading's or a cell's.
+    in_paragraph: bool,
+    /// Inside an attachment image that opened its paragraph.
+    attachment_image: Option<String>,
+    /// The attachment image that opened the paragraph, with its alternative text: the paragraph
+    /// becomes an image block if nothing follows.
+    lone_image: Option<(String, String)>,
 }
 
 impl Reader {
@@ -750,6 +796,7 @@ impl Reader {
             // Text right in a tight list item, or a stray one: it gets a paragraph.
             self.inline = Some(Inlines::default());
             self.implicit = true;
+            self.in_paragraph = false;
         }
         if let Some(current) = &mut self.inline {
             push_inline(&mut current.content, inline);
@@ -776,11 +823,29 @@ impl Reader {
 
     fn paragraph(&mut self, content: Vec<Inline>) {
         let toc = std::mem::take(&mut self.toc);
-        self.push_block(if toc {
+        let block = if toc {
             Block::TableOfContents
+        } else if let Some((id, alt)) = self.lone_image.take() {
+            if content.is_empty() {
+                let alt = (!alt.is_empty()).then_some(alt);
+                Block::Image { id, alt }
+            } else {
+                // Text follows: the image stays its alternative text, as any other.
+                let mut joined = Vec::new();
+                let text = Inline::Text {
+                    text: alt,
+                    marks: Marks::default(),
+                };
+                push_inline(&mut joined, text);
+                content
+                    .into_iter()
+                    .for_each(|inline| push_inline(&mut joined, inline));
+                Block::Paragraph(joined)
+            }
         } else {
-            Block::Paragraph(content)
-        });
+            file_block(&content).unwrap_or(Block::Paragraph(content))
+        };
+        self.push_block(block);
     }
 
     fn event(&mut self, event: Event) {
@@ -848,6 +913,8 @@ impl Reader {
         }
         match tag {
             Tag::Paragraph | Tag::Heading { .. } | Tag::TableCell => {
+                self.in_paragraph = matches!(tag, Tag::Paragraph);
+                self.lone_image = None;
                 self.inline = Some(Inlines::default());
             }
             Tag::CodeBlock(kind) => {
@@ -906,7 +973,20 @@ impl Reader {
                     self.links.push(link);
                 }
             }
-            Tag::Image { .. } => self.image += 1,
+            Tag::Image { dest_url, .. } => {
+                self.image += 1;
+                // A second image after a lone one: both stay text, even an empty one.
+                let after_lone = self.lone_image.take().map(|(_, alt)| alt);
+                if let Some(alt) = &after_lone {
+                    self.text(alt, false);
+                }
+                let opens = after_lone.is_none()
+                    && self.in_paragraph
+                    && self.image == 1
+                    && self.links.is_empty()
+                    && self.inline.as_ref().is_some_and(|i| i.content.is_empty());
+                self.attachment_image = attachment_id(&dest_url).filter(|_| opens);
+            }
             _ => {}
         }
     }
@@ -1057,7 +1137,21 @@ impl Reader {
                     self.inline(Inline::PageLink { id });
                 }
             }
-            TagEnd::Image => self.image = self.image.saturating_sub(1),
+            TagEnd::Image => {
+                self.image = self.image.saturating_sub(1);
+                if let Some(id) = self.attachment_image.take()
+                    && let Some(current) = &mut self.inline
+                {
+                    let alt = std::mem::take(&mut current.content)
+                        .iter()
+                        .filter_map(|inline| match inline {
+                            Inline::Text { text, .. } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    self.lone_image = Some((id, alt));
+                }
+            }
             _ => {}
         }
     }

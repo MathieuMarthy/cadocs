@@ -11,6 +11,7 @@ import { freeSlot, renderAvatars, renderCaret, renderSelection, type User } from
 import { commandsOf, entries, extensionsOf } from "./registry";
 import { SlashMenu } from "./slash";
 import { bindTitle } from "./title";
+import { Uploads } from "./uploads";
 
 const CLOSE_MALFORMED = 1002;
 const CLOSE_TOO_LARGE = 1009;
@@ -87,6 +88,7 @@ export function openPage(page: string, elements: Elements, options: Options, cal
       ...extensionsOf(entries),
       SlashMenu.configure({ commands: commandsOf(entries) }),
       PagePicker.configure({ workspace: options.workspace }),
+      Uploads.configure({ page }),
       Collaboration.configure({ document: ydoc }),
       CollaborationCaret.configure({
         provider,

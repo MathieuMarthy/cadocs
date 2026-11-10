@@ -165,6 +165,14 @@ pub fn every_node() -> Document {
                 },
             ]),
             Block::TableOfContents,
+            Block::Image {
+                id: "0190a0b0-0000-7000-8000-00000000000a".into(),
+                alt: Some("a diagram".into()),
+            },
+            Block::File {
+                id: "0190a0b0-0000-7000-8000-00000000000f".into(),
+                name: "report [final].pdf".into(),
+            },
             Block::Plugin {
                 kind: "kanban/board".into(),
                 data: Some(r#"{"columns":["todo","done"]}"#.into()),

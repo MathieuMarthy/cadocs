@@ -29,7 +29,7 @@ test("the slash menu lists the blocks, filters them, and moves with the arrows",
   await left.keyboard.type("/");
 
   await expect(commands(left)).toBeVisible();
-  await expect(left.getByText("commands · 15")).toBeVisible();
+  await expect(left.getByText("commands · 17")).toBeVisible();
   const options = commands(left).getByRole("option");
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
   await left.keyboard.press("ArrowDown");

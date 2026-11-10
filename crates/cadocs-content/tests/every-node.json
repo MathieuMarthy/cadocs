@@ -433,6 +433,20 @@
       "type": "tableOfContents"
     },
     {
+      "type": "image",
+      "attrs": {
+        "id": "0190a0b0-0000-7000-8000-00000000000a",
+        "alt": "a diagram"
+      }
+    },
+    {
+      "type": "file",
+      "attrs": {
+        "id": "0190a0b0-0000-7000-8000-00000000000f",
+        "name": "report [final].pdf"
+      }
+    },
+    {
       "type": "plugin",
       "attrs": {
         "kind": "kanban/board",

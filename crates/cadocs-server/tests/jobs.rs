@@ -4,7 +4,7 @@ mod common;
 
 use std::time::Duration;
 
-use cadocs_jobs::{Cleanup, Handler, PURGE_EXPIRED, PURGE_TRASH};
+use cadocs_jobs::{Cleanup, Handler, PURGE_EXPIRED, PURGE_ORPHAN_FILES, PURGE_TRASH};
 use cadocs_store::{JobStore, SqliteStore, now_ms};
 use common::{Api, Login, ORIGIN, Reply, logged_in};
 use futures_util::StreamExt;
@@ -162,10 +162,10 @@ async fn no_event(socket: &mut Socket) {
 }
 
 #[test]
-fn both_cleanups_recur() {
+fn every_cleanup_recurs() {
     assert_eq!(
         Cleanup::<SqliteStore>::RECURRING,
-        [PURGE_EXPIRED, PURGE_TRASH]
+        [PURGE_EXPIRED, PURGE_TRASH, PURGE_ORPHAN_FILES]
     );
 }
 

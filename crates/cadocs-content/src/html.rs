@@ -5,7 +5,7 @@
 
 use std::fmt::Write;
 
-use crate::PageTitles;
+use crate::{ATTACHMENT_PATH, PageTitles};
 use crate::ast::*;
 use crate::headings::numbered;
 use crate::url::allowed;
@@ -200,6 +200,24 @@ fn block(context: &mut Context, block: &Block, out: &mut String) {
             out.push_str("</tbody></table>");
         }
         Block::TableOfContents => toc(context, out),
+        Block::Image { id, alt } => {
+            let _ = write!(
+                out,
+                r#"<figure class="image"><img src="{ATTACHMENT_PATH}{}" alt=""#,
+                encode_component(id)
+            );
+            escape(alt.as_deref().unwrap_or_default(), out);
+            out.push_str(r#""></figure>"#);
+        }
+        Block::File { id, name } => {
+            let _ = write!(
+                out,
+                r#"<p class="file"><a class="file" href="{ATTACHMENT_PATH}{}" download>"#,
+                encode_component(id)
+            );
+            escape(name, out);
+            out.push_str("</a></p>");
+        }
         Block::Plugin { kind, text, .. } => {
             out.push_str(r#"<div class="plugin" data-kind=""#);
             escape(kind, out);

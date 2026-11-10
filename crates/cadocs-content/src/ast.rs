@@ -44,6 +44,16 @@ pub enum Block {
     Table(Vec<TableRow>),
     /// The headings of the page, listed where it stands.
     TableOfContents,
+    /// An image attachment, by id: [`crate::ATTACHMENT_PATH`] followed by the id serves it.
+    Image {
+        id: String,
+        alt: Option<String>,
+    },
+    /// Any other attachment, offered for download under the name it was uploaded with.
+    File {
+        id: String,
+        name: String,
+    },
     /// A content plugin's block (ADR 0016). `data` is the plugin's JSON, as text, and `text` is
     /// what every renderer shows instead of running the plugin.
     Plugin {

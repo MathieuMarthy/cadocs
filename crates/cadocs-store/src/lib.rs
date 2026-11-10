@@ -1,6 +1,7 @@
 //! Store traits and their SQLite implementation (ADR 0002).
 
 mod accounts;
+mod attachments;
 mod jobs;
 mod pages;
 mod spaces;
@@ -14,6 +15,7 @@ pub use accounts::{
     AccountStore, ActiveSession, AdminChanges, Credentials, FirstUser, Membership,
     NewPasswordReset, NewSession, SessionStanding, UpdateBasis, User, UserChanges, UserRecord,
 };
+pub use attachments::{Attachment, AttachmentStore, NewAttachment, UploadTarget};
 pub use jobs::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob};
 pub use pages::{
     DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, MovedPage, NewPage, PageCrumb, PageMove,
@@ -95,6 +97,10 @@ pub enum StoreError {
     NameMismatch,
     #[error("this email belongs to a member")]
     AlreadyMember,
+    #[error("no such attachment")]
+    AttachmentNotFound,
+    #[error("the workspace has no room left for this file")]
+    QuotaExceeded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -38,8 +38,8 @@ Environment variables only, so no config file format has to be parsed or documen
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `CADOCS_SESSION_DAYS` **P** | `30` | Session lifetime, 1 to 3650, extended by use |
-| `CADOCS_MAX_UPLOAD_MB` | `25` | Largest attachment |
-| `CADOCS_WORKSPACE_QUOTA_MB` | `0` | Attachment storage per workspace, `0` for no limit |
+| `CADOCS_MAX_UPLOAD_MB` | `25` | Largest attachment, 1 to 1048576 |
+| `CADOCS_WORKSPACE_QUOTA_MB` | `0` | Attachment storage per workspace, `0` for no limit, at most 1048576 |
 | `CADOCS_TRASH_DAYS` | `30` | Time in the trash before purging, 1 to 3650. The purge runs at start and then every hour |
 | `CADOCS_REVISION_PAUSE_SECS` | `120` | Pause in editing that creates a revision |
 | `CADOCS_REVISION_MAX_SECS` | `600` | Longest editing time without a revision |
@@ -62,7 +62,7 @@ Environment variables only, so no config file format has to be parsed or documen
 data/
 ├── cadocs.lock      exclusive lock, held while serving
 ├── cadocs.db        with -wal and -shm while running
-├── files/           attachments, by opaque id
+├── files/           attachments, by opaque id, under two folders named from its last four digits
 └── tmp/             uploads and exports in progress, emptied at startup
 ```
 

@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use cadocs_collab::{DocRegistry, PageAuthorizer};
+use cadocs_files::LocalFileStore;
 use cadocs_server::api::auth::normalize_email;
 use cadocs_server::assets::WebAssets;
 use cadocs_server::cli::{self, Command};
@@ -77,6 +78,8 @@ async fn run(config: Config) -> anyhow::Result<()> {
     let _lock = data_dir::lock(&config.data_dir)?;
 
     let store = Arc::new(SqliteStore::open(&config.data_dir.join("cadocs.db")).await?);
+    let files = LocalFileStore::open(&config.data_dir)
+        .with_context(|| format!("cannot prepare {}", config.data_dir.display()))?;
     let registry = DocRegistry::new(store.clone(), config.collab.clone());
     let state = AppState::new(
         registry.clone(),
@@ -84,6 +87,8 @@ async fn run(config: Config) -> anyhow::Result<()> {
         Arc::new(PageAuthorizer::new(store)),
         config.socket,
         config.http,
+        Arc::new(files),
+        config.attachments,
     );
     tokio::spawn(return_freed_memory(registry, state.passwords.clone()));
     start_jobs(&state, config.jobs);

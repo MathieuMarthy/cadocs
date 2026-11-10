@@ -24,14 +24,17 @@ use axum::http::StatusCode;
 use axum::middleware::{from_fn_with_state, map_response};
 use axum::routing::{any, get};
 use cadocs_collab::{Authorizer, DocRegistry};
+use cadocs_files::FileStore;
 use cadocs_jobs::{Cleanup, JobConfig, JobQueue, Worker};
-use cadocs_store::{AccountStore, DocStore, JobStore, PageStore, SpaceStore, WorkspaceStore};
+use cadocs_store::{
+    AccountStore, AttachmentStore, DocStore, JobStore, PageStore, SpaceStore, WorkspaceStore,
+};
 use rust_embed::RustEmbed;
 use tokio::net::TcpListener;
 use tokio::sync::{Notify, oneshot, watch};
 use tokio::time::{MissedTickBehavior, interval, timeout};
 
-use crate::config::{HttpConfig, SocketConfig};
+use crate::config::{AttachmentLimits, HttpConfig, SocketConfig};
 use crate::password::Passwords;
 use crate::rate_limit::RateLimiter;
 
@@ -47,6 +50,8 @@ pub struct AppState<S, A> {
     pub socket: SocketConfig,
     pub http: Arc<HttpConfig>,
     pub passwords: Arc<Passwords>,
+    pub files: Arc<dyn FileStore>,
+    pub attachments: AttachmentLimits,
     /// Shared by the routes that check or hash a password.
     pub password_guesses: Arc<RateLimiter>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
@@ -64,6 +69,8 @@ impl<S, A> Clone for AppState<S, A> {
             socket: self.socket,
             http: self.http.clone(),
             passwords: self.passwords.clone(),
+            files: self.files.clone(),
+            attachments: self.attachments,
             password_guesses: self.password_guesses.clone(),
             sockets: self.sockets.clone(),
             access: self.access.clone(),
@@ -78,6 +85,8 @@ impl<S, A> AppState<S, A> {
         authorizer: Arc<A>,
         socket: SocketConfig,
         http: HttpConfig,
+        files: Arc<dyn FileStore>,
+        attachments: AttachmentLimits,
     ) -> Self {
         Self {
             registry,
@@ -86,6 +95,8 @@ impl<S, A> AppState<S, A> {
             socket,
             http: Arc::new(http),
             passwords: Arc::default(),
+            files,
+            attachments,
             password_guesses: Arc::new(RateLimiter::new(
                 api::auth::GUESS_BURST,
                 api::auth::GUESS_REFILL,
@@ -105,7 +116,7 @@ impl<S, A> AppState<S, A> {
 
 /// Starts the worker, which runs until the process ends: a job it cuts short runs again at the next
 /// start. The queue is for whatever adds jobs.
-pub fn start_jobs<S: DocStore + JobStore, A>(
+pub fn start_jobs<S: DocStore + JobStore + AttachmentStore, A>(
     state: &AppState<S, A>,
     config: JobConfig,
 ) -> JobQueue<S> {
@@ -114,6 +125,7 @@ pub fn start_jobs<S: DocStore + JobStore, A>(
         state.store.clone(),
         state.registry.clone(),
         state.access.clone(),
+        state.files.clone(),
         config.trash_retention,
     );
     tokio::spawn(Worker::new(queue.clone(), Arc::new(cleanup), config).run());
@@ -146,7 +158,7 @@ async fn watch_access<S: DocStore, A: Authorizer>(
 
 pub fn router<S, A, E>(state: AppState<S, A>) -> Router
 where
-    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore,
+    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore + AttachmentStore,
     A: Authorizer,
     E: RustEmbed + 'static,
 {
@@ -181,7 +193,7 @@ async fn health<S: DocStore, A: Authorizer>(State(state): State<AppState<S, A>>)
 
 /// Serves until `shutdown` resolves, then closes every socket and flushes every room.
 pub async fn serve<
-    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore,
+    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore + AttachmentStore,
     A: Authorizer,
     E: RustEmbed + 'static,
 >(

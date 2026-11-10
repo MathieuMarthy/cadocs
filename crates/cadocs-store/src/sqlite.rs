@@ -1,4 +1,5 @@
 mod accounts;
+mod attachments;
 mod jobs;
 mod pages;
 mod spaces;

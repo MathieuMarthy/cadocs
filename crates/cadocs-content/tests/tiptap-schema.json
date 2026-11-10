@@ -60,6 +60,16 @@
       "atom": false,
       "attrs": {}
     },
+    "file": {
+      "content": "",
+      "group": "block",
+      "inline": false,
+      "atom": true,
+      "attrs": {
+        "id": null,
+        "name": null
+      }
+    },
     "hardBreak": {
       "content": "",
       "group": "inline",
@@ -82,6 +92,16 @@
       "inline": false,
       "atom": true,
       "attrs": {}
+    },
+    "image": {
+      "content": "",
+      "group": "block",
+      "inline": false,
+      "atom": true,
+      "attrs": {
+        "alt": null,
+        "id": null
+      }
     },
     "listItem": {
       "content": "paragraph block*",

@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// A page with all that resolution needs to know about the user `?1`.
-const SELECT_PAGE: &str = concat!(
+pub(super) const SELECT_PAGE: &str = concat!(
     "SELECT p.id, p.workspace_id, p.space_id, p.parent_id, p.position, p.slug, p.title,
          p.created_by, p.updated_by, p.deleted_at, p.deleted_by, p.created_at, p.updated_at,
          EXISTS (SELECT 1 FROM pages c WHERE c.parent_id = p.id AND c.deleted_at IS NULL)
@@ -28,7 +28,7 @@ const SUBTREE: &str = "WITH RECURSIVE subtree(id, depth) AS (
          SELECT p.id, subtree.depth + 1 FROM pages p JOIN subtree ON p.parent_id = subtree.id
      )";
 
-fn scope(row: &SqliteRow) -> Scope {
+pub(super) fn scope(row: &SqliteRow) -> Scope {
     Scope {
         page_trashed: row.get::<Option<i64>, _>("deleted_at").is_some(),
         ..spaces::scope(row)
@@ -97,7 +97,7 @@ async fn select_page(
 }
 
 /// The row of the page, once the user is known to be allowed `action`.
-async fn authorize(
+pub(super) async fn authorize(
     conn: &mut SqliteConnection,
     page_id: &str,
     actor: &str,

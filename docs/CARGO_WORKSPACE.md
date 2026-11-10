@@ -26,7 +26,7 @@ cadocs/
 
 `cadocs-bench` is outside `default-members`, so a plain `cargo build --release` does not build it. Built together, its dependency features would unify into the server's and change the shipped binary. Use `--workspace` for tests and clippy, and `-p` to build it.
 
-The prototype contains `core`, `store`, `collab`, `server` and `bench`, step 10 of the MVP added `jobs` and step 16 `content`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
+The prototype contains `core`, `store`, `collab`, `server` and `bench`, step 10 of the MVP added `jobs`, step 16 `content` and step 17 `files`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
 
 ## Selected crates
 
@@ -37,7 +37,7 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | Crate | Why | RAM | Binary |
 | --- | --- | --- | --- |
 | `tokio` | Async runtime, required by axum and sqlx. Features limited to what is used | Low, set by worker count | Medium |
-| `axum` (`http1`, `json`, `tokio`, `ws`, no default features, `multipart` from the MVP) | Same stack as uptime-monitoring. Thin layer over hyper | Low. Socket buffers are set to 4 KiB each way instead of 128 KiB | Medium |
+| `axum` (`http1`, `json`, `tokio`, `ws`, no default features) | Same stack as uptime-monitoring. Thin layer over hyper | Low. Socket buffers are set to 4 KiB each way instead of 128 KiB | Medium |
 | `yrs` (`sync` feature, so observers are `Send`) | Yjs port, the core of ADR 0003. Includes sync and awareness | Scales with loaded documents | Medium |
 | `sqlx` (`sqlite`, `runtime-tokio`, `migrate`, `macros` for `migrate!`, no default features) | Async SQLite with embedded migrations, path to PostgreSQL | Each connection has a thread and a page cache, bounded by pool size | Medium, bundled SQLite included |
 | `rust-embed` (no `mime-guess`: the build produces six file types) | Static front end in the binary, as in uptime-monitoring | None until served (file-backed) | Size of the assets |
@@ -49,6 +49,8 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `sha2`, `subtle`, `getrandom` | Session tokens, their hash and constant-time CSRF comparison. `sha2` and `getrandom` were already in the tree through `rust-embed` and `tempfile` | None | See `argon2` |
 | `uuid` (`std`, `v7`) | Sortable ids | None | See `argon2` |
 | `pulldown-cmark` (no default features), MIT | Markdown import in `cadocs-content` (ADR 0008). Its `html` and `getopts` features are off: HTML comes from the AST, and there is no binary | Low: a pull parser, nothing kept after an import | Low. Not linked into the server until a route uses it |
+| `bytes`, `futures-util` (`alloc` in `cadocs-files`), `percent-encoding` | The streams of `FileStore`, and the file name of an upload. All three were already in the tree through axum, so they add no code | None | None |
+| `tokio` `fs` and `io-util` features | Files on disk in `cadocs-files`, through the blocking pool | A buffer per upload or download in progress, up to a chunk of the body | Low |
 | `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
 
 ### Dev tools only
@@ -59,7 +61,8 @@ These never reach the server binary.
 | --- | --- |
 | `tokio-tungstenite`, `futures-util` | WebSocket client in `cadocs-bench` and in integration tests. Same version as axum's, so it is not compiled twice |
 | `tower` (`util`) | Calling the router directly in tests |
-| `tempfile` | Temporary databases in tests |
+| `tempfile` | Temporary databases and data folders in tests |
+| `bytes` | Building file streams in the attachment tests |
 
 `web/` has two npm dev dependencies for the same purpose: `@playwright/test` (Apache-2.0) for the browser tests, and `@types/node` to type-check them. Neither reaches `web/dist`. `svelte` (MIT) is a runtime dependency of the shell, and `@sveltejs/vite-plugin-svelte` (MIT) a build dependency. The shell is about 73 KB of JavaScript, 26 KB compressed, and TipTap stays in a chunk that only a page loads.
 

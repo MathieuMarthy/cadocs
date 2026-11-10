@@ -14,6 +14,7 @@ import { BulletList, ListItem, OrderedList, TaskItem, TaskList } from "@tiptap/e
 import { TableKit } from "@tiptap/extension-table";
 import StarterKit from "@tiptap/starter-kit";
 
+import { FileBlock, ImageBlock } from "./attachments";
 import { Callout, PluginBlock, TableOfContents, Toggle } from "./blocks";
 import { lowlight } from "./code";
 import { PageLink } from "./pagelink";
@@ -243,6 +244,29 @@ export const entries: Entry[] = [
         label: "table of contents",
         keywords: ["toc", "contents", "outline"],
         apply: (chain) => chain.insertContent({ type: "tableOfContents" }),
+      },
+    ],
+  },
+  {
+    // Uploads need the page, so `collab.ts` adds them with `Uploads`, as it adds `PagePicker`.
+    name: "image",
+    extensions: [ImageBlock],
+    commands: [
+      {
+        label: "image",
+        keywords: ["picture", "photo", "upload"],
+        apply: (chain) => chain.pickAttachment("image"),
+      },
+    ],
+  },
+  {
+    name: "file",
+    extensions: [FileBlock],
+    commands: [
+      {
+        label: "file",
+        keywords: ["attachment", "upload", "pdf", "document"],
+        apply: (chain) => chain.pickAttachment("file"),
       },
     ],
   },

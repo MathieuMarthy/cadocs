@@ -28,6 +28,8 @@ fn collect<'a>(blocks: &'a [Block], found: &mut Vec<(u8, &'a [Inline])>) {
             | Block::CodeBlock { .. }
             | Block::HorizontalRule
             | Block::TableOfContents
+            | Block::Image { .. }
+            | Block::File { .. }
             | Block::Plugin { .. } => {}
         }
     }

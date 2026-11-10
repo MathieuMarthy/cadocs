@@ -49,7 +49,12 @@ fn blocks(list: &[Block], out: &mut String) {
                 .iter()
                 .flat_map(|row| &row.cells)
                 .for_each(|cell| blocks(&cell.blocks, out)),
-            Block::Plugin { text, .. } => line(out, text),
+            Block::Plugin { text, .. } | Block::File { name: text, .. } => line(out, text),
+            Block::Image { alt, .. } => {
+                if let Some(alt) = alt.as_deref().filter(|alt| !alt.is_empty()) {
+                    line(out, alt);
+                }
+            }
             Block::HorizontalRule | Block::TableOfContents => {}
         }
     }

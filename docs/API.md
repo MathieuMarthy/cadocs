@@ -1,6 +1,6 @@
 # API
 
-All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today `/ws/pages/{page_id}`, and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces, grants and pages, apart from `/duplicate`, the imports, the exports and the revisions. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
+All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today `/ws/pages/{page_id}`, and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces, grants, pages and attachments, apart from `/duplicate`, the imports, the exports and the revisions. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
 
 ## Conventions
 
@@ -182,9 +182,14 @@ The role in `GET /pages/{page}` tells the front end whether to make the editor r
 
 | Method | Route | Role | Purpose |
 | --- | --- | --- | --- |
-| POST | `/pages/{page}/attachments` | editor | Streaming multipart upload |
+| POST | `/pages/{page}/attachments?name=` | editor | Streaming upload |
 | GET | `/attachments/{id}` | viewer of a referencing page | Download |
-| DELETE | `/attachments/{id}` | editor of a referencing page | Delete |
+| DELETE | `/attachments/{id}` | editor of a referencing page | Delete, for every page that references it |
+
+- An upload is the file itself as the body, not multipart: it streams to disk with no parser in between, and a browser sends a `File` as is. `name` is the file name, percent-encoded, `+` for a space, 1 to 255 characters with no control character, else a `400` naming `name`. `Content-Type` is the file's type: its parameters are dropped, and a missing or malformed one is stored as `application/octet-stream`. It answers `201` with `{ id, workspace_id, file_name, content_type, size, uploaded_by, created_at }`.
+- A file over `CADOCS_MAX_UPLOAD_MB`, or over what the workspace quota leaves, is a `413`: at once when `Content-Length` announces it, else as soon as the stream passes the limit. A full quota refuses even an empty file. A storage failure, a full disk among them, is a `500`, and nothing is recorded.
+- A download sends the stored type, `Content-Length`, an `ETag` of the SHA-256 and `Cache-Control: private, no-cache`, so a reader revalidates and gets `304` while the file is unchanged. `Content-Disposition` is `inline` for PNG, JPEG, GIF, WebP and AVIF, `attachment` for anything else, SVG included, with the name in `filename*`. Its `Content-Security-Policy` is `default-src 'none'; sandbox`, so a file opened by itself runs nothing.
+- `DELETE` answers `204`. A reader who is not an editor of any referencing page gets `403`, and someone who reads none of them `404`.
 
 ### Search
 

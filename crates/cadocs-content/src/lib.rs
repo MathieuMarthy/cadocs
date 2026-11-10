@@ -14,6 +14,10 @@ pub mod yjs;
 
 mod headings;
 
+/// Where the server serves an attachment, followed by its id. Renderers link there, and
+/// Markdown import reads an image or a file from it.
+pub const ATTACHMENT_PATH: &str = "/api/v1/attachments/";
+
 /// Looks up the title of a page that content links to, as the reader may see it: `None` for a
 /// page the reader cannot open or that does not exist, which renderers show without a title.
 pub trait PageTitles {
