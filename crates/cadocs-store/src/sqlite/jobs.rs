@@ -9,6 +9,13 @@ use tokio::sync::Notify;
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob, PageSite, StoreError};
 
+/// Frees at most 1024 pages, 4 MiB with the default page size, so the writer is held briefly.
+const VACUUM_STEP: &str = "PRAGMA incremental_vacuum(1024)";
+/// `analysis_limit` bounds the rows read per index, so a large table is analysed quickly.
+/// `0x10002` checks every table, not only those this connection queried: reads run on the
+/// readers. `optimize` analyses a table only when its size changed a lot since the last time.
+const OPTIMIZE: &str = "PRAGMA analysis_limit = 400; PRAGMA optimize = 0x10002;";
+
 /// A job that outlives its process gets this in `last_error`.
 const INTERRUPTED: &str = "interrupted on every attempt";
 
@@ -198,4 +205,26 @@ impl JobStore for SqliteStore {
             .await?;
         Ok(deleted.rows_affected() > 0)
     }
+
+    async fn maintain_database(&self) -> Result<(), StoreError> {
+        let mut free = freelist_count(self).await?;
+        while free > 0 {
+            sqlx::raw_sql(VACUUM_STEP).execute(&self.writer).await?;
+            let left = freelist_count(self).await?;
+            // A database opened by `open_existing` may still have no auto-vacuum, and the step
+            // then frees nothing.
+            if left >= free {
+                break;
+            }
+            free = left;
+        }
+        sqlx::raw_sql(OPTIMIZE).execute(&self.writer).await?;
+        Ok(())
+    }
+}
+
+async fn freelist_count(store: &SqliteStore) -> Result<i64, StoreError> {
+    Ok(sqlx::query_scalar("PRAGMA freelist_count")
+        .fetch_one(&store.writer)
+        .await?)
 }

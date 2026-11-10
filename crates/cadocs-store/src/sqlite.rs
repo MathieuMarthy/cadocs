@@ -14,7 +14,8 @@ use std::time::Duration;
 use sqlx::Row;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
+    SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions,
+    SqliteSynchronous,
 };
 use tokio::sync::Notify;
 
@@ -31,6 +32,10 @@ const READER_CONNECTIONS: u32 = 2;
 /// Takes the write lock up front. A deferred transaction that reads first would fail at once when
 /// another process writes, because upgrading a read does not use the busy timeout.
 const BEGIN_WRITE: &str = "BEGIN IMMEDIATE";
+
+/// Bytes the WAL keeps on disk after a checkpoint. A large transaction, such as an import, grows
+/// it, and SQLite would otherwise never shrink the file back.
+const WAL_SIZE_LIMIT: i64 = 64 * 1024 * 1024;
 
 /// How long after an edit its page is indexed: the edits of that time share one run.
 const REINDEX_DELAY: Duration = Duration::from_secs(5);
@@ -54,10 +59,13 @@ impl SqliteStore {
         let writer = writer(
             connect_options(path)
                 .create_if_missing(true)
+                // Takes effect only on a database with no table yet: see below for the others.
+                .auto_vacuum(SqliteAutoVacuum::Incremental)
                 .journal_mode(SqliteJournalMode::Wal),
         )
         .await?;
         MIGRATOR.run(&writer).await?;
+        incremental_auto_vacuum(&writer).await?;
         Ok(Self::with_writer(path, writer))
     }
 
@@ -111,6 +119,23 @@ async fn writer(options: SqliteConnectOptions) -> Result<SqlitePool, sqlx::Error
         .await
 }
 
+/// A database created before `auto_vacuum` was set keeps `NONE`, and only a `VACUUM` changes
+/// that. It rewrites the whole file once, so it runs at startup, where `serve` holds the data
+/// folder alone.
+async fn incremental_auto_vacuum(writer: &SqlitePool) -> Result<(), StoreError> {
+    let mode: i64 = sqlx::query_scalar("PRAGMA auto_vacuum")
+        .fetch_one(writer)
+        .await?;
+    if mode != 2 {
+        sqlx::raw_sql("PRAGMA auto_vacuum = INCREMENTAL; VACUUM;")
+            .execute(writer)
+            .await?;
+    }
+    Ok(())
+}
+
+/// No `mmap_size`, on purpose: mapped pages count in the process RSS, which the RAM targets
+/// measure, while the OS page cache gives the same reads uncounted (ADR 0002).
 fn connect_options(path: &Path) -> SqliteConnectOptions {
     SqliteConnectOptions::new()
         .filename(path)
@@ -119,6 +144,7 @@ fn connect_options(path: &Path) -> SqliteConnectOptions {
         .foreign_keys(true)
         // 512 KiB per connection: the OS page cache does the real caching.
         .pragma("cache_size", "-512")
+        .pragma("journal_size_limit", WAL_SIZE_LIMIT.to_string())
 }
 
 impl DocStore for SqliteStore {
@@ -309,6 +335,8 @@ impl DocStore for SqliteStore {
 mod tests {
     use tokio::time::timeout;
 
+    use crate::JobStore;
+
     use super::*;
 
     const SHORT: Duration = Duration::from_millis(200);
@@ -363,6 +391,65 @@ mod tests {
             .append_updates("doc", &updates, &DocEdit::default())
             .await
             .unwrap();
+    }
+
+    async fn pragma(pool: &SqlitePool, name: &str) -> i64 {
+        sqlx::query_scalar(sqlx::AssertSqlSafe(format!("PRAGMA {name}")))
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_new_database_frees_pages_incrementally() {
+        let (store, _dir) = open().await;
+        assert_eq!(pragma(&store.writer, "auto_vacuum").await, 2);
+    }
+
+    #[tokio::test]
+    async fn an_older_database_turns_to_incremental_auto_vacuum() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cadocs.db");
+        let old = SqlitePoolOptions::new()
+            .connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true))
+            .await
+            .unwrap();
+        sqlx::raw_sql("CREATE TABLE older (x)")
+            .execute(&old)
+            .await
+            .unwrap();
+        assert_eq!(pragma(&old, "auto_vacuum").await, 0);
+        old.close().await;
+
+        let store = SqliteStore::open(&path).await.unwrap();
+        assert_eq!(pragma(&store.writer, "auto_vacuum").await, 2);
+    }
+
+    #[tokio::test]
+    async fn the_wal_is_cut_back_after_a_checkpoint() {
+        let (store, _dir) = open().await;
+        assert_eq!(
+            pragma(&store.writer, "journal_size_limit").await,
+            WAL_SIZE_LIMIT
+        );
+    }
+
+    #[tokio::test]
+    async fn maintenance_gives_free_pages_back_to_the_disk() {
+        let (store, _dir) = open().await;
+        sqlx::raw_sql(
+            "CREATE TABLE filler (data BLOB);
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000)
+             INSERT INTO filler SELECT randomblob(4000) FROM n;
+             DROP TABLE filler;",
+        )
+        .execute(&store.writer)
+        .await
+        .unwrap();
+        assert!(pragma(&store.writer, "freelist_count").await > 2000);
+
+        store.maintain_database().await.unwrap();
+        assert_eq!(pragma(&store.writer, "freelist_count").await, 0);
     }
 
     #[tokio::test]
