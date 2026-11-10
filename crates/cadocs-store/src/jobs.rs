@@ -2,6 +2,9 @@
 //! the worker calls them.
 
 use std::future::Future;
+use std::sync::Arc;
+
+use tokio::sync::Notify;
 
 use crate::{PageSite, StoreError};
 
@@ -43,6 +46,10 @@ pub struct ExpiredSpace {
 }
 
 pub trait JobStore: Send + Sync + 'static {
+    /// Told of each job added, by `enqueue` or by another write, such as the reindex a flush
+    /// queues. The worker waits on it.
+    fn jobs_added(&self) -> Arc<Notify>;
+
     /// Adds a job, unless one with its key is waiting.
     fn enqueue(&self, job: &NewJob) -> impl Future<Output = Result<(), StoreError>> + Send;
 

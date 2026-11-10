@@ -25,9 +25,10 @@ use axum::middleware::{from_fn_with_state, map_response};
 use axum::routing::{any, get};
 use cadocs_collab::{Authorizer, DocRegistry};
 use cadocs_files::FileStore;
-use cadocs_jobs::{Cleanup, JobConfig, JobQueue, Worker};
+use cadocs_jobs::{Cleanup, Index, JobConfig, JobQueue, ServerJobs, Worker};
 use cadocs_store::{
-    AccountStore, AttachmentStore, DocStore, JobStore, PageStore, SpaceStore, WorkspaceStore,
+    AccountStore, AttachmentStore, DocStore, JobStore, PageStore, SearchStore, SpaceStore,
+    WorkspaceStore,
 };
 use rust_embed::RustEmbed;
 use tokio::net::TcpListener;
@@ -116,7 +117,7 @@ impl<S, A> AppState<S, A> {
 
 /// Starts the worker, which runs until the process ends: a job it cuts short runs again at the next
 /// start. The queue is for whatever adds jobs.
-pub fn start_jobs<S: DocStore + JobStore + AttachmentStore, A>(
+pub fn start_jobs<S: DocStore + JobStore + AttachmentStore + SearchStore, A>(
     state: &AppState<S, A>,
     config: JobConfig,
 ) -> JobQueue<S> {
@@ -128,7 +129,9 @@ pub fn start_jobs<S: DocStore + JobStore + AttachmentStore, A>(
         state.files.clone(),
         config.trash_retention,
     );
-    tokio::spawn(Worker::new(queue.clone(), Arc::new(cleanup), config).run());
+    let index = Index::new(state.store.clone(), state.registry.clone());
+    let jobs = ServerJobs::new(cleanup, index);
+    tokio::spawn(Worker::new(queue.clone(), Arc::new(jobs), config).run());
     queue
 }
 
@@ -158,7 +161,13 @@ async fn watch_access<S: DocStore, A: Authorizer>(
 
 pub fn router<S, A, E>(state: AppState<S, A>) -> Router
 where
-    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore + AttachmentStore,
+    S: DocStore
+        + AccountStore
+        + WorkspaceStore
+        + SpaceStore
+        + PageStore
+        + AttachmentStore
+        + SearchStore,
     A: Authorizer,
     E: RustEmbed + 'static,
 {
@@ -193,7 +202,13 @@ async fn health<S: DocStore, A: Authorizer>(State(state): State<AppState<S, A>>)
 
 /// Serves until `shutdown` resolves, then closes every socket and flushes every room.
 pub async fn serve<
-    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore + AttachmentStore,
+    S: DocStore
+        + AccountStore
+        + WorkspaceStore
+        + SpaceStore
+        + PageStore
+        + AttachmentStore
+        + SearchStore,
     A: Authorizer,
     E: RustEmbed + 'static,
 >(

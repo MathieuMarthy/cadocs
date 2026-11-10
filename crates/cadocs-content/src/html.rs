@@ -5,10 +5,10 @@
 
 use std::fmt::Write;
 
-use crate::{ATTACHMENT_PATH, PageTitles};
 use crate::ast::*;
 use crate::headings::numbered;
 use crate::url::allowed;
+use crate::{ATTACHMENT_PATH, PageTitles};
 
 pub fn to_html(document: &Document, titles: &dyn PageTitles) -> String {
     let mut out = String::new();

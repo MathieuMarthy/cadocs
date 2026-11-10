@@ -23,12 +23,13 @@ use cadocs_server::session::{csrf_token, token_hash};
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, Credentials,
-    DateCursor, DocEdit, DocStore, FirstUser, Grant, Invitation, InvitationPreview, InvitedUser,
-    Member, Membership, MovedPage, NewAttachment, NewGrant, NewInvitation, NewPage,
-    NewPasswordReset, NewSession, NewSpace, NewWorkspace, PageCrumb, PageMove, PageRecord,
-    PageSite, PageStore, SessionStanding, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore,
-    StoreError, StoredDoc, StoredUpdate, UpdateBasis, UploadTarget, UserChanges, UserRecord,
-    Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
+    DateCursor, DocEdit, DocStore, FirstUser, Grant, IndexTarget, Invitation, InvitationPreview,
+    InvitedUser, Member, Membership, MovedPage, NewAttachment, NewGrant, NewInvitation, NewPage,
+    NewPasswordReset, NewSession, NewSpace, NewWorkspace, PageCrumb, PageIndex, PageMove,
+    PageRecord, PageSite, PageStore, SearchHit, SearchStore, SessionStanding, Snapshot, Space,
+    SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, UpdateBasis,
+    UploadTarget, UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach,
+    WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -237,6 +238,29 @@ impl AttachmentStore for FlakyStore {
 
     async fn known_attachments(&self, ids: &[String]) -> Result<Vec<String>, StoreError> {
         self.inner.known_attachments(ids).await
+    }
+}
+
+impl SearchStore for FlakyStore {
+    async fn index_target(&self, page_id: &str) -> Result<Option<IndexTarget>, StoreError> {
+        self.inner.index_target(page_id).await
+    }
+
+    async fn index_page(&self, index: &PageIndex<'_>) -> Result<bool, StoreError> {
+        self.inner.index_page(index).await
+    }
+
+    async fn search(
+        &self,
+        workspace_id: &str,
+        actor: &str,
+        fts: &str,
+        space: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<SearchHit>, StoreError> {
+        self.inner
+            .search(workspace_id, actor, fts, space, limit)
+            .await
     }
 }
 

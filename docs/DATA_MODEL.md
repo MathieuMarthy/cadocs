@@ -353,6 +353,8 @@ END;
 
 `page_fts` is linked by `rowid`, because a lookup on an `UNINDEXED` column would scan the whole table on every reindex. The trigger also runs on the cascade from `pages`.
 
+A page's index is rebuilt by the `reindex_page` job (payload `{"page": "<id>"}`, key `reindex:<id>`). A flush queues it in the same transaction, five seconds ahead, and a pending one absorbs the next flushes. Changing a workspace's `language` queues one for each of its pages, in the transaction of the change, and the migration that added search queued one for every page. The job replaces `page_text` and `page_fts` in one transaction, so a page has one row in each. It also adds a reference from the page to each attachment its content shows, if that attachment belongs to the page's workspace: an id from another workspace, which a crafted client could write, gives nothing. A trashed page keeps its index, which the search query leaves out, and a restore needs no reindex.
+
 Query shape, with permission filtering inside the SQL:
 
 ```sql
@@ -367,6 +369,8 @@ WHERE page_fts MATCH ?1
 ORDER BY score
 LIMIT 20;
 ```
+
+The `SqliteStore` query matches first, in a common table expression, then joins the pages and resolves the role as the other lists do (`HAS_ROLE`). The match covers every workspace before the filter, which step 23 measures at 10,000 pages.
 
 ## Portability
 

@@ -15,7 +15,7 @@
   import { api, type Workspace } from "../lib/api";
   import { Form } from "../lib/form.svelte";
   import { acquireNav, type Nav } from "../lib/nav.svelte";
-  import { route } from "../lib/router.svelte";
+  import { navigate, route } from "../lib/router.svelte";
   import { app, signOut } from "../lib/session.svelte";
   import { nextTheme, theme } from "../lib/theme.svelte";
   import type { IconName } from "./icons";
@@ -125,6 +125,26 @@
     };
   });
 
+  // `Ctrl K`, or `⌘ K`, opens search from any screen of a workspace, or goes back to its field.
+  $effect(() => {
+    if (!current) return;
+    const slug = current.slug;
+    const key = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "k" || !(event.ctrlKey || event.metaKey)) return;
+      if (event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      const field = document.querySelector<HTMLInputElement>(".search-query input");
+      if (field) {
+        field.focus();
+        field.select();
+      } else {
+        navigate(`/w/${slug}/search`);
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  });
+
   /** The tree keeps its scroll from one screen to the next. */
   function keepScroll(element: HTMLElement) {
     element.scrollTop = treeScroll;
@@ -164,6 +184,14 @@
     </details>
 
     {#if current}
+      <a
+        class="search-field"
+        href="/w/{current.slug}/search"
+        aria-label="search"
+        aria-keyshortcuts="Control+K"
+      >
+        <span>search…</span><kbd>Ctrl K</kbd>
+      </a>
       <ul class="rows">
         <li>
           <a

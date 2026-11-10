@@ -43,7 +43,7 @@ fn site(row: &SqliteRow) -> PageSite {
 }
 
 /// `None` for a user with no role.
-fn page(row: &SqliteRow) -> Option<PageRecord> {
+pub(super) fn page(row: &SqliteRow) -> Option<PageRecord> {
     Some(PageRecord {
         id: row.get("id"),
         workspace_id: row.get("workspace_id"),

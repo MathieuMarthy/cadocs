@@ -26,7 +26,7 @@ cadocs/
 
 `cadocs-bench` is outside `default-members`, so a plain `cargo build --release` does not build it. Built together, its dependency features would unify into the server's and change the shipped binary. Use `--workspace` for tests and clippy, and `-p` to build it.
 
-The prototype contains `core`, `store`, `collab`, `server` and `bench`, step 10 of the MVP added `jobs`, step 16 `content` and step 17 `files`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
+The prototype contains `core`, `store`, `collab`, `server` and `bench`, step 10 of the MVP added `jobs`, step 16 `content`, step 17 `files` and step 18 `search`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
 
 ## Selected crates
 
@@ -51,6 +51,8 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `pulldown-cmark` (no default features), MIT | Markdown import in `cadocs-content` (ADR 0008). Its `html` and `getopts` features are off: HTML comes from the AST, and there is no binary | Low: a pull parser, nothing kept after an import | Low. Not linked into the server until a route uses it |
 | `bytes`, `futures-util` (`alloc` in `cadocs-files`), `percent-encoding` | The streams of `FileStore`, and the file name of an upload. All three were already in the tree through axum, so they add no code | None | None |
 | `tokio` `fs` and `io-util` features | Files on disk in `cadocs-files`, through the blocking pool | A buffer per upload or download in progress, up to a chunk of the body | Low |
+| `rust-stemmers`, MIT and BSD-3-Clause | Snowball stemmers for the 18 languages a workspace accepts, in `cadocs-search` (ADR 0007). Its `serde` dependency was already in the tree | A stemmer is a function pointer; the work buffer lives for one word | See step 18 in [benchmark notes](notes/benchmark.md) |
+| `tokio` `sync` feature in `cadocs-store` | `Notify`, so a write that adds a job wakes the worker. Already compiled for the other crates | None | None |
 | `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
 
 ### Dev tools only
@@ -77,7 +79,6 @@ Step 16 adds a `plugin` node of our own (`blocks.ts`, ADR 0016) and `web/scripts
 | Crate | Stage | Why | Cost note |
 | --- | --- | --- | --- |
 | `tower-http` | MVP | Timeouts, compression, tracing, limited features | Low |
-| `rust-stemmers` | MVP | Snowball stemmers (ADR 0007) | Static tables in the binary |
 | `zstd` | MVP | Compression of revisions | Bounded by compression level |
 | `jiff` | MVP | Dates, as in uptime-monitoring | Low without the bundled tz database |
 | `async_zip` | MVP | Streaming zip for exports with attachments and for imports | Low, nothing buffered whole |

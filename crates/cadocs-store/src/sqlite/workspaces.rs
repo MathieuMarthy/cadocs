@@ -6,7 +6,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, SqliteConnection};
 
 use super::accounts::{INSERT_SESSION, membership, select_memberships};
-use super::{BEGIN_WRITE, SqliteStore};
+use super::{BEGIN_WRITE, SqliteStore, search};
 use crate::{
     Invitation, InvitationPreview, InvitedUser, MAX_SLUG_CHARS, Member, Membership, NewInvitation,
     NewSession, NewWorkspace, StoreError, Workspace, WorkspaceChanges, WorkspaceStore,
@@ -297,6 +297,20 @@ impl WorkspaceStore for SqliteStore {
     ) -> Result<Workspace, StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
         authorize(&mut tx, workspace_id, actor, WorkspaceAction::Update).await?;
+        let language: String = sqlx::query_scalar("SELECT language FROM workspaces WHERE id = ?1")
+            .bind(workspace_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        // Stems change with the language, so every page must be stemmed again.
+        let mut queued = false;
+        if changes
+            .language
+            .as_ref()
+            .is_some_and(|new| *new != language)
+        {
+            let filter = "p.workspace_id = ?1";
+            queued = search::queue_reindex(&mut tx, filter, workspace_id, now).await?;
+        }
         sqlx::query(
             "UPDATE workspaces SET
                  name = coalesce(?2, name),
@@ -316,6 +330,9 @@ impl WorkspaceStore for SqliteStore {
             .fetch_one(&mut *tx)
             .await?;
         tx.commit().await?;
+        if queued {
+            self.jobs_added.notify_one();
+        }
         Ok(workspace(&row))
     }
 

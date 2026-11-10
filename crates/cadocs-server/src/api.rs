@@ -5,6 +5,7 @@ mod attachments;
 pub mod auth;
 mod invitations;
 mod pages;
+mod search;
 mod spaces;
 mod workspaces;
 
@@ -25,7 +26,8 @@ use axum::routing::any;
 use axum::{Json, Router};
 use cadocs_collab::{Authorizer, CollabError};
 use cadocs_store::{
-    AccountStore, AttachmentStore, DocStore, PageStore, SpaceStore, StoreError, WorkspaceStore,
+    AccountStore, AttachmentStore, DocStore, PageStore, SearchStore, SpaceStore, StoreError,
+    WorkspaceStore,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -374,7 +376,13 @@ impl IntoResponse for ApiError {
 
 pub fn router<S, A>(state: &AppState<S, A>) -> Router<AppState<S, A>>
 where
-    S: DocStore + AccountStore + WorkspaceStore + SpaceStore + PageStore + AttachmentStore,
+    S: DocStore
+        + AccountStore
+        + WorkspaceStore
+        + SpaceStore
+        + PageStore
+        + AttachmentStore
+        + SearchStore,
     A: Authorizer,
 {
     // A nested fallback only sees paths below the root of the nest. `router` in `lib.rs` also
@@ -387,7 +395,8 @@ where
         .merge(invitations::routes(state))
         .merge(spaces::routes(state))
         .merge(pages::routes(state))
-        .merge(attachments::routes(state));
+        .merge(attachments::routes(state))
+        .merge(search::routes(state));
     finish(routes, state.http.clone())
 }
 

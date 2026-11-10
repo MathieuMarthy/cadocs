@@ -98,10 +98,13 @@ fn an_attachment_is_a_block_only_alone_in_its_paragraph() {
     };
     assert_eq!(
         from_markdown(&format!("see [notes]({file})")).blocks,
-        [Block::Paragraph(vec![Inline::Text {
-            text: "see ".into(),
-            marks: Marks::default(),
-        }, link("notes")])]
+        [Block::Paragraph(vec![
+            Inline::Text {
+                text: "see ".into(),
+                marks: Marks::default(),
+            },
+            link("notes")
+        ])]
     );
     assert_eq!(
         from_markdown(&format!("[**notes**]({file})")).blocks,

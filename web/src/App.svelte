@@ -5,6 +5,7 @@
   import Invite from "./routes/Invite.svelte";
   import Login from "./routes/Login.svelte";
   import ResetPassword from "./routes/ResetPassword.svelte";
+  import Search from "./routes/Search.svelte";
   import Setup from "./routes/Setup.svelte";
   import Notice from "./components/Notice.svelte";
   import Shell from "./components/Shell.svelte";
@@ -20,7 +21,7 @@
     | { name: "redirect"; to: string }
     | { name: "setup" | "login" | "account" | "admin" | "home" | "not-found" }
     | { name: "invite" | "reset"; token: string }
-    | { name: "workspace" | "settings"; workspace: WorkspaceRow }
+    | { name: "workspace" | "settings" | "search"; workspace: WorkspaceRow }
     | { name: "space-settings"; workspace: WorkspaceRow; space: string }
     | { name: "trash"; workspace: WorkspaceRow; space: string }
     | { name: "page"; id: string };
@@ -64,6 +65,9 @@
       if (workspace && rest[0] === "trash" && rest[1] && rest.length === 2) {
         return { name: "trash", workspace, space: rest[1] };
       }
+      if (workspace && rest[0] === "search" && rest.length === 1) {
+        return { name: "search", workspace };
+      }
       if (workspace && rest[0] === "settings" && rest.length === 1) {
         return { name: "settings", workspace };
       }
@@ -105,6 +109,8 @@
   {#key `${view.workspace.id}/${view.space}`}
     <Trash workspace={view.workspace} slug={view.space} />
   {/key}
+{:else if view.name === "search"}
+  {#key view.workspace.id}<Search workspace={view.workspace} />{/key}
 {:else if view.name === "settings"}
   {#key view.workspace.id}<WorkspaceSettings workspace={view.workspace} />{/key}
 {:else if view.name === "space-settings"}

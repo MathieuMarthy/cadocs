@@ -9,6 +9,7 @@ default-members = [
     "crates/cadocs-core",
     "crates/cadocs-files",
     "crates/cadocs-jobs",
+    "crates/cadocs-search",
     "crates/cadocs-server",
     "crates/cadocs-store",
 ]
@@ -28,6 +29,7 @@ cadocs-content = { path = "crates/cadocs-content" }
 cadocs-core = { path = "crates/cadocs-core" }
 cadocs-files = { path = "crates/cadocs-files" }
 cadocs-jobs = { path = "crates/cadocs-jobs" }
+cadocs-search = { path = "crates/cadocs-search" }
 cadocs-store = { path = "crates/cadocs-store" }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 getrandom = "0.4"
@@ -35,6 +37,8 @@ percent-encoding = { version = "2", default-features = false, features = ["std"]
 # Markdown import (ADR 0008). No `html` or `getopts`: cadocs renders HTML from its own AST.
 pulldown-cmark = { version = "0.13", default-features = false }
 rust-embed = "8"
+# Snowball stemmers for search (ADR 0007). MIT and BSD-3-Clause.
+rust-stemmers = "1.2"
 serde = { version = "1", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 sha2 = { version = "0.11", default-features = false }

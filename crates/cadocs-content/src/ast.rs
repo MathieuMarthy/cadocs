@@ -9,6 +9,50 @@ pub struct Document {
     pub blocks: Vec<Block>,
 }
 
+impl Document {
+    /// The ids of the image and file blocks, in order, each once: what the page shows, and so
+    /// what its readers may download.
+    pub fn attachments(&self) -> Vec<String> {
+        let mut ids: Vec<String> = Vec::new();
+        visit(&self.blocks, &mut |block| {
+            if let Block::Image { id, .. } | Block::File { id, .. } = block
+                && !ids.contains(id)
+            {
+                ids.push(id.clone());
+            }
+        });
+        ids
+    }
+}
+
+/// Calls `action` on every block, those inside others included.
+fn visit(blocks: &[Block], action: &mut impl FnMut(&Block)) {
+    for block in blocks {
+        action(block);
+        match block {
+            Block::BulletList(items) | Block::OrderedList { items, .. } => {
+                items.iter().for_each(|item| visit(&item.blocks, action))
+            }
+            Block::TaskList(items) => items.iter().for_each(|item| visit(&item.blocks, action)),
+            Block::Blockquote(inner)
+            | Block::Callout { blocks: inner, .. }
+            | Block::Details { content: inner, .. } => visit(inner, action),
+            Block::Table(rows) => rows
+                .iter()
+                .flat_map(|row| &row.cells)
+                .for_each(|cell| visit(&cell.blocks, action)),
+            Block::Paragraph(_)
+            | Block::Heading { .. }
+            | Block::CodeBlock { .. }
+            | Block::HorizontalRule
+            | Block::TableOfContents
+            | Block::Image { .. }
+            | Block::File { .. }
+            | Block::Plugin { .. } => {}
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     Paragraph(Vec<Inline>),

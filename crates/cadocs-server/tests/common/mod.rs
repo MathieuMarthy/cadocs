@@ -3,6 +3,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use cadocs_collab::{DocRegistry, PageAuthorizer};
 use cadocs_files::{FileStore, LocalFileStore};
@@ -104,7 +105,9 @@ async fn start_custom(
 ) -> Api {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("cadocs.db");
-    let store = Arc::new(SqliteStore::open(&path).await.unwrap());
+    // Searches find a page soon after its edit.
+    let store = SqliteStore::open(&path).await.unwrap();
+    let store = Arc::new(store.with_reindex_delay(Duration::from_millis(100)));
     let config = Config::from_lookup(|name| match name {
         "CADOCS_PUBLIC_URL" => Some(public_url.to_owned()),
         "CADOCS_TRUSTED_PROXIES" => Some(proxies.to_owned()),

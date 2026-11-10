@@ -6,9 +6,12 @@ license.workspace = true
 
 [dependencies]
 cadocs-collab.workspace = true
+cadocs-content.workspace = true
 cadocs-files.workspace = true
-futures-util.workspace = true
+cadocs-search.workspace = true
 cadocs-store.workspace = true
+futures-util.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tracing.workspace = true
 uuid.workspace = true

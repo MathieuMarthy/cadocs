@@ -26,9 +26,9 @@ use pulldown_cmark::{
     Alignment, BlockQuoteKind, CodeBlockKind, Event, Options, Parser, Tag, TagEnd,
 };
 
-use crate::{ATTACHMENT_PATH, PageTitles};
 use crate::ast::*;
 use crate::url::allowed;
+use crate::{ATTACHMENT_PATH, PageTitles};
 
 const TOC: &str = "[TOC]";
 const PAGE_PREFIX: &str = "/?page=";

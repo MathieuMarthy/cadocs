@@ -8,7 +8,9 @@ license.workspace = true
 cadocs-core.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+# `Notify`, to wake the job worker when a job is added.
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }

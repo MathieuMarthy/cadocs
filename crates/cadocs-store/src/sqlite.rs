@@ -2,10 +2,12 @@ mod accounts;
 mod attachments;
 mod jobs;
 mod pages;
+mod search;
 mod spaces;
 mod workspaces;
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::Row;
@@ -13,6 +15,7 @@ use sqlx::migrate::Migrator;
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
 };
+use tokio::sync::Notify;
 
 use crate::{DocEdit, DocStore, PageSite, Snapshot, StoreError, StoredDoc, StoredUpdate, now_ms};
 
@@ -25,12 +28,18 @@ const READER_CONNECTIONS: u32 = 2;
 /// another process writes, because upgrading a read does not use the busy timeout.
 const BEGIN_WRITE: &str = "BEGIN IMMEDIATE";
 
+/// How long after an edit its page is indexed: the edits of that time share one run.
+const REINDEX_DELAY: Duration = Duration::from_secs(5);
+
 /// SQLite allows one writer at a time: a single connection queues writes in the pool instead of
 /// making them wait on `SQLITE_BUSY`, and reads never wait behind them (ADR 0002).
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     writer: SqlitePool,
     reader: SqlitePool,
+    /// Told of each job a write adds, the reindex of a flush included.
+    jobs_added: Arc<Notify>,
+    reindex_delay: Duration,
 }
 
 impl SqliteStore {
@@ -67,7 +76,18 @@ impl SqliteStore {
             .max_connections(READER_CONNECTIONS)
             .test_before_acquire(false)
             .connect_lazy_with(connect_options(path).read_only(true));
-        Self { writer, reader }
+        Self {
+            writer,
+            reader,
+            jobs_added: Arc::default(),
+            reindex_delay: REINDEX_DELAY,
+        }
+    }
+
+    /// For tests, which cannot wait the default.
+    pub fn with_reindex_delay(mut self, delay: Duration) -> Self {
+        self.reindex_delay = delay;
+        self
     }
 }
 
@@ -212,7 +232,12 @@ impl DocStore for SqliteStore {
                 }
             }
         }
+        let run_at = created_at.saturating_add(self.reindex_delay.as_millis() as i64);
+        let queued = search::queue_reindex(&mut tx, "p.id = ?1", doc_id, run_at).await?;
         tx.commit().await?;
+        if queued {
+            self.jobs_added.notify_one();
+        }
         Ok(renamed)
     }
 

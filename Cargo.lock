@@ -268,14 +268,24 @@ name = "cadocs-jobs"
 version = "0.1.0"
 dependencies = [
  "cadocs-collab",
+ "cadocs-content",
  "cadocs-files",
+ "cadocs-search",
  "cadocs-store",
  "futures-util",
+ "serde_json",
  "sqlx",
  "tempfile",
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "cadocs-search"
+version = "0.1.0"
+dependencies = [
+ "rust-stemmers",
 ]
 
 [[package]]
@@ -287,9 +297,11 @@ dependencies = [
  "axum",
  "bytes",
  "cadocs-collab",
+ "cadocs-content",
  "cadocs-core",
  "cadocs-files",
  "cadocs-jobs",
+ "cadocs-search",
  "cadocs-store",
  "futures-util",
  "getrandom 0.4.3",
@@ -1336,6 +1348,16 @@ checksum = "0d84e8ba78bd384263e5922f084cbe1b081c3b7e69add59c8fb097b879ba968a"
 dependencies = [
  "sha2 0.11.1",
  "walkdir",
+]
+
+[[package]]
+name = "rust-stemmers"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e46a2036019fdb888131db7a4c847a1063a7493f971ed94ea82c67eada63ca54"
+dependencies = [
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]

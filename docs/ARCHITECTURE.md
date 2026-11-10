@@ -124,6 +124,8 @@ Recurring jobs are queued at start and then every hour, with their kind as their
 
 A room flush marks the page dirty, and a debounced job extracts the text from the Yjs state and updates the FTS5 index (ADR 0007). Results are filtered by the spaces the user can read, inside the SQL query.
 
+The flush queues the job in its own transaction, `REINDEX_DELAY` (5 seconds) ahead, with `reindex:<page id>` as its key: the edits of those seconds share one run, and a crash between the flush and the job loses nothing. The store's `jobs_added` wakes the worker when a write adds a job, so the worker does not wait for its poll. The job reads the document through the reader outside a room, renders it to plain text with `cadocs-content`, stems it with `cadocs-search`, and replaces the page's index in one transaction, with the attachment references it finds. A query is stemmed the same way, and its excerpts are made in Rust from the stored plain text.
+
 ## RAM budget
 
 These figures are design estimates. The prototype's measurements are in [Measured results](#measured-results), and they take precedence.

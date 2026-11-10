@@ -8,6 +8,7 @@ use axum::routing::{get, patch};
 use axum::{Extension, Json, Router};
 use cadocs_collab::Authorizer;
 use cadocs_core::permissions::WorkspaceRole;
+use cadocs_search::Language;
 use cadocs_store::{
     AccountStore, DocStore, Member, Membership, NewWorkspace, Workspace, WorkspaceChanges,
     WorkspaceStore, now_ms,
@@ -19,12 +20,6 @@ use super::auth::{Fields, MAX_BODY_BYTES, WorkspaceBody, clean_name, slug};
 use super::{ApiError, ErrorCode, JsonBody, Page, PageQuery, PathParam};
 use crate::AppState;
 use crate::session::{self, CurrentSession};
-
-/// What `rust-stemmers` can stem (ADR 0007).
-const LANGUAGES: [&str; 18] = [
-    "ar", "da", "de", "el", "en", "es", "fi", "fr", "hu", "it", "nl", "no", "pt", "ro", "ru", "sv",
-    "ta", "tr",
-];
 
 pub fn routes<S, A>(state: &AppState<S, A>) -> Router<AppState<S, A>>
 where
@@ -129,7 +124,7 @@ struct UpdateRequest {
 }
 
 fn clean_language(language: String) -> Result<String, &'static str> {
-    if LANGUAGES.contains(&language.as_str()) {
+    if Language::parse(&language).is_some() {
         Ok(language)
     } else {
         Err("invalid")

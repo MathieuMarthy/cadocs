@@ -30,6 +30,12 @@ pub fn read_doc(doc: &Doc) -> Document {
     read(&doc.transact())
 }
 
+/// The title and the content of `doc`, as of one moment.
+pub fn read_page(doc: &Doc) -> (String, Document) {
+    let txn = doc.transact();
+    (read_title(&txn), read(&txn))
+}
+
 /// The content of the document `txn` reads.
 pub fn read<T: ReadTxn>(txn: &T) -> Document {
     match txn.get_xml_fragment(FRAGMENT) {

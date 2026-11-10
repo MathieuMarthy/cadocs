@@ -153,8 +153,14 @@ fn attachment_ids_and_names_are_escaped() {
             name: "<script>".into(),
         },
     ]);
-    assert!(out.contains(r#"src="/api/v1/attachments/a%22%26b%2Fc" alt="&quot;&gt;&lt;script&gt;""#), "{out}");
-    assert!(out.contains(r#"href="/api/v1/attachments/..%2Fx" download>&lt;script&gt;</a>"#), "{out}");
+    assert!(
+        out.contains(r#"src="/api/v1/attachments/a%22%26b%2Fc" alt="&quot;&gt;&lt;script&gt;""#),
+        "{out}"
+    );
+    assert!(
+        out.contains(r#"href="/api/v1/attachments/..%2Fx" download>&lt;script&gt;</a>"#),
+        "{out}"
+    );
 }
 
 #[test]

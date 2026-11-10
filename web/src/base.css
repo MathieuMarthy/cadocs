@@ -404,6 +404,66 @@ h2 {
   white-space: nowrap;
 }
 
+/* Search: the field of the sidebar opens the screen. */
+
+.search-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.search-field:hover {
+  border-color: var(--ink);
+}
+
+.search-field kbd {
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.search-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.search-query {
+  flex: 1 1 260px;
+}
+
+.search-space {
+  flex: 0 1 200px;
+}
+
+.search-results .record-who a {
+  font-weight: 500;
+}
+
+.search-results .excerpt {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
+.search-results mark {
+  background: none;
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .rows {
   margin: 0;
   padding: 0;

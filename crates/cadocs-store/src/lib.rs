@@ -4,6 +4,7 @@ mod accounts;
 mod attachments;
 mod jobs;
 mod pages;
+mod search;
 mod spaces;
 mod sqlite;
 mod workspaces;
@@ -21,6 +22,7 @@ pub use pages::{
     DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, MovedPage, NewPage, PageCrumb, PageMove,
     PageRecord, PageStore, Placement,
 };
+pub use search::{IndexTarget, PageIndex, REINDEX_PAGE, SearchHit, SearchStore};
 pub use spaces::{
     Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore, WorkspaceReach,
 };

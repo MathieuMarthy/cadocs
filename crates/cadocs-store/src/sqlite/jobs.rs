@@ -1,7 +1,10 @@
 //! Everything here runs on the writer, reads too: this polls when the server is idle, and a reader
 //! connection costs a thread and a page cache.
 
+use std::sync::Arc;
+
 use sqlx::Row;
+use tokio::sync::Notify;
 
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob, PageSite, StoreError};
@@ -10,8 +13,12 @@ use crate::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob, PageSite, StoreErr
 const INTERRUPTED: &str = "interrupted on every attempt";
 
 impl JobStore for SqliteStore {
+    fn jobs_added(&self) -> Arc<Notify> {
+        self.jobs_added.clone()
+    }
+
     async fn enqueue(&self, job: &NewJob) -> Result<(), StoreError> {
-        sqlx::query(
+        let added = sqlx::query(
             "INSERT INTO jobs (id, kind, dedup_key, payload, run_at, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT DO NOTHING",
@@ -23,7 +30,11 @@ impl JobStore for SqliteStore {
         .bind(job.run_at)
         .bind(job.now)
         .execute(&self.writer)
-        .await?;
+        .await?
+        .rows_affected();
+        if added > 0 {
+            self.jobs_added.notify_one();
+        }
         Ok(())
     }
 

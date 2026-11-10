@@ -197,6 +197,11 @@ The role in `GET /pages/{page}` tells the front end whether to make the editor r
 | --- | --- | --- | --- |
 | GET | `/workspaces/{ws}/search?q=&space=` | member | Results limited to readable spaces |
 
+- `q` is percent-encoded, `+` for a space, 1 to 200 characters once trimmed, with no control character, else a `400` naming `q` (`required`, `too_long` or `invalid`). It is cut into words (runs of letters and digits), each lowercased, folded to its letters without diacritics and stemmed in the workspace's language (ADR 0007), and a page must hold every one. The last word is a prefix while the query ends right after it, so results follow typing. A query with no word answers no result. Nothing in `q` is read as FTS5 syntax.
+- `space` keeps the results of one space. A space the caller cannot read gives no result, not an error.
+- It answers `200` with `{ items: [{ id, space_id, title, excerpt }] }`: at most 20 live pages of live spaces the caller can read, the best first, a word in the title counting five times one in the body. There is no further page. `excerpt` is a list of `{ text, match }` pieces, about 200 characters of the body around its first match, or from its start, with `…` where it was cut. A client shows the `match` pieces marked, and never reads a piece as HTML.
+- A page is indexed a few seconds after an edit (see [Search](DATA_MODEL.md#search)), so a page just written may not show yet.
+
 ### Sharing
 
 | Method | Route | Role | Purpose |
