@@ -13,6 +13,7 @@ S3=--features=cadocs-server/s3,cadocs-files/s3; cargo test --workspace $S3 && ca
 npm --prefix web ci && npm --prefix web run build   # before a release build: the binary embeds web/dist
 cargo build --release
 npm --prefix web run test:e2e                       # after the two builds: it runs target/release/cadocs, whose web/dist is embedded
+cargo deny check                                    # advisories, licenses, sources (deny.toml), as CI runs it
 bench/rss.sh build && bench/rss.sh run              # RAM benchmark, about 12 minutes, results in target/bench
 ```
 
@@ -60,3 +61,4 @@ What later steps must know, by topic. Read the file of the code you touch, and a
 - [docs/notes/store.md](docs/notes/store.md): stores, permissions, workspaces, spaces, pages.
 - [docs/notes/web.md](docs/notes/web.md): front end, browser and end-to-end tests.
 - [docs/notes/benchmark.md](docs/notes/benchmark.md): benchmark rules and measures.
+- [docs/notes/ci.md](docs/notes/ci.md): GitHub workflows, pins, cargo-deny.
