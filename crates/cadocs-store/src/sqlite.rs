@@ -37,6 +37,11 @@ const BEGIN_WRITE: &str = "BEGIN IMMEDIATE";
 /// it, and SQLite would otherwise never shrink the file back.
 const WAL_SIZE_LIMIT: i64 = 64 * 1024 * 1024;
 
+/// `doc_snapshots.codec` of a state compressed with zstd. `0` is a raw one.
+const ZSTD_CODEC: i64 = 1;
+/// The level revisions use too: most of the gain, for little CPU in the room's task.
+const ZSTD_LEVEL: i32 = 3;
+
 /// How long after an edit its page is indexed: the edits of that time share one run.
 const REINDEX_DELAY: Duration = Duration::from_secs(5);
 
@@ -159,14 +164,29 @@ impl DocStore for SqliteStore {
     async fn load(&self, doc_id: &str) -> Result<StoredDoc, StoreError> {
         let mut tx = self.reader.begin().await?;
 
-        let snapshot = sqlx::query("SELECT state, upto_seq FROM doc_snapshots WHERE page_id = ?1")
+        let row = sqlx::query("SELECT state, upto_seq, codec FROM doc_snapshots WHERE page_id = ?1")
             .bind(doc_id)
             .fetch_optional(&mut *tx)
-            .await?
-            .map(|row| Snapshot {
-                state: row.get("state"),
-                upto_seq: row.get("upto_seq"),
-            });
+            .await?;
+        let snapshot = match row {
+            None => None,
+            Some(row) => {
+                let stored: Vec<u8> = row.get("state");
+                let state = if row.get::<i64, _>("codec") == ZSTD_CODEC {
+                    zstd::stream::decode_all(stored.as_slice()).map_err(|_| {
+                        StoreError::CorruptSnapshot {
+                            doc_id: doc_id.to_owned(),
+                        }
+                    })?
+                } else {
+                    stored
+                };
+                Some(Snapshot {
+                    state,
+                    upto_seq: row.get("upto_seq"),
+                })
+            }
+        };
 
         let after = snapshot.as_ref().map_or(0, |s| s.upto_seq);
         let updates = sqlx::query(
@@ -305,18 +325,23 @@ impl DocStore for SqliteStore {
             });
         }
 
+        // A Yjs state repeats its structure and client ids, so it shrinks several times.
+        let compressed = zstd::bulk::compress(&snapshot.state, ZSTD_LEVEL)
+            .map_err(|error| StoreError::Database(sqlx::Error::Encode(Box::new(error))))?;
         sqlx::query(
-            "INSERT INTO doc_snapshots (page_id, state, upto_seq, updated_at)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO doc_snapshots (page_id, state, upto_seq, updated_at, codec)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT (page_id) DO UPDATE SET
                  state = excluded.state,
                  upto_seq = excluded.upto_seq,
-                 updated_at = excluded.updated_at",
+                 updated_at = excluded.updated_at,
+                 codec = excluded.codec",
         )
         .bind(doc_id)
-        .bind(&snapshot.state)
+        .bind(&compressed)
         .bind(snapshot.upto_seq)
         .bind(now_ms())
+        .bind(ZSTD_CODEC)
         .execute(&mut *tx)
         .await?;
 
@@ -450,6 +475,62 @@ mod tests {
 
         store.maintain_database().await.unwrap();
         assert_eq!(pragma(&store.writer, "freelist_count").await, 0);
+    }
+
+    /// A Yjs state that compresses, as real ones do: repeated structure.
+    fn snapshot_state() -> Vec<u8> {
+        b"<paragraph>cadocs</paragraph>".repeat(200)
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_is_stored_compressed_and_loads_as_it_was() {
+        let (store, _dir) = open().await;
+        let state = snapshot_state();
+        let snapshot = Snapshot {
+            state: state.clone(),
+            upto_seq: 0,
+        };
+        store.compact("doc", &snapshot).await.unwrap();
+
+        let (codec, stored): (i64, Vec<u8>) =
+            sqlx::query_as("SELECT codec, state FROM doc_snapshots WHERE page_id = 'doc'")
+                .fetch_one(&store.writer)
+                .await
+                .unwrap();
+        assert_eq!(codec, 1);
+        assert!(stored.len() * 5 < state.len(), "{} bytes", stored.len());
+        assert_eq!(store.load("doc").await.unwrap().snapshot.unwrap().state, state);
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_stored_raw_before_compression_still_loads() {
+        let (store, _dir) = open().await;
+        sqlx::query(
+            "INSERT INTO doc_snapshots (page_id, state, upto_seq, updated_at)
+             VALUES ('doc', ?1, 0, 1)",
+        )
+        .bind(snapshot_state())
+        .execute(&store.writer)
+        .await
+        .unwrap();
+        let loaded = store.load("doc").await.unwrap().snapshot.unwrap();
+        assert_eq!(loaded.state, snapshot_state());
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_that_does_not_decompress_fails_the_load() {
+        let (store, _dir) = open().await;
+        sqlx::raw_sql(
+            "INSERT INTO doc_snapshots (page_id, state, upto_seq, updated_at, codec)
+             VALUES ('doc', x'0102', 0, 1, 1);",
+        )
+        .execute(&store.writer)
+        .await
+        .unwrap();
+        assert!(matches!(
+            store.load("doc").await,
+            Err(StoreError::CorruptSnapshot { .. })
+        ));
     }
 
     #[tokio::test]

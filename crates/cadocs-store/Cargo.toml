@@ -3,12 +3,15 @@ name = "cadocs-store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [dependencies]
 cadocs-core.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+# Snapshots, compressed as revisions are (docs/DATA_MODEL.md#documents). Already in the binary.
+zstd.workspace = true
 # `Notify`, to wake the job worker when a job is added.
 tokio = { workspace = true, features = ["sync"] }
 
