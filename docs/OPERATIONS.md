@@ -59,7 +59,7 @@ Attachments go to `data/files/` unless `CADOCS_FILE_STORE` is `s3` (ADR 0020). S
 | `CADOCS_S3_SECRET_ACCESS_KEY_FILE` | | A file holding the secret, for container secrets. A final newline is ignored |
 | `CADOCS_S3_REGION` | `us-east-1` | Used in signatures. Self-hosted servers accept the default |
 | `CADOCS_S3_PREFIX` | empty | Put before every key, so applications can share a bucket. Segments such as `apps/cadocs`, with no leading `/`, no empty segment and no `.` or `..`. A `/` is added if missing. Two cadocs instances must never share a bucket and prefix: each one's cleanup would delete the other's files |
-| `CADOCS_S3_DOWNLOADS` | `proxy` | `proxy`: the server streams each file. `redirect`: after the access check, the server answers `302` to a presigned link, and the browser fetches the file from S3. Use it only if browsers can reach `CADOCS_S3_ENDPOINT` |
+| `CADOCS_S3_DOWNLOADS` | `proxy` | `proxy`: the server streams each file. `redirect`: after the access check, the server answers `302` to a presigned link for safe images, and the browser fetches them from S3. Other files are still streamed. Use it only if browsers can reach `CADOCS_S3_ENDPOINT` |
 | `CADOCS_S3_LINK_SECS` | `3600` | Lifetime of a presigned link, 2 to 604800. A link is the same for half of it, so browsers keep files in cache, and a leaked link works at most this long |
 | `CADOCS_S3_CA_FILE` | | A PEM bundle trusted besides the system roots, for an internal certificate authority |
 
@@ -126,7 +126,7 @@ Give cadocs its own key, limited to its bucket and prefix. With bucket versionin
 
 `HEAD` on the bucket at startup is allowed by `s3:ListBucket`.
 
-In `redirect` mode, `img-src` in the CSP adds the endpoint's origin, and the files are served by S3 with the type, disposition and cache lifetime cadocs signed into the link. A type the browser could run, such as HTML or SVG, is still sent as `attachment`.
+In `redirect` mode, only safe images (AVIF, GIF, JPEG, PNG, WebP) are redirected, and S3 serves them with the type, disposition and cache lifetime cadocs signed into the link. Every other file, SVG and HTML included, is still streamed by cadocs, with its sandbox CSP and `nosniff`, because S3 sends neither and its origin may be shared. `img-src` in the CSP adds the endpoint's origin.
 
 ## Security headers
 

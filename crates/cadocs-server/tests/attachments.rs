@@ -695,14 +695,13 @@ async fn a_store_that_links_gets_a_redirect_after_the_access_check() {
     // Each view goes through the check again, so a revoked reader stops getting links.
     assert_eq!(reply.header("cache-control"), Some("private, no-store"));
 
-    // What could run in a page is downloaded on the other origin too.
+    // Anything but a safe image is streamed by the server, with its sandbox and `nosniff`: the
+    // storage's origin, maybe shared with other applications, sends neither.
     let reply = wiki.download(&wiki.bob, &html).await;
-    assert_eq!(reply.status, 302, "{reply:?}");
-    let location = reply.header("location").unwrap();
-    assert!(
-        location.ends_with("disposition=attachment; filename=\"a.html\"; filename*=UTF-8''a.html"),
-        "{location}"
-    );
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert_eq!(reply.bytes, b"<b>");
+    let policy = reply.header("content-security-policy").unwrap();
+    assert!(policy.contains("sandbox"), "{policy}");
 
     assert_eq!(wiki.download(&wiki.eve, &image).await.status, 404);
 }

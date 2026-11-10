@@ -185,8 +185,12 @@ async fn download<S: AttachmentStore, A>(
         disposition: &disposition,
     };
     // The access check above runs on each view: the redirect is never cached, while the link it
-    // gives stays the same for a while, so the browser keeps the file (ADR 0020).
-    if let Some(url) = state.files.download_url(&id, &download) {
+    // gives stays the same for a while, so the browser keeps the file (ADR 0020). Only safe
+    // images go there: the storage sends no sandbox or `nosniff`, and its origin may be shared.
+    let link = inline
+        .then(|| state.files.download_url(&id, &download))
+        .flatten();
+    if let Some(url) = link {
         let location = HeaderValue::try_from(url).map_err(ApiError::internal)?;
         let headers = [
             (LOCATION, location),
