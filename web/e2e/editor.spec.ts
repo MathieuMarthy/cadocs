@@ -235,18 +235,23 @@ test("a read older than a demotion does not make the page writable again", async
   await expect(editor(right)).toHaveAttribute("contenteditable", "false");
 });
 
-/** A client from a later version, whose schema has a block this one lacks. */
-async function writeFutureBlock(server: TestServer) {
+/** A client outside the browser that appends `block` to the page. */
+async function writeBlock(server: TestServer, block: Y.XmlElement) {
   const doc = new Y.Doc();
   const provider = new WebsocketProvider(server.wsUrl, await server.page(DOC), doc, {
     disableBc: true,
     WebSocketPolyfill: await server.webSocketClass(),
   });
   await expect.poll(() => provider.synced).toBe(true);
-  const block = new Y.XmlElement("futureBlock");
-  block.insert(0, [new Y.XmlText("from the future")]);
   doc.getXmlFragment("default").push([block]);
   return { doc, provider };
+}
+
+/** A client from a later version, whose schema has a block this one lacks. */
+async function writeFutureBlock(server: TestServer) {
+  const block = new Y.XmlElement("futureBlock");
+  block.insert(0, [new Y.XmlText("from the future")]);
+  return writeBlock(server, block);
 }
 
 /** The names of the top-level nodes the server holds, as a fresh client reads them. */
@@ -302,6 +307,34 @@ test("a block this tab does not know stays intact for the others", async ({
     await banner.getByRole("button", { name: "reload" }).click();
     await expect(left.getByRole("alert")).toContainText("cannot show");
     await late.close();
+  } finally {
+    writer.provider.destroy();
+    writer.doc.destroy();
+  }
+});
+
+test("a plugin block shows its text and stays intact", async ({ left, right, server }) => {
+  // No plugin runs before V2: every plugin block is one whose plugin is missing (ADR 0016).
+  await bothOnline(left, right);
+  await editor(left).click();
+  await left.keyboard.type("known");
+  await expectText(editor(right).locator("p"), "known");
+  const block = new Y.XmlElement("plugin");
+  block.setAttribute("kind", "kanban/board");
+  // Plugin data is any JSON, which Yjs stores as is.
+  block.setAttribute("data", { columns: ["todo", "done"] } as never);
+  block.setAttribute("text", "todo, done");
+  const writer = await writeBlock(server, block);
+  try {
+    for (const page of [left, right]) {
+      const fallback = editor(page).locator('div[data-type="plugin"]');
+      await expect(fallback).toHaveText("todo, done");
+      await expect(fallback).toHaveAttribute("data-kind", "kanban/board");
+      await expect(page.getByRole("alert")).toHaveCount(0);
+    }
+    await expect.poll(() => storedNodes(server)).toContain("plugin");
+    expect(block.getAttribute("data")).toEqual({ columns: ["todo", "done"] });
+    expect(block.getAttribute("text")).toBe("todo, done");
   } finally {
     writer.provider.destroy();
     writer.doc.destroy();

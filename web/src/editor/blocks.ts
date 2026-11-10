@@ -203,3 +203,62 @@ export const TableOfContents = Node.create({
     };
   },
 });
+
+/**
+ * The envelope of every plugin block (ADR 0016): `kind` names the plugin and block, `data` is the
+ * plugin's own JSON, and `text` is what shows when the plugin cannot run. No plugin runs before
+ * V2, so the block always shows its `text`, and stays intact.
+ */
+export const PluginBlock = Node.create({
+  name: "plugin",
+  group: "block",
+  atom: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      kind: {
+        default: "",
+        parseHTML: (element) => element.dataset.kind ?? "",
+        renderHTML: (attributes) => ({ "data-kind": attributes.kind }),
+      },
+      data: {
+        default: null,
+        parseHTML: (element) => {
+          try {
+            return JSON.parse(element.dataset.pluginData ?? "null");
+          } catch {
+            return null;
+          }
+        },
+        renderHTML: (attributes) =>
+          attributes.data === null ? {} : { "data-plugin-data": JSON.stringify(attributes.data) },
+      },
+      text: {
+        default: "",
+        parseHTML: (element) => element.dataset.text ?? "",
+        renderHTML: (attributes) => ({ "data-text": attributes.text }),
+      },
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-type="plugin"]' }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ["div", mergeAttributes(HTMLAttributes, { "data-type": "plugin" })];
+  },
+
+  addNodeView() {
+    return ({ node }) => {
+      const dom = document.createElement("div");
+      dom.dataset.type = "plugin";
+      dom.dataset.kind = String(node.attrs.kind);
+      dom.className = "plugin-fallback";
+      dom.contentEditable = "false";
+      dom.textContent = String(node.attrs.text || node.attrs.kind || "plugin block");
+      return { dom, ignoreMutation: () => true };
+    };
+  },
+});

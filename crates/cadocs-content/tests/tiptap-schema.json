@@ -1,0 +1,225 @@
+{
+  "nodes": {
+    "blockquote": {
+      "content": "block+",
+      "group": "block",
+      "inline": false,
+      "atom": false,
+      "attrs": {}
+    },
+    "bulletList": {
+      "content": "listItem+",
+      "group": "block list",
+      "inline": false,
+      "atom": false,
+      "attrs": {}
+    },
+    "callout": {
+      "content": "block+",
+      "group": "block",
+      "inline": false,
+      "atom": false,
+      "attrs": {
+        "kind": "note"
+      }
+    },
+    "codeBlock": {
+      "content": "text*",
+      "group": "block",
+      "inline": false,
+      "atom": false,
+      "attrs": {
+        "language": null
+      }
+    },
+    "details": {
+      "content": "detailsSummary detailsContent",
+      "group": "block",
+      "inline": false,
+      "atom": false,
+      "attrs": {}
+    },
+    "detailsContent": {
+      "content": "block+",
+      "group": "",
+      "inline": false,
+      "atom": false,
+      "attrs": {}
+    },
+    "detailsSummary": {
+      "content": "text*",
+      "group": "",
+      "inline": false,
+      "atom": false,
+      "attrs": {}
+    },
+    "doc": {
+      "content": "block+",
+      "group": "",
+      "inline": false,
+      "atom": false,
+      "attrs": {}
+    },
+    "hardBreak": {
+      "content": "",
+      "group": "inline",
+      "inline": true,
+      "atom": true,
+      "attrs": {}
+    },
+    "heading": {
+      "content": "inline*",
+      "group": "block",
+      "inline": false,
+      "atom": false,
+      "attrs": {
+        "level": 1
+      }
+    },
+    "horizontalRule": {
+      "content": "",
+      "group": "block",
+      "inline": false,
+      "atom": true,
+      "attrs": {}
+    },
+    "listItem": {
+      "content": "paragraph block*",
+      "group": "",
+      "inline": false,
+      "atom": false,
+      "attrs": {}
+    },
+    "orderedList": {
+      "content": "listItem+",
+      "group": "block list",
+      "inline": false,
+      "atom": false,
+      "attrs": {
+        "start": 1,
+        "type": null
+      }
+    },
+    "pageLink": {
+      "content": "",
+      "group": "inline",
+      "inline": true,
+      "atom": true,
+      "attrs": {
+        "id": null
+      }
+    },
+    "paragraph": {
+      "content": "inline*",
+      "group": "block",
+      "inline": false,
+      "atom": false,
+      "attrs": {}
+    },
+    "plugin": {
+      "content": "",
+      "group": "block",
+      "inline": false,
+      "atom": true,
+      "attrs": {
+        "data": null,
+        "kind": "",
+        "text": ""
+      }
+    },
+    "table": {
+      "content": "tableRow+",
+      "group": "block",
+      "inline": false,
+      "atom": false,
+      "attrs": {}
+    },
+    "tableCell": {
+      "content": "block+",
+      "group": "",
+      "inline": false,
+      "atom": false,
+      "attrs": {
+        "align": null,
+        "colspan": 1,
+        "colwidth": null,
+        "rowspan": 1
+      }
+    },
+    "tableHeader": {
+      "content": "block+",
+      "group": "",
+      "inline": false,
+      "atom": false,
+      "attrs": {
+        "align": null,
+        "colspan": 1,
+        "colwidth": null,
+        "rowspan": 1
+      }
+    },
+    "tableOfContents": {
+      "content": "",
+      "group": "block",
+      "inline": false,
+      "atom": true,
+      "attrs": {}
+    },
+    "tableRow": {
+      "content": "(tableCell | tableHeader)*",
+      "group": "",
+      "inline": false,
+      "atom": false,
+      "attrs": {}
+    },
+    "taskItem": {
+      "content": "paragraph block*",
+      "group": "",
+      "inline": false,
+      "atom": false,
+      "attrs": {
+        "checked": false
+      }
+    },
+    "taskList": {
+      "content": "taskItem+",
+      "group": "block list",
+      "inline": false,
+      "atom": false,
+      "attrs": {}
+    },
+    "text": {
+      "content": "",
+      "group": "inline",
+      "inline": true,
+      "atom": true,
+      "attrs": {}
+    }
+  },
+  "marks": {
+    "bold": {
+      "attrs": {}
+    },
+    "code": {
+      "attrs": {}
+    },
+    "italic": {
+      "attrs": {}
+    },
+    "link": {
+      "attrs": {
+        "class": null,
+        "href": null,
+        "rel": "noopener noreferrer nofollow",
+        "target": "_blank",
+        "title": null
+      }
+    },
+    "strike": {
+      "attrs": {}
+    },
+    "underline": {
+      "attrs": {}
+    }
+  }
+}

@@ -54,6 +54,7 @@ What later steps must know, by topic. Read the file of the code you touch, and a
 - **Prototype limits:** there is no search or Markdown conversion. The server binds to `127.0.0.1`. Do not expose it.
 - **Access changes:** a handler whose change can alter what a user reaches calls `state.access_changed()` once it is stored ([store notes](docs/notes/store.md)).
 - [docs/notes/collab.md](docs/notes/collab.md): rooms, yrs, y-websocket, Yjs layout, socket RAM.
+- [docs/notes/content.md](docs/notes/content.md): schema check, Yjs layout of nodes, renderers, Markdown conventions.
 - [docs/notes/server.md](docs/notes/server.md): server, page socket, HTTP foundation, sessions, administration.
 - [docs/notes/store.md](docs/notes/store.md): stores, permissions, workspaces, spaces, pages.
 - [docs/notes/web.md](docs/notes/web.md): front end, browser and end-to-end tests.

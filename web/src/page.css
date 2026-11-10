@@ -340,6 +340,14 @@
   --kind: var(--danger);
   --kind-text: var(--danger);
 }
+/* A plugin block whose plugin cannot run shows its fallback text, dashed (ADR 0016). */
+.tiptap .plugin-fallback {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  white-space: pre-wrap;
+}
 .callout-head select {
   margin: 0 0 var(--space-1) calc(-1 * var(--space-1));
   padding: 0 var(--space-1);

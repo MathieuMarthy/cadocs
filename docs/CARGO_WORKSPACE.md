@@ -26,7 +26,7 @@ cadocs/
 
 `cadocs-bench` is outside `default-members`, so a plain `cargo build --release` does not build it. Built together, its dependency features would unify into the server's and change the shipped binary. Use `--workspace` for tests and clippy, and `-p` to build it.
 
-The prototype contains `core`, `store`, `collab`, `server` and `bench`, and step 10 of the MVP added `jobs`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
+The prototype contains `core`, `store`, `collab`, `server` and `bench`, step 10 of the MVP added `jobs` and step 16 `content`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
 
 ## Selected crates
 
@@ -48,6 +48,7 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `argon2` (`alloc`, `getrandom`, `password-hash`) | Password hashing at OWASP settings | 19 MB per hash, one at a time, returned by a trim (ADR 0015) | With the next two rows, 0.4 MB in all, routes included |
 | `sha2`, `subtle`, `getrandom` | Session tokens, their hash and constant-time CSRF comparison. `sha2` and `getrandom` were already in the tree through `rust-embed` and `tempfile` | None | See `argon2` |
 | `uuid` (`std`, `v7`) | Sortable ids | None | See `argon2` |
+| `pulldown-cmark` (no default features), MIT | Markdown import in `cadocs-content` (ADR 0008). Its `html` and `getopts` features are off: HTML comes from the AST, and there is no binary | Low: a pull parser, nothing kept after an import | Low. Not linked into the server until a route uses it |
 | `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
 
 ### Dev tools only
@@ -66,12 +67,13 @@ The editor (step 14) adds, all MIT except `highlight.js` (BSD-3-Clause): the Tip
 
 Step 15 adds `@tiptap/extension-table` (it brings nothing new: `prosemirror-tables` already came with `@tiptap/pm`) and `@tiptap/extension-details` for toggles, both MIT. Callouts, links to pages and the table of contents are our own nodes, in `web/src/editor/blocks.ts` and `pagelink.ts`. `@tiptap/extension-table-of-contents` was left out: it writes an id onto every heading, which each tab would write into the shared document. The page chunk went to 706 KB, 226 KB compressed.
 
+Step 16 adds a `plugin` node of our own (`blocks.ts`, ADR 0016) and `web/scripts/schema.ts`, which runs the registry under Node through Vite's `runnerImport` to export the schema: nothing new is installed, and `src/editor/schema.ts` is not part of the app.
+
 ### Planned
 
 | Crate | Stage | Why | Cost note |
 | --- | --- | --- | --- |
 | `tower-http` | MVP | Timeouts, compression, tracing, limited features | Low |
-| `pulldown-cmark` | MVP | Markdown parsing, no allocation-heavy DOM | Low |
 | `rust-stemmers` | MVP | Snowball stemmers (ADR 0007) | Static tables in the binary |
 | `zstd` | MVP | Compression of revisions | Bounded by compression level |
 | `jiff` | MVP | Dates, as in uptime-monitoring | Low without the bundled tz database |

@@ -1,6 +1,7 @@
 // What the editor knows: its blocks, the slash commands that make them, and their shortcuts.
 // The editor is built from this list alone, so a block is added here and nowhere else (ADR 0016).
-// Node and mark names are TipTap's defaults, which the Rust schema of step 16 must match.
+// Node and mark names are TipTap's defaults. `cadocs-content` holds the same schema in Rust, and
+// `npm run schema` writes this one where its test compares them (ADR 0008).
 
 import { type AnyExtension, type ChainedCommands, type Editor, InputRule } from "@tiptap/core";
 import Blockquote from "@tiptap/extension-blockquote";
@@ -13,7 +14,7 @@ import { BulletList, ListItem, OrderedList, TaskItem, TaskList } from "@tiptap/e
 import { TableKit } from "@tiptap/extension-table";
 import StarterKit from "@tiptap/starter-kit";
 
-import { Callout, TableOfContents, Toggle } from "./blocks";
+import { Callout, PluginBlock, TableOfContents, Toggle } from "./blocks";
 import { lowlight } from "./code";
 import { PageLink } from "./pagelink";
 import { TableMenuOnRightClick, TableWithControls } from "./table";
@@ -244,6 +245,11 @@ export const entries: Entry[] = [
         apply: (chain) => chain.insertContent({ type: "tableOfContents" }),
       },
     ],
+  },
+  {
+    // Blocks of content plugins, shown by their fallback text until plugins ship (ADR 0016).
+    name: "plugin",
+    extensions: [PluginBlock],
   },
   {
     name: "link",
