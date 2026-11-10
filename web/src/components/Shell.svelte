@@ -18,7 +18,7 @@
   import { route } from "../lib/router.svelte";
   import { app, signOut } from "../lib/session.svelte";
   import { nextTheme, theme } from "../lib/theme.svelte";
-  import type { IconName } from "./Icon.svelte";
+  import type { IconName } from "./icons";
   import IconButton from "./IconButton.svelte";
   import Menu, { type MenuItem } from "./Menu.svelte";
   import Source from "./Source.svelte";

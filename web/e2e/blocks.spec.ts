@@ -219,3 +219,108 @@ test("a reader opens toggles and follows the contents, but cannot change a callo
   await toggle(right).getByRole("button", { name: "open" }).click();
   await expect(toggle(right).getByRole("button", { name: "close" })).toBeVisible();
 });
+
+/** Makes a 3 by 3 table with a header row, the caret in its first cell. */
+async function makeTable(page: Page) {
+  await editor(page).click();
+  await page.keyboard.type("/table");
+  await expect(commands(page).getByRole("option")).toHaveText(["table", "table of contents"]);
+  await page.keyboard.press("Enter");
+}
+
+const rows = (page: Page) => editor(page).locator("table tr");
+const headers = (page: Page) => editor(page).locator("table tr").first().locator("th");
+
+test("the buttons at the table's edges add a row and a column, for writers only", async ({
+  left,
+  right,
+  server,
+  member,
+}) => {
+  await bothOnline(left, right);
+  await makeTable(left);
+  await expect(rows(right)).toHaveCount(3);
+
+  await editor(left).locator("table").hover();
+  await editor(left).getByRole("button", { name: "add row" }).click();
+  await expect(rows(right)).toHaveCount(4);
+  await editor(left).locator("table").hover();
+  await editor(left).getByRole("button", { name: "add column" }).click();
+  await expect(headers(right)).toHaveCount(4);
+  // The new cells are at the end.
+  await left.keyboard.type("Last");
+  await expectText(headers(right).last(), "Last");
+
+  await grant(server, member, "viewer");
+  await expect(status(right)).toContainText("read only");
+  await editor(right).locator("table").hover();
+  await expect(editor(right).getByRole("button", { name: "add row" })).toBeHidden();
+});
+
+test("a right click on a cell opens a menu that adds and deletes rows and columns", async ({
+  left,
+  right,
+}) => {
+  await bothOnline(left, right);
+  await makeTable(left);
+  await left.keyboard.type("Name");
+  const menu = left.getByRole("menu", { name: "table" });
+
+  await editor(left).locator("table th").first().click({ button: "right" });
+  await expect(menu.getByRole("menuitem")).toHaveText([
+    "add row above",
+    "add row below",
+    "add column left",
+    "add column right",
+    "delete row",
+    "delete column",
+    "delete table",
+  ]);
+  await menu.getByRole("menuitem", { name: "add column left" }).click();
+  await expect(menu).toBeHidden();
+  await expect(headers(right)).toHaveCount(4);
+  // The column went left of the clicked cell.
+  await expectText(headers(right).nth(1), "Name");
+
+  // By keyboard: the arrows, then Enter.
+  await editor(left).locator("table td").first().click({ button: "right" });
+  await left.keyboard.press("ArrowDown");
+  await left.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitem", { name: "add row below" })).toBeFocused();
+  await left.keyboard.press("Enter");
+  await expect(rows(right)).toHaveCount(4);
+
+  await editor(left).locator("table td").first().click({ button: "right" });
+  await left.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+
+  await editor(left).locator("table td").first().click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "delete row" }).click();
+  await expect(rows(right)).toHaveCount(3);
+  await editor(left).locator("table th").last().click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "delete column" }).click();
+  await expect(headers(right)).toHaveCount(3);
+  await editor(left).locator("table td").first().click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "delete table" }).click();
+  await expect(editor(right).locator("table")).toHaveCount(0);
+});
+
+test("on a table wider than the page, the edge buttons stay at the table's edges", async ({ left }) => {
+  await expect(status(left)).toContainText("synced");
+  await makeTable(left);
+  const table = editor(left).locator("table");
+  const column = editor(left).getByRole("button", { name: "add column" });
+  const row = editor(left).getByRole("button", { name: "add row" });
+  // Columns are at least 25px wide: past the page's width, the table scrolls sideways.
+  for (let count = 3; count < 32; count += 1) {
+    await table.hover();
+    await column.click();
+  }
+  await expect(headers(left)).toHaveCount(32);
+  await table.hover();
+  const box = (await table.boundingBox())!;
+  const columnBox = (await column.boundingBox())!;
+  const rowBox = (await row.boundingBox())!;
+  expect(columnBox.x).toBeGreaterThanOrEqual(box.x + box.width);
+  expect(Math.abs(rowBox.width - box.width)).toBeLessThan(2);
+});

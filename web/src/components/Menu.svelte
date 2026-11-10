@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  import type { IconName } from "./Icon.svelte";
+  import type { IconName } from "./icons";
 
   export interface MenuItem {
     icon: IconName;

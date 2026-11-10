@@ -16,6 +16,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { Callout, TableOfContents, Toggle } from "./blocks";
 import { lowlight } from "./code";
 import { PageLink } from "./pagelink";
+import { TableMenuOnRightClick, TableWithControls } from "./table";
 import { MarkdownSource, quietInSource } from "./source";
 
 export interface SlashCommand {
@@ -198,9 +199,13 @@ export const entries: Entry[] = [
     ],
   },
   {
-    // Column widths are not stored: `resizable` would write them into the document.
+    // Column widths are not stored: `resizable` would write them into the document. Writers also
+    // get `+` buttons on the edges and a menu on a cell's right click (`table.ts`).
     name: "table",
-    extensions: [TableKit.configure({ table: { resizable: false } })],
+    extensions: [
+      TableKit.configure({ table: { resizable: false, View: TableWithControls } }),
+      TableMenuOnRightClick,
+    ],
     commands: [
       {
         label: "table",

@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { HTMLButtonAttributes } from "svelte/elements";
 
-  import Icon, { type IconName } from "./Icon.svelte";
+  import Icon from "./Icon.svelte";
+  import type { IconName } from "./icons";
 
   /** A compact action: an icon, its verb in `title`, and the full label for assistive tools. */
   let {

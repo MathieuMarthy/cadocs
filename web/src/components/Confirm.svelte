@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { IconName } from "./Icon.svelte";
+  import type { IconName } from "./icons";
   import IconButton from "./IconButton.svelte";
 
   /** A button that asks once more, for what cannot be undone. */

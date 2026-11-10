@@ -129,7 +129,7 @@ The shell uses the buttons, fields, breadcrumb and workspace selector. The other
 - A page whose content this version cannot show gets a banner above the title: 1px `ink` border, mono 13px, and a `reload` button.
 - Callout: `panel` fill, 1px `line` border and a 3px rule on the left in the color of its kind: `ink` for `note`, `accent` for `warning`, `danger` for `danger`. Its kind shows at the top in `label` style, in `muted`, `accent-text` or `danger`, as a list writers can change.
 - Toggle: `▸` closed, `▾` open, in `muted`, before the summary line, as in the tree. Each reader opens it for themself.
-- Table: 1px `line` rules, the header row on `panel` in mono 14px 600, cells in body text.
+- Table: 1px `line` rules, the header row on `panel` in mono 14px 600, cells in body text. For writers, hovering it shows a `plus` bar on its bottom edge (`add row`) and its right edge (`add column`), `panel` with a `line` border and an `ink` one under the pointer. A right click on a cell opens the action menu at the pointer: the four `add` verbs with `plus`, then below a rule `delete row`, `delete column` and `delete table` with `x`, the last in `danger`.
 - Link to a page: the page's title in `accent-text`, underlined by a dotted rule so it reads apart from a web link. A page the reader cannot open shows `page not found`, struck, in `muted`.
 - Table of contents: 1px `line` frame, a `contents` label, then each heading with its number in `accent-text`, indented by `space-4` per level, in `ui` mono.
 
