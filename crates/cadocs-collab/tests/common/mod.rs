@@ -141,10 +141,24 @@ impl DocStore for MemStore {
         if self.page_gone.load(Ordering::SeqCst) {
             return Err(StoreError::PageNotFound);
         }
-        let once = self
-            .fail_next_appends
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
-        if self.fail_append.load(Ordering::SeqCst) || once.is_ok() {
+        // Takes one planned failure, if any. A loop rather than `fetch_update`, which newer
+        // toolchains deprecate and older ones lack a replacement for.
+        let mut left = self.fail_next_appends.load(Ordering::SeqCst);
+        let once = loop {
+            if left == 0 {
+                break false;
+            }
+            match self.fail_next_appends.compare_exchange(
+                left,
+                left - 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break true,
+                Err(seen) => left = seen,
+            }
+        };
+        if self.fail_append.load(Ordering::SeqCst) || once {
             return Err(failure());
         }
         let mut docs = self.docs.lock().unwrap();

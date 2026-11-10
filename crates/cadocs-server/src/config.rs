@@ -187,6 +187,7 @@ impl Config {
                 room_idle: read.secs("CADOCS_ROOM_IDLE_SECS", collab.room_idle)?,
                 room_queue_bytes: read.value("CADOCS_ROOM_QUEUE_BYTES", collab.room_queue_bytes)?,
                 max_rooms: read.value("CADOCS_MAX_ROOMS", collab.max_rooms)?,
+                room_memory: read.room_memory(collab.room_memory)?,
                 max_sockets: read.value("CADOCS_MAX_SOCKETS", collab.max_sockets)?,
                 max_frame_bytes: read.value("CADOCS_MAX_FRAME_BYTES", collab.max_frame_bytes)?,
                 send_queue: read.value("CADOCS_SEND_QUEUE", collab.send_queue)?,
@@ -308,6 +309,15 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
             max_upload_bytes: upload * MIB,
             workspace_quota_bytes: (quota > 0).then_some(quota * MIB),
         })
+    }
+
+    fn room_memory(&self, default: usize) -> anyhow::Result<usize> {
+        let mb = self.value("CADOCS_ROOM_MEMORY_MB", default as u64 / MIB)?;
+        ensure!(
+            (1..=MAX_MB).contains(&mb),
+            "CADOCS_ROOM_MEMORY_MB must be between 1 and {MAX_MB}"
+        );
+        usize::try_from(mb * MIB).context("CADOCS_ROOM_MEMORY_MB is too large for this platform")
     }
 
     fn file_store(&self) -> anyhow::Result<FileStoreConfig> {
@@ -592,6 +602,7 @@ mod tests {
         assert_eq!(config.collab.room_idle, Duration::from_secs(60));
         assert_eq!(config.collab.room_queue_bytes, 4_194_304);
         assert_eq!(config.collab.max_rooms, 256);
+        assert_eq!(config.collab.room_memory, 64 * 1024 * 1024);
         assert_eq!(config.collab.max_sockets, 512);
         assert_eq!(config.collab.max_frame_bytes, 8_388_608);
         assert_eq!(config.collab.send_queue, 256);
@@ -616,6 +627,7 @@ mod tests {
             ("CADOCS_ROOM_IDLE_SECS", "5"),
             ("CADOCS_ROOM_QUEUE_BYTES", "1024"),
             ("CADOCS_MAX_ROOMS", "2"),
+            ("CADOCS_ROOM_MEMORY_MB", "16"),
             ("CADOCS_MAX_SOCKETS", "3"),
             ("CADOCS_MAX_FRAME_BYTES", "512"),
             ("CADOCS_SEND_QUEUE", "4"),
@@ -641,6 +653,7 @@ mod tests {
         assert_eq!(config.collab.room_idle, Duration::from_secs(5));
         assert_eq!(config.collab.room_queue_bytes, 1024);
         assert_eq!(config.collab.max_rooms, 2);
+        assert_eq!(config.collab.room_memory, 16 * 1024 * 1024);
         assert_eq!(config.collab.max_sockets, 3);
         assert_eq!(config.collab.max_frame_bytes, 512);
         assert_eq!(config.collab.send_queue, 4);
@@ -681,6 +694,14 @@ mod tests {
         ] {
             let error = config(refused).unwrap_err();
             assert!(error.to_string().contains("CADOCS_REVISION"), "{error}");
+        }
+    }
+
+    #[test]
+    fn the_room_memory_budget_is_at_least_a_megabyte() {
+        for refused in ["0", "1048577"] {
+            let error = config(&[("CADOCS_ROOM_MEMORY_MB", refused)]).unwrap_err();
+            assert!(format!("{error:#}").contains("CADOCS_ROOM_MEMORY_MB"), "{error:#}");
         }
     }
 

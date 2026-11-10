@@ -37,6 +37,12 @@ pub const CLOSE_PAGE_GONE: u16 = CLOSE_NOT_FOUND;
 /// The client stopped reading.
 pub const CLOSE_TOO_SLOW: u16 = 4408;
 
+/// What a loaded room is counted as at least, against [`CollabConfig::room_memory`].
+pub const ROOM_MIN_BYTES: usize = 64 * 1024;
+/// What a loaded room is counted as per byte of its encoded document. A room was measured at 10 to
+/// 15 times its encoded size: each yrs block is a heap structure (`docs/ARCHITECTURE.md`).
+pub const ROOM_BYTES_PER_ENCODED_BYTE: usize = 12;
+
 /// The limits of [OPERATIONS.md](../../docs/OPERATIONS.md). Ping settings belong to the socket
 /// layer in `cadocs-server`.
 #[derive(Debug, Clone)]
@@ -49,6 +55,10 @@ pub struct CollabConfig {
     /// Unflushed bytes a room may hold.
     pub room_queue_bytes: usize,
     pub max_rooms: usize,
+    /// What loaded rooms may take together, as estimated from their encoded size. Past it, idle
+    /// rooms unload first, then connections are refused, as at `max_rooms`. Rooms load one at a
+    /// time, so the budget is crossed by one room at most, plus an evicted one on its way out.
+    pub room_memory: usize,
     pub max_sockets: usize,
     pub max_frame_bytes: usize,
     /// Queued frames per socket.
@@ -65,6 +75,7 @@ impl Default for CollabConfig {
             room_idle: Duration::from_secs(60),
             room_queue_bytes: 4 * 1024 * 1024,
             max_rooms: 256,
+            room_memory: 64 * 1024 * 1024,
             max_sockets: 512,
             max_frame_bytes: 8 * 1024 * 1024,
             send_queue: 256,
@@ -79,7 +90,7 @@ pub enum CollabError {
     Store(Arc<StoreError>),
     #[error("stored document {doc_id} cannot be decoded")]
     CorruptDocument { doc_id: String },
-    /// Every room is live at `max_rooms`, or `max_sockets` is reached.
+    /// Every room is live at `max_rooms` or `room_memory`, or `max_sockets` is reached.
     #[error("no room or socket available")]
     AtCapacity,
     #[error("the server is shutting down")]
