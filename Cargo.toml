@@ -18,6 +18,8 @@ default-members = [
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
+# Nothing here goes to crates.io: the product is the binary.
+publish = false
 
 [workspace.dependencies]
 anyhow = "1"
@@ -44,8 +46,8 @@ rust-embed = "8"
 # Snowball stemmers for search (ADR 0007). MIT and BSD-3-Clause.
 rust-stemmers = "1.2"
 # S3 request signing and listing parsing, with no I/O of its own (ADR 0020). BSD-2-Clause.
-# `full` brings the listing parser.
-rusty-s3 = { version = "0.8", default-features = false, features = ["full"] }
+# `full` brings the listing parser, `rustcrypto` the pure Rust signing backend.
+rusty-s3 = { version = "0.11", default-features = false, features = ["full", "rustcrypto"] }
 serde = { version = "1", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 sha2 = { version = "0.11", default-features = false }

@@ -131,7 +131,10 @@ async fn list(
         .collect();
     let truncated = keys.len() > max;
     let page = &keys[..keys.len().min(max)];
-    let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult>");
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+         <ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+    );
     for (key, date) in page {
         let date = jiff::Timestamp::try_from(**date).unwrap();
         xml.push_str(&format!(

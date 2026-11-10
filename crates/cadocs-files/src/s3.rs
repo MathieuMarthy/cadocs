@@ -224,7 +224,8 @@ impl Inner {
         let response = self.send(Method::GET, action.sign(REQUEST_LIFETIME), None).await?;
         expect(&response, &[StatusCode::OK], "list")?;
         let xml = response.bytes().await.map_err(transport)?;
-        let page = ListObjectsV2::parse_response(&xml).map_err(invalid)?;
+        let xml = std::str::from_utf8(&xml).map_err(invalid)?;
+        let page = ListObjectsV2::parse_response(xml).map_err(invalid)?;
         let mut files = Vec::with_capacity(page.contents.len());
         for object in page.contents {
             let Some(relative) = object.key.strip_prefix(&self.prefix) else {
@@ -236,10 +237,14 @@ impl Inner {
             if relative_path(id).ok().as_deref() != Some(relative) {
                 continue;
             }
-            let modified: jiff::Timestamp = object.last_modified.parse().map_err(invalid)?;
+            // With no date, the file counts as new, so the cleanup never takes it for an old stray.
+            let modified = match object.last_modified {
+                Some(date) => SystemTime::from(date.parse::<jiff::Timestamp>().map_err(invalid)?),
+                None => SystemTime::now(),
+            };
             files.push(StoredFile {
                 id: id.to_owned(),
-                modified: SystemTime::from(modified),
+                modified,
             });
         }
         Ok((files, page.next_continuation_token))

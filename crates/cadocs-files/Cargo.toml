@@ -3,6 +3,7 @@ name = "cadocs-files"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [features]
 # The S3 store (ADR 0020). Off by default, so a default build carries none of its code.
