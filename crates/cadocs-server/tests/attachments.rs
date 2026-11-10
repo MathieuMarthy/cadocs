@@ -9,7 +9,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use cadocs_files::{
-    BoxFuture, ByteStream, FileBody, FileError, FileList, FileStore, LocalFileStore, Stored,
+    BoxFuture, ByteStream, Download, FileBody, FileError, FileList, FileStore, LocalFileStore,
+    Stored,
 };
 use cadocs_jobs::PURGE_ORPHAN_FILES;
 use cadocs_store::now_ms;
@@ -618,4 +619,106 @@ async fn files_no_page_references_go_with_their_rows() {
 
 fn bytes(data: &'static [u8]) -> bytes::Bytes {
     bytes::Bytes::from_static(data)
+}
+
+const FILES_ORIGIN: &str = "https://files.example.org";
+
+/// Keeps files on disk, and sends browsers to another origin for them, as the S3 store does in
+/// `redirect` mode (ADR 0020).
+struct Redirecting {
+    local: LocalFileStore,
+    _dir: tempfile::TempDir,
+}
+
+impl Redirecting {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        Self {
+            local: LocalFileStore::open(dir.path()).unwrap(),
+            _dir: dir,
+        }
+    }
+}
+
+impl FileStore for Redirecting {
+    fn put<'a>(
+        &'a self,
+        id: &'a str,
+        body: ByteStream<'a>,
+        max_bytes: u64,
+    ) -> BoxFuture<'a, Result<Stored, FileError>> {
+        self.local.put(id, body, max_bytes)
+    }
+
+    fn get<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<FileBody, FileError>> {
+        self.local.get(id)
+    }
+
+    fn delete<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<(), FileError>> {
+        self.local.delete(id)
+    }
+
+    fn list(&self) -> FileList {
+        self.local.list()
+    }
+
+    fn download_url(&self, id: &str, download: &Download<'_>) -> Option<String> {
+        Some(format!(
+            "{FILES_ORIGIN}/{id}?type={}&disposition={}",
+            download.content_type, download.disposition
+        ))
+    }
+
+    fn download_origin(&self) -> Option<String> {
+        Some(FILES_ORIGIN.to_owned())
+    }
+}
+
+#[tokio::test]
+async fn a_store_that_links_gets_a_redirect_after_the_access_check() {
+    let api = start_with_files(Arc::new(Redirecting::new()), &[]).await;
+    let ada = setup(&api).await;
+    let wiki = wiki_on(api, ada).await;
+    let page = wiki.page(&wiki.space(json!("viewer")).await).await;
+    let image = wiki.attach(&page, "a.png", "image/png", b"png").await;
+    let html = wiki.attach(&page, "a.html", "text/html", b"<b>").await;
+
+    let reply = wiki.download(&wiki.bob, &image).await;
+    assert_eq!(reply.status, 302, "{reply:?}");
+    assert_eq!(
+        reply.header("location").unwrap(),
+        format!(
+            "{FILES_ORIGIN}/{image}?type=image/png\
+             &disposition=inline; filename=\"a.png\"; filename*=UTF-8''a.png"
+        )
+    );
+    // Each view goes through the check again, so a revoked reader stops getting links.
+    assert_eq!(reply.header("cache-control"), Some("private, no-store"));
+
+    // What could run in a page is downloaded on the other origin too.
+    let reply = wiki.download(&wiki.bob, &html).await;
+    assert_eq!(reply.status, 302, "{reply:?}");
+    let location = reply.header("location").unwrap();
+    assert!(
+        location.ends_with("disposition=attachment; filename=\"a.html\"; filename*=UTF-8''a.html"),
+        "{location}"
+    );
+
+    assert_eq!(wiki.download(&wiki.eve, &image).await.status, 404);
+}
+
+#[tokio::test]
+async fn images_may_come_from_the_origin_of_the_links() {
+    let api = start_with_files(Arc::new(Redirecting::new()), &[]).await;
+    let reply = api.raw("GET", "/health", &[], b"").await;
+    let policy = reply.header("content-security-policy").unwrap();
+    assert!(
+        policy.contains(&format!("img-src 'self' data: {FILES_ORIGIN};")),
+        "{policy}"
+    );
+
+    let (api, _) = logged_in().await;
+    let reply = api.raw("GET", "/health", &[], b"").await;
+    let policy = reply.header("content-security-policy").unwrap();
+    assert!(policy.contains("img-src 'self' data:;"), "{policy}");
 }

@@ -40,7 +40,7 @@ Scope:
 - Table of contents, generated in the browser
 - Markdown shortcuts, Markdown import and export for one page, with or without attachments
 - Printing to PDF through a print stylesheet
-- Image and file attachments on local disk, with size limits
+- Image and file attachments on local disk or S3, chosen by the operator, with size limits (ADR 0020)
 - Full-text search (FTS5, stemming)
 - Revisions: list, view, restore, retention
 - Brut interface in Svelte, light and dark themes, usable on a phone browser
@@ -71,6 +71,8 @@ Steps, one session each. Each step adds the migration for the tables it needs, a
 - [x] **Step 17:** Attachments: `cadocs-files`, streaming upload, download, limits and quota, reference tracking, orphan cleanup, image and file blocks. Done when the attachment rules of [DATA_MODEL.md](DATA_MODEL.md#attachments) pass, including a full disk. The reference added when a page's content holds an attachment belongs to step 18, which owns the indexing job.
 - [x] **Step 18:** Search: `cadocs-search`, stemming, FTS5, the reindex job, the search route and screen. The indexing job also adds the attachment references it finds. Done when results respect readable spaces, stemming is tested in English and French, and an image pasted into another page is readable there.
 - [x] **Step 19:** Revisions: creation job, list, view, restore, thinning, screens. Done when a restore reaches connected clients as a normal edit and keeps the previous content as a revision.
+- [x] **Step 19a:** SQLite upkeep (ADR 0019): incremental auto-vacuum, conversion of older databases at startup, WAL size limit, the `maintain_database` job, and no `mmap_size`. Done when a new and an older database both end in incremental mode and the job gives free pages back.
+- [x] **Step 20b:** S3 file store (ADR 0020): `CADOCS_FILE_STORE`, the `s3` feature, the S3 `FileStore` on `rusty-s3` and `reqwest`, the disk layout as keys, the startup check, `proxy` and `redirect` downloads with windowed presigned URLs, the CSP origin. Done when the file store contract passes on disk, on a fake S3 and on a real MinIO, and a download in `redirect` mode answers a presigned `302` after the permission check.
 - [ ] **Step 20:** Markdown import and export for one page, with or without attachments, and the print stylesheet. Done when an export imports back with its content and attachments.
 - [ ] **Step 21:** Delivery: `cadocs backup` and `cadocs restore`, Docker image, `aarch64` and `x86_64` binaries, [OPERATIONS.md](OPERATIONS.md) complete. Done when a backup and restore round trip passes on a running server.
 - [ ] **Step 22:** Coverage: the whole permission matrix over REST and WebSocket, and a check of each scope item against its tests. Done when nothing in the scope lacks an automated test.
@@ -133,7 +135,6 @@ Scope:
 - Backlinks, page duplication and copy to another space
 - Math (KaTeX) and Mermaid blocks, loaded on demand in the browser
 - Diff between revisions
-- S3 file storage, behind a Cargo feature
 - Email notifications through optional SMTP
 - Internationalized interface
 - Page templates

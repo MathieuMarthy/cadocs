@@ -45,6 +45,24 @@ Environment variables only, so no config file format has to be parsed or documen
 | `CADOCS_REVISION_MAX_SECS` | `600` | Longest editing time without a revision. At least the pause |
 | `CADOCS_REVISION_KEEP_DAYS` | `30` | All revisions are kept this long. After that, one per day remains |
 
+### Files
+
+Attachments go to `data/files/` unless `CADOCS_FILE_STORE` is `s3` (ADR 0020). S3 needs a build with the `s3` feature (`cargo build --release --features s3`): a default build refuses `s3` at startup and carries no S3 code. The server checks the bucket with a `HEAD` at startup and refuses to start if it fails.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CADOCS_FILE_STORE` | `local` | `local` or `s3` |
+| `CADOCS_S3_ENDPOINT` | | Required for `s3`. The server's URL, `http` or `https`, with no path or credentials, such as `https://s3.internal.example.org`. Requests are path-style |
+| `CADOCS_S3_BUCKET` | | Required for `s3`. The bucket must exist |
+| `CADOCS_S3_ACCESS_KEY_ID` | | Required for `s3` |
+| `CADOCS_S3_SECRET_ACCESS_KEY` | | Required for `s3`, unless the next one is set. Never both |
+| `CADOCS_S3_SECRET_ACCESS_KEY_FILE` | | A file holding the secret, for container secrets. A final newline is ignored |
+| `CADOCS_S3_REGION` | `us-east-1` | Used in signatures. Self-hosted servers accept the default |
+| `CADOCS_S3_PREFIX` | empty | Put before every key, so applications can share a bucket. Segments such as `apps/cadocs`, with no leading `/`, no empty segment and no `.` or `..`. A `/` is added if missing. Two cadocs instances must never share a bucket and prefix: each one's cleanup would delete the other's files |
+| `CADOCS_S3_DOWNLOADS` | `proxy` | `proxy`: the server streams each file. `redirect`: after the access check, the server answers `302` to a presigned link, and the browser fetches the file from S3. Use it only if browsers can reach `CADOCS_S3_ENDPOINT` |
+| `CADOCS_S3_LINK_SECS` | `3600` | Lifetime of a presigned link, 2 to 604800. A link is the same for half of it, so browsers keep files in cache, and a leaked link works at most this long |
+| `CADOCS_S3_CA_FILE` | | A PEM bundle trusted besides the system roots, for an internal certificate authority |
+
 ## Commands
 
 | Command | Purpose |
@@ -61,10 +79,12 @@ Environment variables only, so no config file format has to be parsed or documen
 ```
 data/
 ├── cadocs.lock      exclusive lock, held while serving
-├── cadocs.db        with -wal and -shm while running
-├── files/           attachments, by opaque id, under two folders named from its last four digits
+├── cadocs.db        with -wal and -shm while running; the WAL is cut back to 64 MiB after a checkpoint
+├── files/           attachments, by opaque id, under two folders named from its last four digits (empty with S3)
 └── tmp/             uploads and exports in progress, emptied at startup
 ```
+
+The database frees deleted pages within the hour, through the `maintain_database` job (ADR 0019). The first start on a database created before that ADR runs one `VACUUM`. It needs free disk space of about twice the size of `cadocs.db`, for the rewritten copy and the WAL that receives it. Without that space, `serve` refuses to start until space is freed.
 
 ## Deployment
 
@@ -72,6 +92,41 @@ data/
 - **Docker:** a small glibc base image, a non-root user, and one volume on the data folder.
 - **TLS:** handled by a reverse proxy (Caddy, nginx, Traefik). cadocs has no TLS code. Plain HTTP works on `localhost` only, because browsers accept `Secure` cookies there.
 - **Reverse proxy:** it must forward WebSocket upgrades and keep them open past the ping interval. Set `CADOCS_TRUSTED_PROXIES`, otherwise rate limits see the proxy as one client.
+
+## S3
+
+An object's key is `CADOCS_S3_PREFIX`, then the file's path under `data/files/`: `<prefix>/ab/89/0190a1b2-…-0123456789ab`. A local folder therefore moves to S3 as it is, and back:
+
+1. Stop the server.
+2. Copy the files: `mc mirror data/files/ <alias>/<bucket>/<prefix>/`, or `rclone copy data/files/ <remote>:<bucket>/<prefix>/`.
+3. Set `CADOCS_FILE_STORE=s3` and the `CADOCS_S3_*` settings, then start the server.
+
+The local files can be deleted once the server serves them from S3. Uploads still go through `data/tmp`, which needs room for `CADOCS_MAX_UPLOAD_MB` per upload in progress.
+
+Give cadocs its own key, limited to its bucket and prefix. With bucket versioning on, a compromised server can delete objects, but not their earlier versions. A policy for MinIO or any S3 server that reads IAM policies:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": ["arn:aws:s3:::wiki/cadocs/*"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::wiki"],
+      "Condition": { "StringLike": { "s3:prefix": ["cadocs/*"] } }
+    }
+  ]
+}
+```
+
+`HEAD` on the bucket at startup is allowed by `s3:ListBucket`.
+
+In `redirect` mode, `img-src` in the CSP adds the endpoint's origin, and the files are served by S3 with the type, disposition and cache lifetime cadocs signed into the link. A type the browser could run, such as HTML or SVG, is still sent as `attachment`.
 
 ## Security headers
 
@@ -83,11 +138,11 @@ Sent on every response, unless a handler sets its own value.
 | `X-Content-Type-Options` | `nosniff` |
 | `Referrer-Policy` | `same-origin` |
 
-`style-src` needs `'unsafe-inline'` because ProseMirror and table column widths use inline styles. Public pages use a stricter policy, with `script-src 'none'`, and `X-Robots-Tag: noindex` unless the share allows indexing.
+With `CADOCS_S3_DOWNLOADS=redirect`, `img-src` also lists the origin of `CADOCS_S3_ENDPOINT`. `style-src` needs `'unsafe-inline'` because ProseMirror and table column widths use inline styles. Public pages use a stricter policy, with `script-src 'none'`, and `X-Robots-Tag: noindex` unless the share allows indexing.
 
 ## Backup and restore
 
-A backup is a folder with `cadocs.db`, from `VACUUM INTO`, and a copy of `files/`.
+A backup is a folder with `cadocs.db`, from `VACUUM INTO`, and a copy of `files/`. With S3, the backup holds the database only, and the files are backed up on the S3 side: bucket versioning, replication or a mirror. Restoring an older database beside a newer bucket leaves orphans, which the cleanup removes.
 
 1. Copy the database first, then the files. A file newer than the database is at worst an orphan, which the cleanup job removes. The reverse order could leave a page pointing at a missing file.
 2. Copying files never deletes anything from the backup folder, so a failed run can simply be repeated.
@@ -108,6 +163,7 @@ Restoring on a stopped server replaces the data folder. Browsers still open on o
 | Room queue full while flushes fail | The room stops accepting updates and closes its write sockets with `1013`. Clients keep their edits and resend them when they reconnect |
 | Page deleted under a live room | The next flush drops the room's edits and closes its sockets with `4404`. `/health` stays `200` |
 | Upload hits a full disk | The upload fails with `500`, its temporary file is removed, and nothing is recorded |
+| S3 unreachable or refusing | At startup, the server does not start. Later, an upload fails with `500` and records nothing, and a download in `proxy` mode fails with `500`. In `redirect` mode the link is still given, and the browser gets the error from S3 |
 | Job fails | Retried with backoff, then kept as `failed` for inspection |
 | Second instance on the same folder | Refuses to start, because of the lock |
 

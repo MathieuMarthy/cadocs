@@ -9,6 +9,7 @@ Design lives in `docs/`: read only what the current task needs. `ARCHITECTURE.md
 ```bash
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+S3=--features=cadocs-server/s3,cadocs-files/s3; cargo test --workspace $S3 && cargo clippy --workspace --all-targets $S3 -- -D warnings   # S3 store (ADR 0020); CADOCS_TEST_S3_* adds a real server
 npm --prefix web ci && npm --prefix web run build   # before a release build: the binary embeds web/dist
 cargo build --release
 npm --prefix web run test:e2e                       # after the two builds: it runs target/release/cadocs, whose web/dist is embedded

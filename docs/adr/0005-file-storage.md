@@ -14,7 +14,7 @@ Pages embed images and attachments. A Raspberry Pi has a local disk. A VPS may p
 - Uploads stream to a temporary file, are hashed while streaming, and move into place when complete. No file is ever held whole in memory.
 - Size limits are enforced during the stream.
 - Downloads check page permissions, and are sent with `Content-Disposition: attachment` unless the type is on a safe image list. User-uploaded HTML or SVG must never run in the application's origin.
-- S3 comes in V1 behind a Cargo feature, so that its dependencies stay out of default builds.
+- S3 comes behind a Cargo feature, so that its dependencies stay out of default builds. ADR 0020 brought it into the MVP and settles its details.
 
 ## Consequences
 

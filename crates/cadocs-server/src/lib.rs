@@ -21,7 +21,7 @@ use anyhow::Context;
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::middleware::{from_fn_with_state, map_response};
+use axum::middleware::{from_fn_with_state, map_response_with_state};
 use axum::routing::{any, get};
 use cadocs_collab::{Authorizer, DocRegistry};
 use cadocs_files::FileStore;
@@ -194,7 +194,12 @@ where
         .nest("/api/v1", api::router(&state))
         .route("/api/v1/", any(api::not_found))
         .fallback_service(get(assets::serve::<E>))
-        .layer(map_response(security::add_headers))
+        .layer(map_response_with_state(
+            Arc::new(security::SecurityHeaders::new(
+                state.files.download_origin().as_deref(),
+            )),
+            security::add_headers,
+        ))
         .with_state(state)
 }
 

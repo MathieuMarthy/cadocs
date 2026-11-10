@@ -1069,7 +1069,8 @@ async fn a_handler_keeps_its_own_security_policy() {
                 ([(header::CONTENT_SECURITY_POLICY, strict)], "public page")
             }),
         )
-        .layer(axum::middleware::map_response(
+        .layer(axum::middleware::map_response_with_state(
+            std::sync::Arc::new(cadocs_server::security::SecurityHeaders::new(None)),
             cadocs_server::security::add_headers,
         ));
     let response = app
