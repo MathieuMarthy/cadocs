@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig, type Plugin } from "vite";
 
-import { version } from "./package.json";
+import packageJson from "./package.json" with { type: "json" };
 
 // Fontsource lists woff beside woff2. Every browser cadocs supports takes woff2 first, so the
 // woff files would only make the binary larger.
@@ -23,14 +23,14 @@ function sourceRef() {
       .toString()
       .trim();
   } catch {
-    return `v${version}`;
+    return `v${packageJson.version}`;
   }
 }
 
 export default defineConfig({
   plugins: [svelte(), dropWoff],
   define: {
-    __VERSION__: JSON.stringify(version),
+    __VERSION__: JSON.stringify(packageJson.version),
     __SOURCE_URL__: JSON.stringify(
       `https://github.com/MathieuMarthy/cadocs/tree/${sourceRef()}`,
     ),
