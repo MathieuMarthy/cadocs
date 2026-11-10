@@ -231,11 +231,18 @@ CREATE TABLE page_revisions (
     created_at BIGINT NOT NULL,
     UNIQUE (page_id, number)
 );
+
+CREATE TABLE revision_authors (              -- who wrote since the last revision
+    page_id    TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_at    BIGINT NOT NULL,              -- the flush that last added this user
+    PRIMARY KEY (page_id, user_id)
+) WITHOUT ROWID;
 ```
 
 The `seq` keeps growing after compaction, because `upto_seq` records the position. This lets a compaction run while updates arrive: the transaction deletes only rows with `seq <= upto_seq`.
 
-A revision is created by a job after `CADOCS_REVISION_PAUSE_SECS` without edits, or after `CADOCS_REVISION_MAX_SECS` of continuous activity, and only if the content changed. A revision holds a full state rather than a Yjs snapshot. It can then be rendered or restored without the document's complete history, and old revisions can be pruned. All revisions are kept for `CADOCS_REVISION_KEEP_DAYS`. Older ones are thinned to one per day, and the most recent revision is never pruned.
+A revision is created by a job after `CADOCS_REVISION_PAUSE_SECS` without edits, or after `CADOCS_REVISION_MAX_SECS` of continuous activity, and only if the content changed. Each flush moves the pending `create_revision` job (key `revision:<page>`) to the pause after it, but never past the maximum after the job was first queued, and adds its author to `revision_authors`. "Changed" compares the title and the AST with those of the latest revision, so an edit undone, or content written again as it was, makes none. A revision takes every author recorded, and removes those whose last flush its read covered. A revision holds a full state rather than a Yjs snapshot. It can then be rendered or restored without the document's complete history, and old revisions can be pruned. All revisions are kept for `CADOCS_REVISION_KEEP_DAYS`. Older ones are thinned to one per day, and the most recent revision is never pruned.
 
 Restoring cannot simply merge the old state, because a CRDT merge would keep current content. In one room transaction, the server renders the revision into the AST (ADR 0008), clears `default` and `title`, and writes the AST back. Connected clients receive this as a normal edit, and the previous content stays available as a revision of its own, created first.
 

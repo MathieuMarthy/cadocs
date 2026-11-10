@@ -55,6 +55,8 @@ tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std"] }
 uuid = { version = "1", default-features = false, features = ["std", "v7"] }
 yrs = { version = "0.28", features = ["sync"] }
+# Revisions, compressed (docs/DATA_MODEL.md#documents). No legacy formats or dictionary builder.
+zstd = { version = "0.13", default-features = false }
 
 # Tests must see the yrs that ships: its overflow checks and debug assertions only fire in dev
 # builds, on crafted frames, and would hide what the release binary does with them.

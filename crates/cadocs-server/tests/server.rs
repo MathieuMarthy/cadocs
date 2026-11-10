@@ -25,11 +25,11 @@ use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, Credentials,
     DateCursor, DocEdit, DocStore, FirstUser, Grant, IndexTarget, Invitation, InvitationPreview,
     InvitedUser, Member, Membership, MovedPage, NewAttachment, NewGrant, NewInvitation, NewPage,
-    NewPasswordReset, NewSession, NewSpace, NewWorkspace, PageCrumb, PageIndex, PageMove,
-    PageRecord, PageSite, PageStore, SearchHit, SearchStore, SessionStanding, Snapshot, Space,
-    SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, UpdateBasis,
-    UploadTarget, UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach,
-    WorkspaceStore, now_ms,
+    NewPasswordReset, NewRevision, NewSession, NewSpace, NewWorkspace, PageCrumb, PageIndex,
+    PageMove, PageRecord, PageSite, PageStore, Revision, RevisionStore, RevisionSummary, SearchHit,
+    SearchStore, SessionStanding, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore,
+    StoreError, StoredDoc, StoredUpdate, UpdateBasis, UploadTarget, UserChanges, UserRecord,
+    Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -261,6 +261,56 @@ impl SearchStore for FlakyStore {
         self.inner
             .search(workspace_id, actor, fts, space, limit)
             .await
+    }
+}
+
+impl RevisionStore for FlakyStore {
+    async fn latest_revision(&self, page_id: &str) -> Result<Option<Revision>, StoreError> {
+        self.inner.latest_revision(page_id).await
+    }
+
+    async fn add_revision(&self, revision: &NewRevision<'_>) -> Result<Option<i64>, StoreError> {
+        self.inner.add_revision(revision).await
+    }
+
+    async fn revisions(
+        &self,
+        page_id: &str,
+        actor: &str,
+        before: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<RevisionSummary>, StoreError> {
+        self.inner.revisions(page_id, actor, before, limit).await
+    }
+
+    async fn revision(
+        &self,
+        page_id: &str,
+        number: i64,
+        actor: &str,
+    ) -> Result<Revision, StoreError> {
+        self.inner.revision(page_id, number, actor).await
+    }
+
+    async fn revision_to_restore(
+        &self,
+        page_id: &str,
+        number: i64,
+        actor: &str,
+    ) -> Result<Revision, StoreError> {
+        self.inner.revision_to_restore(page_id, number, actor).await
+    }
+
+    async fn thin_revisions(&self, before: i64) -> Result<u64, StoreError> {
+        self.inner.thin_revisions(before).await
+    }
+
+    async fn readable_titles(
+        &self,
+        actor: &str,
+        ids: &[String],
+    ) -> Result<Vec<(String, String)>, StoreError> {
+        self.inner.readable_titles(actor, ids).await
     }
 }
 

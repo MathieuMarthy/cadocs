@@ -13,6 +13,7 @@ anyhow.workspace = true
 argon2.workspace = true
 axum.workspace = true
 cadocs-collab.workspace = true
+cadocs-content.workspace = true
 cadocs-core.workspace = true
 cadocs-files.workspace = true
 cadocs-jobs.workspace = true
@@ -34,7 +35,6 @@ uuid.workspace = true
 
 [dev-dependencies]
 bytes.workspace = true
-cadocs-content.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true

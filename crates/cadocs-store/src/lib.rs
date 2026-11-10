@@ -4,6 +4,7 @@ mod accounts;
 mod attachments;
 mod jobs;
 mod pages;
+mod revisions;
 mod search;
 mod spaces;
 mod sqlite;
@@ -21,6 +22,10 @@ pub use jobs::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob};
 pub use pages::{
     DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, MovedPage, NewPage, PageCrumb, PageMove,
     PageRecord, PageStore, Placement,
+};
+pub use revisions::{
+    CREATE_REVISION, NewRevision, Revision, RevisionAuthor, RevisionStore, RevisionSummary,
+    RevisionTiming, THIN_REVISIONS,
 };
 pub use search::{IndexTarget, PageIndex, REINDEX_PAGE, SearchHit, SearchStore};
 pub use spaces::{
@@ -101,6 +106,8 @@ pub enum StoreError {
     AlreadyMember,
     #[error("no such attachment")]
     AttachmentNotFound,
+    #[error("no such revision")]
+    RevisionNotFound,
     #[error("the workspace has no room left for this file")]
     QuotaExceeded,
 }

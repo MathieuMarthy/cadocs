@@ -1,6 +1,7 @@
 <script lang="ts">
   import Message from "./routes/Message.svelte";
   import Account from "./routes/Account.svelte";
+  import History from "./routes/History.svelte";
   import Admin from "./routes/Admin.svelte";
   import Invite from "./routes/Invite.svelte";
   import Login from "./routes/Login.svelte";
@@ -24,7 +25,8 @@
     | { name: "workspace" | "settings" | "search"; workspace: WorkspaceRow }
     | { name: "space-settings"; workspace: WorkspaceRow; space: string }
     | { name: "trash"; workspace: WorkspaceRow; space: string }
-    | { name: "page"; id: string };
+    | { name: "page"; id: string }
+    | { name: "history"; id: string; revision: number | null };
 
   function resolve(path: string, search: string): View {
     const [first, second, ...rest] = path.split("/").filter(Boolean);
@@ -53,6 +55,10 @@
     }
     if (!first) {
       const page = query.get("page");
+      if (page && query.has("history")) {
+        const revision = Number(query.get("history"));
+        return { name: "history", id: page, revision: Number.isInteger(revision) && revision > 0 ? revision : null };
+      }
       if (page) return { name: "page", id: page };
       const workspace = session.workspaces[0];
       return workspace ? { name: "redirect", to: `/w/${workspace.slug}` } : { name: "home" };
@@ -125,6 +131,8 @@
       <button class="button" type="button" onclick={() => location.reload()}>reload</button>
     </Message>
   {/await}
+{:else if view.name === "history"}
+  {#key view.id}<History id={view.id} selected={view.revision} />{/key}
 {:else if view.name === "home"}
   <Shell title="no workspace">
     <h1>no workspace</h1>

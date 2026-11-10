@@ -9,6 +9,7 @@ use anyhow::{Context, ensure};
 use axum::http::{HeaderMap, Uri, header};
 use cadocs_collab::CollabConfig;
 use cadocs_jobs::JobConfig;
+use cadocs_store::RevisionTiming;
 
 use crate::client_ip::TrustedProxies;
 
@@ -19,6 +20,7 @@ const SECS_PER_DAY: u64 = 24 * 60 * 60;
 const DEFAULT_SESSION_DAYS: u64 = 30;
 const MAX_SESSION_DAYS: u64 = 3650;
 const DEFAULT_TRASH_DAYS: u64 = 30;
+const DEFAULT_REVISION_DAYS: u64 = 30;
 const DEFAULT_MAX_UPLOAD_MB: u64 = 25;
 /// 1 TiB: far past any wiki, and still far from overflowing once in bytes.
 const MAX_MB: u64 = 1024 * 1024;
@@ -34,6 +36,8 @@ pub struct Config {
     pub collab: CollabConfig,
     pub socket: SocketConfig,
     pub jobs: JobConfig,
+    /// When an edit's revision is taken.
+    pub revisions: RevisionTiming,
     pub attachments: AttachmentLimits,
 }
 
@@ -180,8 +184,10 @@ impl Config {
             },
             jobs: JobConfig {
                 trash_retention: read.trash_retention()?,
+                revision_retention: read.revision_retention()?,
                 ..JobConfig::default()
             },
+            revisions: read.revision_timing()?,
             attachments: read.attachment_limits()?,
         };
         config.validate()?;
@@ -244,6 +250,31 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
             "CADOCS_TRASH_DAYS must be between 1 and {MAX_TRASH_DAYS}"
         );
         Ok(Duration::from_secs(days * SECS_PER_DAY))
+    }
+
+    fn revision_retention(&self) -> anyhow::Result<Duration> {
+        let days = self.value("CADOCS_REVISION_KEEP_DAYS", DEFAULT_REVISION_DAYS)?;
+        ensure!(
+            (1..=MAX_TRASH_DAYS).contains(&days),
+            "CADOCS_REVISION_KEEP_DAYS must be between 1 and {MAX_TRASH_DAYS}"
+        );
+        Ok(Duration::from_secs(days * SECS_PER_DAY))
+    }
+
+    /// A pause of 0 takes a revision after each flush.
+    fn revision_timing(&self) -> anyhow::Result<RevisionTiming> {
+        let defaults = RevisionTiming::default();
+        let pause = self.secs("CADOCS_REVISION_PAUSE_SECS", defaults.pause)?;
+        let max = self.secs("CADOCS_REVISION_MAX_SECS", defaults.max)?;
+        ensure!(
+            max.as_secs() <= MAX_SECS,
+            "CADOCS_REVISION_MAX_SECS is too large"
+        );
+        ensure!(
+            pause <= max,
+            "CADOCS_REVISION_PAUSE_SECS must be at most CADOCS_REVISION_MAX_SECS"
+        );
+        Ok(RevisionTiming { pause, max })
     }
 
     fn attachment_limits(&self) -> anyhow::Result<AttachmentLimits> {
@@ -494,6 +525,9 @@ mod tests {
             ("CADOCS_SEND_QUEUE", "4"),
             ("CADOCS_DOC_READS", "5"),
             ("CADOCS_TRASH_DAYS", "9"),
+            ("CADOCS_REVISION_PAUSE_SECS", "11"),
+            ("CADOCS_REVISION_MAX_SECS", "12"),
+            ("CADOCS_REVISION_KEEP_DAYS", "13"),
             ("CADOCS_PING_SECS", "6"),
             ("CADOCS_PING_TIMEOUT_SECS", "7"),
         ])
@@ -516,8 +550,42 @@ mod tests {
         assert_eq!(config.collab.send_queue, 4);
         assert_eq!(config.collab.doc_reads, 5);
         assert_eq!(config.jobs.trash_retention, Duration::from_secs(9 * 86_400));
+        assert_eq!(config.revisions.pause, Duration::from_secs(11));
+        assert_eq!(config.revisions.max, Duration::from_secs(12));
+        assert_eq!(
+            config.jobs.revision_retention,
+            Duration::from_secs(13 * 86_400)
+        );
         assert_eq!(config.socket.ping, Duration::from_secs(6));
         assert_eq!(config.socket.ping_timeout, Duration::from_secs(7));
+    }
+
+    #[test]
+    fn revision_timing_is_checked() {
+        let defaults = config(&[]).unwrap();
+        assert_eq!(defaults.revisions.pause, Duration::from_secs(120));
+        assert_eq!(defaults.revisions.max, Duration::from_secs(600));
+        assert_eq!(
+            defaults.jobs.revision_retention,
+            Duration::from_secs(30 * 86_400)
+        );
+        let at_once = config(&[
+            ("CADOCS_REVISION_PAUSE_SECS", "0"),
+            ("CADOCS_REVISION_MAX_SECS", "0"),
+        ]);
+        assert!(at_once.is_ok(), "a revision after each flush is allowed");
+        let huge = u64::MAX.to_string();
+        for refused in [
+            &[
+                ("CADOCS_REVISION_PAUSE_SECS", "60"),
+                ("CADOCS_REVISION_MAX_SECS", "30"),
+            ][..],
+            &[("CADOCS_REVISION_KEEP_DAYS", "0")],
+            &[("CADOCS_REVISION_MAX_SECS", huge.as_str())],
+        ] {
+            let error = config(refused).unwrap_err();
+            assert!(error.to_string().contains("CADOCS_REVISION"), "{error}");
+        }
     }
 
     #[test]

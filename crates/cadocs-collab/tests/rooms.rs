@@ -20,7 +20,7 @@ use tokio::time::sleep;
 use yrs::sync::awareness::AwarenessUpdateEntry;
 use yrs::sync::{Awareness, AwarenessUpdate, Message, SyncMessage};
 use yrs::updates::decoder::Decode;
-use yrs::{Array, Doc, ReadTxn, Text, Transact, XmlFragment, XmlTextPrelim};
+use yrs::{Array, Doc, ReadTxn, Text, Transact, WriteTxn, XmlFragment, XmlTextPrelim};
 
 const FLUSH: Duration = Duration::from_millis(600);
 const IDLE: Duration = Duration::from_secs(61);
@@ -202,6 +202,44 @@ async fn the_server_writes_a_title_like_any_other_edit() {
     let edit = store.edits().pop().unwrap();
     assert_eq!(edit.title.as_deref(), Some("Nouveau été"));
     assert_eq!(edit.author.as_deref(), Some("bob"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_server_rewrites_a_document_like_any_other_edit() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let mut peer = Peer::join(&registry, ReadWrite).await;
+    peer.write("Before").unwrap();
+
+    registry
+        .rewrite(DOC, "bob", 5, |txn| {
+            let text = txn.get_or_insert_text("title");
+            let length = text.len(txn);
+            text.remove_range(txn, 0, length);
+            text.insert(txn, 0, "After");
+        })
+        .await
+        .unwrap();
+    peer.pump().await;
+    sleep(FLUSH).await;
+
+    assert_eq!(title(&peer.doc), "After");
+    assert_eq!(title(&rebuild(&store.stored(DOC))), "After");
+    let edit = store.edits().pop().unwrap();
+    assert_eq!(edit.author.as_deref(), Some("bob"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rewrite_that_panics_is_a_corrupt_document() {
+    let store = MemStore::new();
+    let registry = registry(&store);
+    let refused = registry
+        .rewrite(DOC, "bob", 0, |_| panic!("bad state"))
+        .await;
+    assert!(
+        matches!(refused, Err(CollabError::CorruptDocument { .. })),
+        "{refused:?}"
+    );
 }
 
 #[tokio::test(start_paused = true)]

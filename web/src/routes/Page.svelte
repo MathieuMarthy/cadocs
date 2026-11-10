@@ -69,9 +69,12 @@
 
   const shownTitle = $derived(name || row?.title || "untitled");
 
-  /** The top bar's menu: copy link for anyone, move to trash for those who may write. */
+  /** The top bar's menu: copy link and history for anyone, move to trash for those who may write. */
   const actions = $derived.by<MenuItem[]>(() => {
-    const items: MenuItem[] = [{ icon: "link", label: "copy link", select: () => void copy(pageLink(id)) }];
+    const items: MenuItem[] = [
+      { icon: "link", label: "copy link", select: () => void copy(pageLink(id)) },
+      { icon: "history", label: "history", href: `/?page=${id}&history` },
+    ];
     const page = row;
     const held = nav;
     if (page && held && canEdit(page.role)) {

@@ -2,6 +2,7 @@ mod accounts;
 mod attachments;
 mod jobs;
 mod pages;
+mod revisions;
 mod search;
 mod spaces;
 mod workspaces;
@@ -17,7 +18,10 @@ use sqlx::sqlite::{
 };
 use tokio::sync::Notify;
 
-use crate::{DocEdit, DocStore, PageSite, Snapshot, StoreError, StoredDoc, StoredUpdate, now_ms};
+use crate::{
+    DocEdit, DocStore, PageSite, RevisionTiming, Snapshot, StoreError, StoredDoc, StoredUpdate,
+    now_ms,
+};
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations/sqlite");
 
@@ -40,6 +44,7 @@ pub struct SqliteStore {
     /// Told of each job a write adds, the reindex of a flush included.
     jobs_added: Arc<Notify>,
     reindex_delay: Duration,
+    revision_timing: RevisionTiming,
 }
 
 impl SqliteStore {
@@ -81,12 +86,19 @@ impl SqliteStore {
             reader,
             jobs_added: Arc::default(),
             reindex_delay: REINDEX_DELAY,
+            revision_timing: RevisionTiming::default(),
         }
     }
 
     /// For tests, which cannot wait the default.
     pub fn with_reindex_delay(mut self, delay: Duration) -> Self {
         self.reindex_delay = delay;
+        self
+    }
+
+    /// When a flush's revision is taken: `CADOCS_REVISION_PAUSE_SECS` and `_MAX_SECS`.
+    pub fn with_revision_timing(mut self, timing: RevisionTiming) -> Self {
+        self.revision_timing = timing;
         self
     }
 }
@@ -233,11 +245,12 @@ impl DocStore for SqliteStore {
             }
         }
         let run_at = created_at.saturating_add(self.reindex_delay.as_millis() as i64);
-        let queued = search::queue_reindex(&mut tx, "p.id = ?1", doc_id, run_at).await?;
+        search::queue_reindex(&mut tx, "p.id = ?1", doc_id, run_at).await?;
+        let author = edit.author.as_deref();
+        revisions::note_edit(&mut tx, doc_id, author, self.revision_timing, created_at).await?;
         tx.commit().await?;
-        if queued {
-            self.jobs_added.notify_one();
-        }
+        // The revision job is always queued or moved, so the worker always has news.
+        self.jobs_added.notify_one();
         Ok(renamed)
     }
 

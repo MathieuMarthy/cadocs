@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 cadocs-core.workspace = true
+serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 # `Notify`, to wake the job worker when a job is added.

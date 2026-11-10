@@ -11,7 +11,7 @@ use cadocs_store::{DocEdit, DocStore, StoreError, StoredDoc, StoredUpdate};
 use tokio::sync::{Notify, Semaphore, watch};
 use tokio::time::{Instant, sleep, sleep_until};
 use tracing::warn;
-use yrs::Doc;
+use yrs::{Doc, TransactionMut};
 
 use crate::connection::Connection;
 use crate::events::{Event, EventConnection, EventHubs, PageEvent};
@@ -166,6 +166,24 @@ impl<S: DocStore> DocRegistry<S> {
             .await?
     }
 
+    /// Runs `action` on a document's room, loading it if needed, as one edit by `user_id` that
+    /// every client receives. `bytes` is about what it writes, for the bound on unflushed edits.
+    /// This is for writes that replace content, such as a revision restore.
+    pub async fn rewrite<T>(
+        &self,
+        doc_id: &str,
+        user_id: &str,
+        bytes: usize,
+        action: impl FnOnce(&mut TransactionMut) -> T,
+    ) -> Result<T, CollabError> {
+        let mut action = Some(action);
+        self.enter(doc_id, |room| {
+            let action = action.take().expect("a room is entered once");
+            room.change(user_id, bytes, action)
+        })
+        .await?
+    }
+
     /// Hands `action` a private copy of a document, with no client needed. A loaded room gives its
     /// edits, flushed or not, and only for as long as it takes to encode them, so a slow `action`
     /// holds up no room. Otherwise the copy comes from the store: no room is made, nothing is
@@ -190,6 +208,19 @@ impl<S: DocStore> DocRegistry<S> {
         };
         let (doc, _) = built.map_err(|_| corrupt())??;
         Ok(action(&doc))
+    }
+
+    /// Runs `action` under a turn of `doc_reads`, for work outside a room that weighs as much as
+    /// a read, such as decoding a stored revision. It never fails today; the `Result` matches
+    /// `read`, so a caller can treat both alike.
+    pub async fn bounded<T>(&self, action: impl FnOnce() -> T) -> Result<T, CollabError> {
+        let _turn = self
+            .inner
+            .reads
+            .acquire()
+            .await
+            .expect("this semaphore is never closed");
+        Ok(action())
     }
 
     /// The latest state of a document. An unload still holds edits the store lacks, so it is waited

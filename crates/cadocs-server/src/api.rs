@@ -5,6 +5,7 @@ mod attachments;
 pub mod auth;
 mod invitations;
 mod pages;
+mod revisions;
 mod search;
 mod spaces;
 mod workspaces;
@@ -26,8 +27,8 @@ use axum::routing::any;
 use axum::{Json, Router};
 use cadocs_collab::{Authorizer, CollabError};
 use cadocs_store::{
-    AccountStore, AttachmentStore, DocStore, PageStore, SearchStore, SpaceStore, StoreError,
-    WorkspaceStore,
+    AccountStore, AttachmentStore, DocStore, PageStore, RevisionStore, SearchStore, SpaceStore,
+    StoreError, WorkspaceStore,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -216,7 +217,8 @@ impl From<StoreError> for ApiError {
             | StoreError::InvitationNotFound
             | StoreError::SpaceNotFound
             | StoreError::PageNotFound
-            | StoreError::AttachmentNotFound => ApiError::new(ErrorCode::NotFound),
+            | StoreError::AttachmentNotFound
+            | StoreError::RevisionNotFound => ApiError::new(ErrorCode::NotFound),
             error => {
                 tracing::error!(%error, "storage failed");
                 ApiError::new(ErrorCode::Unavailable)
@@ -382,7 +384,8 @@ where
         + SpaceStore
         + PageStore
         + AttachmentStore
-        + SearchStore,
+        + SearchStore
+        + RevisionStore,
     A: Authorizer,
 {
     // A nested fallback only sees paths below the root of the nest. `router` in `lib.rs` also
@@ -396,7 +399,8 @@ where
         .merge(spaces::routes(state))
         .merge(pages::routes(state))
         .merge(attachments::routes(state))
-        .merge(search::routes(state));
+        .merge(search::routes(state))
+        .merge(revisions::routes(state));
     finish(routes, state.http.clone())
 }
 

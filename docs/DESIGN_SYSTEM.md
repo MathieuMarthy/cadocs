@@ -80,6 +80,7 @@ One set: **Lucide** 0.460.0 (ISC license, compatible with AGPL-3.0), redrawn wit
 | `ellipsis` | more actions (opens an action menu) |
 | `trash-2` | move to trash, open the trash |
 | `rotate-ccw` | restore |
+| `history` | history (a page's revisions) |
 | `x` | close, delete forever (in `danger`) |
 | `pencil` | rename |
 | `link`, `copy` | copy link, copy |

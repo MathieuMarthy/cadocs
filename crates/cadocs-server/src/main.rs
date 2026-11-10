@@ -77,7 +77,8 @@ async fn reset_password(config: Config, email: &str) -> anyhow::Result<()> {
 async fn run(config: Config) -> anyhow::Result<()> {
     let _lock = data_dir::lock(&config.data_dir)?;
 
-    let store = Arc::new(SqliteStore::open(&config.data_dir.join("cadocs.db")).await?);
+    let store = SqliteStore::open(&config.data_dir.join("cadocs.db")).await?;
+    let store = Arc::new(store.with_revision_timing(config.revisions));
     let files = LocalFileStore::open(&config.data_dir)
         .with_context(|| format!("cannot prepare {}", config.data_dir.display()))?;
     let registry = DocRegistry::new(store.clone(), config.collab.clone());

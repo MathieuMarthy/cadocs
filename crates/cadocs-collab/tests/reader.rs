@@ -202,3 +202,40 @@ async fn a_read_is_refused_once_the_server_closes() {
         "{result:?}"
     );
 }
+
+/// Decoding a revision weighs as much as a read, so it takes a turn of the same bound.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bounded_work_shares_the_bound_of_reads() {
+    const BOUND: usize = 2;
+    let store = MemStore::new();
+    store_title(&store, "stored").await;
+    let registry = registry(&store, BOUND);
+    let running = Arc::new(AtomicUsize::new(0));
+    let highest = Arc::new(AtomicUsize::new(0));
+    let work = |running: Arc<AtomicUsize>, highest: Arc<AtomicUsize>| {
+        move || {
+            let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+            highest.fetch_max(now, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(20));
+            running.fetch_sub(1, Ordering::SeqCst);
+        }
+    };
+
+    let mut tasks = JoinSet::new();
+    for i in 0..3 * BOUND {
+        let registry = registry.clone();
+        let job = work(running.clone(), highest.clone());
+        tasks.spawn(async move {
+            if i % 2 == 0 {
+                registry.bounded(job).await
+            } else {
+                registry.read(DOC, move |_| job()).await
+            }
+        });
+    }
+    while let Some(task) = tasks.join_next().await {
+        task.unwrap().unwrap();
+    }
+
+    assert_eq!(highest.load(Ordering::SeqCst), BOUND);
+}

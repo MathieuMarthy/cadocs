@@ -2,6 +2,7 @@
 
 mod cleanup;
 mod index;
+mod revisions;
 
 use std::error::Error;
 use std::future::Future;
@@ -9,7 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cadocs_store::{
-    AttachmentStore, DocStore, Job, JobStore, NewJob, REINDEX_PAGE, SearchStore, StoreError, now_ms,
+    AttachmentStore, CREATE_REVISION, DocStore, Job, JobStore, NewJob, REINDEX_PAGE, RevisionStore,
+    SearchStore, StoreError, THIN_REVISIONS, now_ms,
 };
 use tokio::sync::Notify;
 use tokio::task::JoinSet;
@@ -19,6 +21,7 @@ use uuid::Uuid;
 
 pub use cleanup::{Cleanup, PURGE_EXPIRED, PURGE_ORPHAN_FILES, PURGE_TRASH};
 pub use index::Index;
+pub use revisions::{Decoded, RevisionError, Revisions, capture, decode, decode_bounded, restore};
 
 /// Whatever went wrong, for `last_error`.
 pub type JobError = Box<dyn Error + Send + Sync>;
@@ -40,6 +43,8 @@ pub struct JobConfig {
     pub recurring_every: Duration,
     /// How long a page or a space stays in the trash.
     pub trash_retention: Duration,
+    /// How long every revision is kept. After that, one per day remains.
+    pub revision_retention: Duration,
 }
 
 impl Default for JobConfig {
@@ -50,6 +55,7 @@ impl Default for JobConfig {
             poll: Duration::from_secs(60),
             recurring_every: Duration::from_secs(3600),
             trash_retention: Duration::from_secs(30 * 24 * 3600),
+            revision_retention: Duration::from_secs(30 * 24 * 3600),
         }
     }
 }
@@ -104,26 +110,39 @@ impl<S: JobStore> JobQueue<S> {
     }
 }
 
-/// Every job of the server: the cleanups, and the search index.
+/// Every job of the server: the cleanups, the search index and the revisions.
 pub struct ServerJobs<S> {
     cleanup: Cleanup<S>,
     index: Index<S>,
+    revisions: Revisions<S>,
 }
 
 impl<S> ServerJobs<S> {
-    pub fn new(cleanup: Cleanup<S>, index: Index<S>) -> Self {
-        Self { cleanup, index }
+    pub fn new(cleanup: Cleanup<S>, index: Index<S>, revisions: Revisions<S>) -> Self {
+        Self {
+            cleanup,
+            index,
+            revisions,
+        }
     }
 }
 
-impl<S: DocStore + JobStore + AttachmentStore + SearchStore> Handler for ServerJobs<S> {
-    const RECURRING: &'static [&'static str] = <Cleanup<S> as Handler>::RECURRING;
+impl<S: DocStore + JobStore + AttachmentStore + SearchStore + RevisionStore> Handler
+    for ServerJobs<S>
+{
+    const RECURRING: &'static [&'static str] = &[
+        PURGE_EXPIRED,
+        PURGE_TRASH,
+        PURGE_ORPHAN_FILES,
+        THIN_REVISIONS,
+    ];
 
     async fn run(&self, job: &Job) -> Result<(), JobError> {
-        if job.kind == REINDEX_PAGE {
-            self.index.reindex(job).await
-        } else {
-            self.cleanup.run(job).await
+        match job.kind.as_str() {
+            REINDEX_PAGE => self.index.reindex(job).await,
+            CREATE_REVISION => self.revisions.create(job).await,
+            THIN_REVISIONS => self.revisions.thin().await,
+            _ => self.cleanup.run(job).await,
         }
     }
 }

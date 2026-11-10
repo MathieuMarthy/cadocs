@@ -23,6 +23,30 @@ impl Document {
         });
         ids
     }
+
+    /// The ids of the pages the content links to, in order, each once: what a renderer needs the
+    /// titles of.
+    pub fn page_links(&self) -> Vec<String> {
+        let mut ids: Vec<String> = Vec::new();
+        visit(&self.blocks, &mut |block| {
+            let inlines: &[Inline] = match block {
+                Block::Paragraph(content)
+                | Block::Heading { content, .. }
+                | Block::Details {
+                    summary: content, ..
+                } => content,
+                _ => &[],
+            };
+            for inline in inlines {
+                if let Inline::PageLink { id } = inline
+                    && !ids.contains(id)
+                {
+                    ids.push(id.clone());
+                }
+            }
+        });
+        ids
+    }
 }
 
 /// Calls `action` on every block, those inside others included.

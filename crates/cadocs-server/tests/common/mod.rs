@@ -105,9 +105,6 @@ async fn start_custom(
 ) -> Api {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("cadocs.db");
-    // Searches find a page soon after its edit.
-    let store = SqliteStore::open(&path).await.unwrap();
-    let store = Arc::new(store.with_reindex_delay(Duration::from_millis(100)));
     let config = Config::from_lookup(|name| match name {
         "CADOCS_PUBLIC_URL" => Some(public_url.to_owned()),
         "CADOCS_TRUSTED_PROXIES" => Some(proxies.to_owned()),
@@ -117,6 +114,12 @@ async fn start_custom(
             .map(|(_, value)| (*value).to_owned()),
     })
     .unwrap();
+    // Searches find a page soon after its edit.
+    let store = SqliteStore::open(&path).await.unwrap();
+    let store = store
+        .with_reindex_delay(Duration::from_millis(100))
+        .with_revision_timing(config.revisions);
+    let store = Arc::new(store);
     let registry = DocRegistry::new(store.clone(), config.collab);
     let state = AppState::new(
         registry.clone(),

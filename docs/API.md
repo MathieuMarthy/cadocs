@@ -1,6 +1,6 @@
 # API
 
-All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today `/ws/pages/{page_id}`, and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces, grants, pages and attachments, apart from `/duplicate`, the imports, the exports and the revisions. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
+All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today `/ws/pages/{page_id}`, and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces, grants, pages, attachments, search and revisions, apart from `/duplicate`, the imports and the exports. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
 
 ## Conventions
 
@@ -152,6 +152,9 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 | GET | `/pages/{page}/revisions` | viewer | List revisions |
 | GET | `/pages/{page}/revisions/{n}` | viewer | Rendered content of a revision |
 | POST | `/pages/{page}/revisions/{n}/restore` | editor | Apply a revision as a new edit |
+
+- A revision summary is `{ number, title, authors: [{ id, name }], created_at }`, the most recent first, paginated with the number as the cursor. `authors` are who wrote since the revision before, minus deleted accounts. `GET /pages/{page}/revisions/{n}` adds `html`, rendered by the server with the titles of the linked pages the caller can open (`page not found` for the others). A number that is not a positive integer is `400` with `n: invalid`, an unknown one `404`.
+- A restore answers `204`. It first keeps the current content as a revision when it differs from the latest one, then replaces the title and content through the room in one transaction: open clients receive it as an edit, and the next revision job records it with the restorer as its author.
 
 - A page is `{ id, workspace_id, space_id, parent_id, position, slug, title, role, has_children, created_by, updated_by, deleted_at, deleted_by, created_at, updated_at }`. `GET /pages/{page}` also answers `ancestors`, the pages above it as `[{ id, title }]`, the root first, for the breadcrumb and the tree. They are live and in its space, so the caller's role covers them. `role` is the caller's on the space, `has_children` says whether a live page sits under it, and `position` is an opaque key that sorts among its siblings. A trashed page answers `404` everywhere but the trash list, `restore` and `purge`.
 - `POST /spaces/{space}/pages` takes `{ parent_id?, after? }` and answers `201` with the page. A new page has an empty title, which its client writes through the page socket. `POST /pages/{page}/move` takes `{ space_id?, parent_id?, after? }` and answers the page. A missing or `null` `parent_id` is the root of the space, a missing `space_id` the current one.

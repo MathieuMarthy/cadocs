@@ -4,8 +4,8 @@ mod common;
 
 use std::time::Duration;
 
-use cadocs_jobs::{Cleanup, Handler, PURGE_EXPIRED, PURGE_ORPHAN_FILES, PURGE_TRASH};
-use cadocs_store::{JobStore, SqliteStore, now_ms};
+use cadocs_jobs::{Cleanup, Handler, PURGE_EXPIRED, PURGE_ORPHAN_FILES, PURGE_TRASH, ServerJobs};
+use cadocs_store::{JobStore, SqliteStore, THIN_REVISIONS, now_ms};
 use common::{Api, Login, ORIGIN, Reply, logged_in};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
@@ -118,7 +118,8 @@ impl Wiki {
         connect_async(request).await.unwrap().0
     }
 
-    /// Runs a job and waits for it to end.
+    /// Runs a job and waits for it to end, with the reindexes it may cause. A revision waits for a
+    /// pause in editing far longer than a test, so it is not waited for.
     async fn run(&self, kind: &str) {
         let queue = &self.api.queue;
         queue
@@ -126,7 +127,8 @@ impl Wiki {
             .await
             .unwrap();
         let ended = async {
-            while self.api.number("SELECT count(*) FROM jobs").await != 0 {
+            let query = "SELECT count(*) FROM jobs WHERE kind <> 'create_revision'";
+            while self.api.number(query).await != 0 {
                 sleep(Duration::from_millis(5)).await;
             }
         };
@@ -166,6 +168,15 @@ fn every_cleanup_recurs() {
     assert_eq!(
         Cleanup::<SqliteStore>::RECURRING,
         [PURGE_EXPIRED, PURGE_TRASH, PURGE_ORPHAN_FILES]
+    );
+    assert_eq!(
+        ServerJobs::<SqliteStore>::RECURRING,
+        [
+            PURGE_EXPIRED,
+            PURGE_TRASH,
+            PURGE_ORPHAN_FILES,
+            THIN_REVISIONS
+        ]
     );
 }
 

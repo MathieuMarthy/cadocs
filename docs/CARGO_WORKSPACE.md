@@ -53,6 +53,8 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `tokio` `fs` and `io-util` features | Files on disk in `cadocs-files`, through the blocking pool | A buffer per upload or download in progress, up to a chunk of the body | Low |
 | `rust-stemmers`, MIT and BSD-3-Clause | Snowball stemmers for the 18 languages a workspace accepts, in `cadocs-search` (ADR 0007). Its `serde` dependency was already in the tree | A stemmer is a function pointer; the work buffer lives for one word | See step 18 in [benchmark notes](notes/benchmark.md) |
 | `tokio` `sync` feature in `cadocs-store` | `Notify`, so a write that adds a job wakes the worker. Already compiled for the other crates | None | None |
+| `zstd` (no default features: no legacy formats, no dictionary builder), MIT and BSD-3-Clause | Revision states, compressed at level 3 in `cadocs-jobs`. Bundles the C library | A compression or decompression context per call, sized to the input, freed after it | See step 19 in [benchmark notes](notes/benchmark.md) |
+| `serde_json` in `cadocs-store` | Revision authors stored and read as JSON arrays. Already in the tree | None | None |
 | `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
 
 ### Dev tools only
@@ -79,7 +81,6 @@ Step 16 adds a `plugin` node of our own (`blocks.ts`, ADR 0016) and `web/scripts
 | Crate | Stage | Why | Cost note |
 | --- | --- | --- | --- |
 | `tower-http` | MVP | Timeouts, compression, tracing, limited features | Low |
-| `zstd` | MVP | Compression of revisions | Bounded by compression level |
 | `jiff` | MVP | Dates, as in uptime-monitoring | Low without the bundled tz database |
 | `async_zip` | MVP | Streaming zip for exports with attachments and for imports | Low, nothing buffered whole |
 | `lettre` | V1 | SMTP, optional feature | Only in builds that enable it |

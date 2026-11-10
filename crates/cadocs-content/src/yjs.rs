@@ -12,8 +12,9 @@ use yrs::any::Number;
 use yrs::types::Attrs;
 use yrs::types::text::YChange;
 use yrs::{
-    Any, Doc, GetString, Out, ReadTxn, Text, Transact, TransactionMut, Xml, XmlElementPrelim,
-    XmlElementRef, XmlFragment, XmlFragmentRef, XmlOut, XmlTextPrelim, XmlTextRef,
+    Any, Doc, GetString, Out, ReadTxn, Text, Transact, TransactionMut, WriteTxn, Xml,
+    XmlElementPrelim, XmlElementRef, XmlFragment, XmlFragmentRef, XmlOut, XmlTextPrelim,
+    XmlTextRef,
 };
 
 use crate::ast::*;
@@ -414,6 +415,23 @@ pub fn write(txn: &mut TransactionMut, fragment: &XmlFragmentRef, document: &Doc
         fragment.remove_range(txn, 0, len);
     }
     write_blocks(txn, fragment, &document.blocks, false);
+}
+
+/// Replaces the title and the content of a page, in `txn`, as restoring a revision does. A title
+/// that holds more than text is left as it is, since yrs cannot remove what is not text, and the
+/// answer is then `false`.
+pub fn replace_page(txn: &mut TransactionMut, title: &str, document: &Document) -> bool {
+    let text = txn.get_or_insert_text(TITLE);
+    let current = text.get_string(txn);
+    let length = text.len(txn);
+    let plain = current.len() == length as usize;
+    if plain && current != title {
+        text.remove_range(txn, 0, length);
+        text.insert(txn, 0, title);
+    }
+    let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+    write(txn, &fragment, document);
+    plain
 }
 
 fn element<P: XmlFragment>(txn: &mut TransactionMut, parent: &P, tag: &str) -> XmlElementRef {

@@ -264,3 +264,43 @@ fn odd_children_of_lists_and_tables_keep_their_text() {
         assert!(text.contains(part), "{part} lost from {text:?}");
     }
 }
+
+#[test]
+fn replace_page_writes_the_title_and_the_content() {
+    let doc = written(&every_node());
+    doc.get_or_insert_text(yjs::TITLE)
+        .insert(&mut doc.transact_mut(), 0, "Old title");
+    let small = Document {
+        blocks: vec![para("restored")],
+    };
+    assert!(yjs::replace_page(&mut doc.transact_mut(), "New", &small));
+    assert_eq!(yjs::read_page(&doc), ("New".to_owned(), small));
+}
+
+#[test]
+fn replace_page_keeps_a_title_holding_more_than_text() {
+    let doc = Doc::new();
+    let title = doc.get_or_insert_text(yjs::TITLE);
+    title.insert(&mut doc.transact_mut(), 0, "Odd");
+    title.insert_embed(&mut doc.transact_mut(), 3, Any::from("embed"));
+    let small = Document {
+        blocks: vec![para("restored")],
+    };
+    assert!(!yjs::replace_page(&mut doc.transact_mut(), "New", &small));
+    assert_eq!(yjs::read_doc(&doc), small);
+}
+
+#[test]
+fn page_links_lists_each_linked_page_once() {
+    let link = |id: &str| Inline::PageLink { id: id.to_owned() };
+    let document = Document {
+        blocks: vec![
+            Block::Paragraph(vec![link("a"), text(" and "), link("b")]),
+            Block::Blockquote(vec![Block::Heading {
+                level: 2,
+                content: vec![link("a"), link("c")],
+            }]),
+        ],
+    };
+    assert_eq!(document.page_links(), ["a", "b", "c"]);
+}

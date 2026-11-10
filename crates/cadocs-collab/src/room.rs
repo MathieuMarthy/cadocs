@@ -15,7 +15,10 @@ use tracing::warn;
 use yrs::sync::awareness::AwarenessUpdateEntry;
 use yrs::sync::{Awareness, AwarenessUpdate, Message, SyncMessage};
 use yrs::updates::encoder::Encode;
-use yrs::{ClientID, Doc, GetString, IdSet, ReadTxn, StateVector, Text, Transact, Update};
+use yrs::{
+    ClientID, Doc, GetString, IdSet, ReadTxn, StateVector, Text, Transact, TransactionMut, Update,
+    WriteTxn,
+};
 
 use crate::connection::{Close, Connection, decode_untrusted};
 use crate::{
@@ -551,25 +554,40 @@ impl Room {
     /// Replaces the title, as an edit every client receives. The registry calls this under its
     /// lock, so the room cannot start unloading at the same time.
     pub(crate) fn set_title(&self, title: &str, author: &str) -> Result<(), CollabError> {
-        let mut state = self.state();
-        if state.queue_refuses(title.len(), &self.config) {
-            return Err(CollabError::StorageFailing);
-        }
-        let doc = state.awareness.doc();
-        // The observer runs as this transaction drops, and a stored document can make yrs panic.
-        let replaced = catch_unwind(AssertUnwindSafe(|| {
-            let text = doc.get_or_insert_text(TITLE);
-            let mut txn = doc.transact_mut();
-            let current = text.get_string(&txn);
-            let length = text.len(&txn);
+        let plain = self.change(author, title.len(), |txn| {
+            let text = txn.get_or_insert_text(TITLE);
+            let current = text.get_string(txn);
+            let length = text.len(txn);
             // A client can put more than text in this root. yrs counts it, but cannot remove it:
             // it would panic after deleting the text.
             let plain = current.len() == length as usize;
             if plain && current != title {
-                text.remove_range(&mut txn, 0, length);
-                text.insert(&mut txn, 0, title);
+                text.remove_range(txn, 0, length);
+                text.insert(txn, 0, title);
             }
             plain
+        })?;
+        plain.then_some(()).ok_or_else(|| self.corrupt())
+    }
+
+    /// Runs `action` in one transaction, whose update every client receives and the store gets as
+    /// an edit by `author`. `bytes` is about what it writes, for the queue's bound. A panic in
+    /// `action` is a corrupt document: what it wrote before still goes out, as any edit would.
+    pub(crate) fn change<T>(
+        &self,
+        author: &str,
+        bytes: usize,
+        action: impl FnOnce(&mut TransactionMut) -> T,
+    ) -> Result<T, CollabError> {
+        let mut state = self.state();
+        if state.queue_refuses(bytes, &self.config) {
+            return Err(CollabError::StorageFailing);
+        }
+        let doc = state.awareness.doc();
+        // The observer runs as this transaction drops, and a stored document can make yrs panic.
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let mut txn = doc.transact_mut();
+            action(&mut txn)
         }));
         let applied = lock(&state.applied).take();
         if let Some(update) = applied {
@@ -579,11 +597,12 @@ impl Room {
                 self.enqueue(&mut state, update, Some(author.into()));
             }
         }
-        match replaced {
-            Ok(true) => Ok(()),
-            _ => Err(CollabError::CorruptDocument {
-                doc_id: self.doc_id.clone(),
-            }),
+        result.map_err(|_| self.corrupt())
+    }
+
+    fn corrupt(&self) -> CollabError {
+        CollabError::CorruptDocument {
+            doc_id: self.doc_id.clone(),
         }
     }
 
