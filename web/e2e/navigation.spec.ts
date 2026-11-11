@@ -183,7 +183,8 @@ test("the tree shows over REST even when the events socket never opens", async (
   page,
   server,
 }) => {
-  await newPage(server, "Offline");
+  // With no events socket, the tree is read once: it must find the title stored.
+  await server.titleStored(await newPage(server, "Offline"), "Offline");
   await page.routeWebSocket(/\/ws\/events/, (socket) => socket.close({ code: 1011 }));
   await asOwner(page, server);
   await page.goto(`${server.url}/w/tests`);

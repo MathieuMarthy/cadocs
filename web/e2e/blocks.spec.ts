@@ -108,6 +108,8 @@ test("a link to a page is picked by its title, shows its title, and opens it", a
 }) => {
   const target = await server.page("target");
   await server.call("PATCH", `/pages/${target}`, { title: "Deploy notes" });
+  // The picker reads the recent pages once, so the title must be stored first.
+  await server.titleStored(target, "Deploy notes");
   await bothOnline(left, right);
   await editor(left).click();
   await left.keyboard.type("See ");
@@ -159,6 +161,7 @@ test("a link to a page the reader cannot open does not show its title", async ({
   const space = await server.call("POST", `/workspaces/${workspaceId}/spaces`, { name: "Private" });
   const secret = await server.call("POST", `/spaces/${space.id}/pages`, {});
   await server.call("PATCH", `/pages/${secret.id}`, { title: "Salaries" });
+  await server.titleStored(secret.id, "Salaries");
   await bothOnline(left, right);
   await editor(left).click();
   await left.keyboard.type("[[sal");
