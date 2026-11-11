@@ -75,7 +75,9 @@ impl Default for CollabConfig {
             room_idle: Duration::from_secs(60),
             room_queue_bytes: 4 * 1024 * 1024,
             max_rooms: 256,
-            room_memory: 64 * 1024 * 1024,
+            // 100 MB of RSS, the MVP target, less about 15 MB idle and 12 MB for 200 sockets. The
+            // 100-document benchmark needs about 66 MiB (docs/notes/benchmark.md).
+            room_memory: 72 * 1024 * 1024,
             max_sockets: 512,
             max_frame_bytes: 8 * 1024 * 1024,
             send_queue: 256,

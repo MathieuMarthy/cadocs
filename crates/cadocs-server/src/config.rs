@@ -602,7 +602,7 @@ mod tests {
         assert_eq!(config.collab.room_idle, Duration::from_secs(60));
         assert_eq!(config.collab.room_queue_bytes, 4_194_304);
         assert_eq!(config.collab.max_rooms, 256);
-        assert_eq!(config.collab.room_memory, 64 * 1024 * 1024);
+        assert_eq!(config.collab.room_memory, 72 * 1024 * 1024);
         assert_eq!(config.collab.max_sockets, 512);
         assert_eq!(config.collab.max_frame_bytes, 8_388_608);
         assert_eq!(config.collab.send_queue, 256);
