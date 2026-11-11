@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod assets;
+pub mod backup;
 pub mod cli;
 pub mod client_ip;
 pub mod config;

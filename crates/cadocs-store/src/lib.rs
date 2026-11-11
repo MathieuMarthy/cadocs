@@ -72,6 +72,12 @@ pub enum StoreError {
     LastInstanceAdmin,
     #[error("this database belongs to another version of cadocs: start the matching server first")]
     OtherVersion,
+    #[error("this database comes from a newer version of cadocs")]
+    NewerVersion,
+    #[error("the database is damaged: {0}")]
+    Damaged(String),
+    #[error("the path is not valid UTF-8")]
+    NotUtf8Path,
     #[error("no such user")]
     UserNotFound,
     #[error("this account is disabled")]

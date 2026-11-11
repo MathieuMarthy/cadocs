@@ -1,0 +1,107 @@
+# A release for each `v*` tag: binaries for x86_64 and aarch64, default and S3 builds, attached to
+# a GitHub release, and the matching images on ghcr.io. Everything comes from the Dockerfile, so a
+# binary and its image are one build, against bookworm's glibc. Each architecture builds on a
+# native runner: emulating aarch64 would take hours for an LTO build.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  draft:
+    name: Draft release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Create the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --generate-notes
+
+  build:
+    name: Build (${{ matrix.arch }}, ${{ matrix.flavor }})
+    needs: draft
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+      packages: write
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        flavor: [default, s3]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - flavor: default
+            features: ""
+            suffix: ""
+          - flavor: s3
+            features: s3
+            suffix: "-s3"
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      ARCH: ${{ matrix.arch }}
+      TARGET: ${{ matrix.target }}
+      FEATURES: ${{ matrix.features }}
+      SUFFIX: ${{ matrix.suffix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Binary
+        run: |
+          docker buildx build --platform "linux/$ARCH" --build-arg "FEATURES=$FEATURES" \
+            --target binary --output type=local,dest=out .
+          name="cadocs-$TAG-$TARGET$SUFFIX"
+          mkdir "$name"
+          cp out/cadocs LICENSE "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "$name.tar.gz" "$name.tar.gz.sha256"
+      - name: Image
+        # The same builder still holds the layers of the binary, so this only adds the last stage.
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${TAG#v}$SUFFIX-$ARCH"
+          docker buildx build --platform "linux/$ARCH" --build-arg "FEATURES=$FEATURES" \
+            --tag "$image" --push .
+
+  publish:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Multi-architecture images
+        # `X.Y.Z` and `latest` are the default build, `X.Y.Z-s3` and `s3` the S3 one.
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          version="${TAG#v}"
+          for pair in ":latest" "-s3:s3"; do
+            suffix="${pair%%:*}" alias="${pair#*:}"
+            docker buildx imagetools create \
+              --tag "$repo:$version$suffix" --tag "$repo:$alias" \
+              "$repo:$version$suffix-amd64" "$repo:$version$suffix-arm64"
+          done
+      - name: Publish the release
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false

@@ -13,6 +13,7 @@ S3=--features=cadocs-server/s3,cadocs-files/s3; cargo test --workspace $S3 && ca
 npm --prefix web ci && npm --prefix web run build   # before a release build: the binary embeds web/dist
 cargo build --release
 npm --prefix web run test:e2e                       # after the two builds: it runs target/release/cadocs, whose web/dist is embedded
+docker build -t cadocs .                            # the image, as releases build it (.github/workflows/release.yml)
 cargo deny check                                    # advisories, licenses, sources (deny.toml), as CI runs it
 bench/rss.sh build && bench/rss.sh run              # RAM benchmark, about 12 minutes, results in target/bench
 ```
@@ -53,7 +54,7 @@ Other rules:
 
 What later steps must know, by topic. Read the file of the code you touch, and add to it. Keep this section short: every session and subagent pays for it.
 
-- **Prototype limits:** the server binds to `127.0.0.1`. Do not expose it.
+- **Binding:** the server binds to `127.0.0.1` by default. The Docker image sets `CADOCS_BIND=0.0.0.0:3000`, and its port is published on `127.0.0.1` behind a TLS proxy ([OPERATIONS.md](docs/OPERATIONS.md#deployment)). Do not expose it without the security review of step 24.
 - **Access changes:** a handler whose change can alter what a user reaches calls `state.access_changed()` once it is stored ([store notes](docs/notes/store.md)).
 - [docs/notes/collab.md](docs/notes/collab.md): rooms, yrs, y-websocket, Yjs layout, socket RAM.
 - [docs/notes/content.md](docs/notes/content.md): schema check, Yjs layout of nodes, renderers, Markdown conventions.

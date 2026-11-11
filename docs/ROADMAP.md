@@ -76,7 +76,7 @@ Steps, one session each. Each step adds the migration for the tables it needs, a
 - [x] **Step 20c:** Compressed snapshots: `doc_snapshots.codec`, zstd level 3 at each compaction, raw rows still read. Done when a compacted state is stored compressed and loads as it was, and a raw one still loads.
 - [x] **Step 20d:** Room memory budget: `CADOCS_ROOM_MEMORY_MB`, each room counted from its encoded size. Done when the budget refuses or evicts as `CADOCS_MAX_ROOMS` does, and a large document weighs by its size.
 - [x] **Step 20:** Markdown import and export for one page, with or without attachments, and the print stylesheet. Done when an export imports back with its content and attachments.
-- [ ] **Step 21:** Delivery: `cadocs backup` and `cadocs restore`, Docker image, `aarch64` and `x86_64` binaries, [OPERATIONS.md](OPERATIONS.md) complete. Done when a backup and restore round trip passes on a running server.
+- [x] **Step 21:** Delivery: `cadocs backup` and `cadocs restore`, Docker image, `aarch64` and `x86_64` binaries, [OPERATIONS.md](OPERATIONS.md) complete. Done when a backup and restore round trip passes on a running server.
 - [ ] **Step 22:** Coverage: the whole permission matrix over REST and WebSocket, and a check of each scope item against its tests. Done when nothing in the scope lacks an automated test.
 - [ ] **Step 23:** MVP benchmark: idle, 30 active users, login peaks, 10,000 pages, and the value of `CADOCS_MAX_ROOMS`. Comes last, after step 24, whose fixes could invalidate the measures. Done when the results are recorded against the exit criteria, as measured.
 - [ ] **Step 24:** Security review of auth, uploads and rendered HTML. Done when its findings are fixed or recorded.
@@ -119,7 +119,7 @@ Exit criteria:
 - [ ] RSS under 100 MB with 30 simulated active users on 30 pages, each with one page socket and one events socket.
 - [ ] After login peaks, RSS returns to the idle target plus at most 10 MB.
 - [ ] 10,000 pages load and search with p95 latency under 100 ms on a Raspberry Pi 4 or an equivalent 1 vCPU VPS.
-- [ ] A backup and restore round trip is tested, on a running server.
+- [x] A backup and restore round trip is tested, on a running server.
 - [ ] A security review of auth, uploads and rendered HTML is done.
 - [ ] One team uses it daily for two weeks with no data loss.
 

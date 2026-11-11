@@ -97,13 +97,34 @@ pub async fn start_with_files(files: Arc<dyn FileStore>, settings: &[(&str, &str
     start_custom(ORIGIN, "", settings, Some(files)).await
 }
 
+/// A server on a data folder that already holds a database, as a restore leaves it.
+pub async fn start_in(dir: TempDir) -> Api {
+    start_custom_in(dir, ORIGIN, "", &[], None).await
+}
+
 async fn start_custom(
     public_url: &str,
     proxies: &str,
     settings: &[(&str, &str)],
     files: Option<Arc<dyn FileStore>>,
 ) -> Api {
-    let dir = TempDir::new().unwrap();
+    start_custom_in(
+        TempDir::new().unwrap(),
+        public_url,
+        proxies,
+        settings,
+        files,
+    )
+    .await
+}
+
+async fn start_custom_in(
+    dir: TempDir,
+    public_url: &str,
+    proxies: &str,
+    settings: &[(&str, &str)],
+    files: Option<Arc<dyn FileStore>>,
+) -> Api {
     let path = dir.path().join("cadocs.db");
     let config = Config::from_lookup(|name| match name {
         "CADOCS_PUBLIC_URL" => Some(public_url.to_owned()),

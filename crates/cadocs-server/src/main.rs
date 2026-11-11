@@ -12,7 +12,7 @@ use cadocs_server::cli::{self, Command};
 use cadocs_server::config::{Config, FileStoreConfig};
 use cadocs_server::password::Passwords;
 use cadocs_server::session::new_password_reset;
-use cadocs_server::{AppState, data_dir, serve, start_jobs};
+use cadocs_server::{AppState, backup, data_dir, serve, start_jobs};
 use cadocs_store::{AccountStore, DocStore, SqliteStore};
 use tokio::net::TcpListener;
 use tokio::task::spawn_blocking;
@@ -38,11 +38,39 @@ fn main() -> anyhow::Result<()> {
     let config = Config::from_env()?;
     match command {
         Command::Serve => run_server(config),
-        Command::ResetPassword { email } => tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?
-            .block_on(reset_password(config, &email)),
+        Command::ResetPassword { email } => on_one_thread(reset_password(config, &email)),
+        Command::Backup { to } => on_one_thread(async move {
+            let copied = backup::backup(&config.data_dir, &to, local_files(&config)).await?;
+            println!(
+                "backed up to {}: the database and {} new files",
+                to.display(),
+                copied.files
+            );
+            Ok(())
+        }),
+        Command::Restore { from } => on_one_thread(async move {
+            let copied = backup::restore(&from, &config.data_dir, local_files(&config)).await?;
+            let data_dir = config.data_dir.display();
+            println!(
+                "restored into {data_dir}: the database and {} files",
+                copied.files
+            );
+            Ok(())
+        }),
     }
+}
+
+/// A command other than `serve` runs on one thread.
+fn on_one_thread(work: impl Future<Output = anyhow::Result<()>>) -> anyhow::Result<()> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(work)
+}
+
+/// With S3, files are backed up on the S3 side (ADR 0020).
+fn local_files(config: &Config) -> bool {
+    matches!(config.files, FileStoreConfig::Local)
 }
 
 fn run_server(config: Config) -> anyhow::Result<()> {
