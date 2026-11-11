@@ -135,6 +135,23 @@ export class TestServer {
     return response.status === 204 ? null : response.json();
   }
 
+  /**
+   * Waits until lists read over REST show a page's title. A rename reaches `pages.title` at the
+   * next flush, about half a second later, so a browser that reads the tree or the recent pages
+   * sooner, with no events socket to correct it, keeps the old title.
+   */
+  async titleStored(pageId: string, title: string) {
+    const { workspaceId } = await this.session();
+    const until = Date.now() + 10_000;
+    while (Date.now() < until) {
+      const recent = await this.call("GET", `/workspaces/${workspaceId}/recent?limit=100`);
+      const rows: { id: string; title: string }[] = recent.items;
+      if (rows.some((row) => row.id === pageId && row.title === title)) return;
+      await new Promise((done) => setTimeout(done, 50));
+    }
+    throw new Error(`the title of ${pageId} is not stored as ${title}`);
+  }
+
   /** An invitation link to the workspace of the first account. */
   async invite(email: string, role = "member") {
     const { workspaceId } = await this.session();
