@@ -382,7 +382,9 @@ function decorations(state: EditorState, editable: boolean) {
     const { $from, empty } = state.selection;
     const block = empty ? blockAt($from) : null;
     const role = roleOf($from);
-    if (block !== null && (role.kind === "heading" || role.kind === "quote")) {
+    // A block another tab is writing out already shows its source as text: a hint would double it.
+    const hinted = role.kind === "heading" || role.kind === "quote";
+    if (block !== null && hinted && !looksWritten(role, $from.parent.textContent)) {
       const hint = sourceOf(role)!.trimEnd();
       found.push(Decoration.node(block, block + $from.parent.nodeSize, { class: "md-hinted" }));
       found.push(
