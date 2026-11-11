@@ -28,17 +28,27 @@ use pulldown_cmark::{
 
 use crate::ast::*;
 use crate::url::allowed;
-use crate::{ATTACHMENT_PATH, PageTitles};
+use crate::{Links, PageTitles, Relative};
 
 const TOC: &str = "[TOC]";
-const PAGE_PREFIX: &str = "/?page=";
 const EMPTY: &str = "<br>";
 
 // Export.
 
 pub fn to_markdown(document: &Document, titles: &dyn PageTitles) -> String {
-    let out = blocks(titles, &document.blocks);
+    to_markdown_with(document, titles, &Relative)
+}
+
+/// Markdown whose links to attachments and pages are those `links` gives.
+pub fn to_markdown_with(document: &Document, titles: &dyn PageTitles, links: &dyn Links) -> String {
+    let ctx = Writer { titles, links };
+    let out = blocks(&ctx, &document.blocks);
     if out.is_empty() { out } else { out + "\n" }
+}
+
+struct Writer<'a> {
+    titles: &'a dyn PageTitles,
+    links: &'a dyn Links,
 }
 
 /// Which lists would merge when written one after the other with the same marker.
@@ -62,7 +72,7 @@ fn interrupts(block: &Block) -> bool {
 /// Blocks separated by a blank line, without a final line break. A list right after a list of
 /// its family takes the other marker (`*` or `)`), or Markdown would read one list. In a list
 /// item (`tight`), a list right after a paragraph follows it on the next line.
-fn blocks_in(titles: &dyn PageTitles, list: &[Block], tight: bool) -> String {
+fn blocks_in(ctx: &Writer<'_>, list: &[Block], tight: bool) -> String {
     let mut out = String::new();
     let mut alternate = false;
     for (index, current) in list.iter().enumerate() {
@@ -76,13 +86,13 @@ fn blocks_in(titles: &dyn PageTitles, list: &[Block], tight: bool) -> String {
                 && interrupts(current);
             out.push_str(if follows { "\n" } else { "\n\n" });
         }
-        out.push_str(&block(titles, current, alternate));
+        out.push_str(&block(ctx, current, alternate));
     }
     out
 }
 
-fn blocks(titles: &dyn PageTitles, list: &[Block]) -> String {
-    blocks_in(titles, list, false)
+fn blocks(ctx: &Writer<'_>, list: &[Block]) -> String {
+    blocks_in(ctx, list, false)
 }
 
 /// `text` with `first` before its first line and `rest` before the others, blank lines kept
@@ -108,29 +118,29 @@ fn quoted(text: &str) -> String {
     prefixed(text, "> ", "> ")
 }
 
-fn list_item(titles: &dyn PageTitles, marker: &str, list: &[Block]) -> String {
+fn list_item(ctx: &Writer<'_>, marker: &str, list: &[Block]) -> String {
     let indent = " ".repeat(marker.len());
-    prefixed(&blocks_in(titles, list, true), marker, &indent)
+    prefixed(&blocks_in(ctx, list, true), marker, &indent)
 }
 
-fn block(titles: &dyn PageTitles, block: &Block, alternate: bool) -> String {
+fn block(ctx: &Writer<'_>, block: &Block, alternate: bool) -> String {
     let bullet = if alternate { "*" } else { "-" };
     let number = if alternate { ")" } else { "." };
     match block {
         // `<br>` alone stands for an empty paragraph, which Markdown has no other way to keep.
         Block::Paragraph(content) if content.is_empty() => EMPTY.into(),
         // `[TOC]` written by a user comes out escaped, so it stays text.
-        Block::Paragraph(content) => inlines(titles, content, Flow::Block),
+        Block::Paragraph(content) => inlines(ctx, content, Flow::Block),
         Block::Heading { level, content } => {
             format!(
                 "{} {}",
                 "#".repeat((*level).clamp(1, 6).into()),
-                inlines(titles, content, Flow::Line)
+                inlines(ctx, content, Flow::Line)
             )
         }
         Block::BulletList(items) => items
             .iter()
-            .map(|item| list_item(titles, &format!("{bullet} "), &item.blocks))
+            .map(|item| list_item(ctx, &format!("{bullet} "), &item.blocks))
             .collect::<Vec<_>>()
             .join("\n"),
         Block::OrderedList { start, items, .. } => items
@@ -138,7 +148,7 @@ fn block(titles: &dyn PageTitles, block: &Block, alternate: bool) -> String {
             .enumerate()
             .map(|(index, item)| {
                 list_item(
-                    titles,
+                    ctx,
                     // `-1.` would be a bullet: Markdown lists start at 0 or more.
                     &format!("{}{number} ", (*start).max(0) + index as i64),
                     &item.blocks,
@@ -151,7 +161,7 @@ fn block(titles: &dyn PageTitles, block: &Block, alternate: bool) -> String {
             .map(|item| {
                 let marker = format!("{bullet} [{}] ", if item.checked { "x" } else { " " });
                 // The continuation lines align on the list marker, not on the box.
-                prefixed(&blocks_in(titles, &item.blocks, true), &marker, "  ")
+                prefixed(&blocks_in(ctx, &item.blocks, true), &marker, "  ")
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -161,7 +171,7 @@ fn block(titles: &dyn PageTitles, block: &Block, alternate: bool) -> String {
             let info = language.as_deref().unwrap_or("").replace(['`', '\n'], "");
             format!("{fence}{info}\n{code}\n{fence}")
         }
-        Block::Blockquote(inner) => quoted(&blocks(titles, inner)),
+        Block::Blockquote(inner) => quoted(&blocks(ctx, inner)),
         Block::HorizontalRule => "---".into(),
         Block::Callout {
             kind,
@@ -172,25 +182,25 @@ fn block(titles: &dyn PageTitles, block: &Block, alternate: bool) -> String {
                 "danger" => "CAUTION",
                 _ => "NOTE",
             };
-            quoted(&format!("[!{alert}]\n{}", blocks(titles, inner)))
+            quoted(&format!("[!{alert}]\n{}", blocks(ctx, inner)))
         }
         Block::Details { summary, content } => format!(
             "<details>\n<summary>\n\n{}\n\n</summary>\n\n{}\n\n</details>",
-            inlines(titles, summary, Flow::Block),
-            blocks(titles, content)
+            inlines(ctx, summary, Flow::Block),
+            blocks(ctx, content)
         ),
-        Block::Table(rows) => table(titles, rows),
+        Block::Table(rows) => table(ctx, rows),
         Block::TableOfContents => TOC.into(),
         Block::Image { id, alt } => {
             let mut out = "![".to_string();
             escape(alt.as_deref().unwrap_or_default(), false, &mut out);
-            let _ = write!(out, "]({})", destination(&format!("{ATTACHMENT_PATH}{id}")));
+            let _ = write!(out, "]({})", destination(&ctx.links.attachment(id)));
             out
         }
         Block::File { id, name } => {
             let mut out = "[".to_string();
             escape(name, false, &mut out);
-            let _ = write!(out, "]({})", destination(&format!("{ATTACHMENT_PATH}{id}")));
+            let _ = write!(out, "]({})", destination(&ctx.links.attachment(id)));
             out
         }
         Block::Plugin { text, .. } => {
@@ -209,7 +219,7 @@ fn block(titles: &dyn PageTitles, block: &Block, alternate: bool) -> String {
                     }
                 })
                 .collect();
-            inlines(titles, &content, Flow::Block)
+            inlines(ctx, &content, Flow::Block)
         }
     }
 }
@@ -223,7 +233,7 @@ fn longest_run(text: &str, wanted: char) -> usize {
     longest
 }
 
-fn table(titles: &dyn PageTitles, rows: &[TableRow]) -> String {
+fn table(ctx: &Writer<'_>, rows: &[TableRow]) -> String {
     let width = rows.iter().map(|row| row.cells.len()).max().unwrap_or(0);
     if width == 0 {
         return String::new();
@@ -238,7 +248,7 @@ fn table(titles: &dyn PageTitles, rows: &[TableRow]) -> String {
                     .iter()
                     .map(|block| match block {
                         Block::Paragraph(content) | Block::Heading { content, .. } => {
-                            inlines(titles, content, Flow::Cell)
+                            inlines(ctx, content, Flow::Cell)
                         }
                         other => {
                             let text = crate::text::to_text(&Document {
@@ -259,7 +269,7 @@ fn table(titles: &dyn PageTitles, rows: &[TableRow]) -> String {
                                     }
                                 })
                                 .collect();
-                            inlines(titles, &content, Flow::Cell)
+                            inlines(ctx, &content, Flow::Cell)
                         }
                     })
                     .collect::<Vec<_>>()
@@ -533,7 +543,7 @@ fn flanks(
     opens && closes
 }
 
-fn inlines(titles: &dyn PageTitles, content: &[Inline], flow: Flow) -> String {
+fn inlines(ctx: &Writer<'_>, content: &[Inline], flow: Flow) -> String {
     let mut out = String::new();
     // Each open delimiter, and whether it was written as an HTML tag.
     let mut open: Vec<(Delimiter, bool)> = Vec::new();
@@ -608,10 +618,13 @@ fn inlines(titles: &dyn PageTitles, content: &[Inline], flow: Flow) -> String {
                 Flow::Cell => "<br>",
             }),
             Inline::PageLink { id } => {
-                let title = titles.title(id).unwrap_or_else(|| "page not found".into());
+                let title = ctx
+                    .titles
+                    .title(id)
+                    .unwrap_or_else(|| "page not found".into());
                 out.push('[');
                 escape(&title, false, &mut out);
-                let _ = write!(out, "]({PAGE_PREFIX}{})", destination(id));
+                let _ = write!(out, "]({})", destination(&ctx.links.page(id)));
             }
         }
     }
@@ -622,14 +635,8 @@ fn inlines(titles: &dyn PageTitles, content: &[Inline], flow: Flow) -> String {
 
 // Import.
 
-/// The id in an attachment's address, as the renderers write it.
-fn attachment_id(href: &str) -> Option<String> {
-    let id = href.strip_prefix(ATTACHMENT_PATH)?;
-    (!id.is_empty() && !id.contains(['/', '?', '#'])).then(|| id.to_string())
-}
-
 /// A paragraph holding only a plain link to an attachment, as a file block is written.
-fn file_block(content: &[Inline]) -> Option<Block> {
+fn file_block(links: &dyn Links, content: &[Inline]) -> Option<Block> {
     let [Inline::Text { text, marks }] = content else {
         return None;
     };
@@ -642,18 +649,26 @@ fn file_block(content: &[Inline]) -> Option<Block> {
         return None;
     }
     Some(Block::File {
-        id: attachment_id(&link.href)?,
+        id: links.attachment_id(&link.href)?,
         name: text.clone(),
     })
 }
 
 /// The document a Markdown text describes. Never fails: what it cannot map stays as text.
 pub fn from_markdown(markdown: &str) -> Document {
+    from_markdown_with(markdown, &Relative)
+}
+
+/// The same, reading links to attachments and pages at the addresses `links` knows.
+pub fn from_markdown_with(markdown: &str, links: &dyn Links) -> Document {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_GFM;
-    let mut reader = Reader::default();
+    let mut reader = Reader {
+        addresses: Some(links),
+        ..Reader::default()
+    };
     for (event, range) in Parser::new_ext(markdown, options).into_offset_iter() {
         // The table of contents is known by its source: escaped brackets read as the same text.
         if matches!(event, Event::Start(Tag::Paragraph)) {
@@ -712,7 +727,9 @@ struct Inlines {
 }
 
 #[derive(Default)]
-struct Reader {
+struct Reader<'a> {
+    /// Always set: an `Option` only for `Default`.
+    addresses: Option<&'a dyn Links>,
     stack: Vec<Container>,
     inline: Option<Inlines>,
     /// Paragraph opened for text a tight list item holds directly.
@@ -739,7 +756,11 @@ struct Reader {
     lone_image: Option<(String, String)>,
 }
 
-impl Reader {
+impl Reader<'_> {
+    fn addresses(&self) -> &dyn Links {
+        self.addresses.unwrap_or(&Relative)
+    }
+
     fn push_block(&mut self, block: Block) {
         if self.stack.is_empty() {
             self.stack.push(Container::Root(Vec::new()));
@@ -843,7 +864,7 @@ impl Reader {
                 Block::Paragraph(joined)
             }
         } else {
-            file_block(&content).unwrap_or(Block::Paragraph(content))
+            file_block(self.addresses(), &content).unwrap_or(Block::Paragraph(content))
         };
         self.push_block(block);
     }
@@ -961,10 +982,7 @@ impl Reader {
             Tag::Link {
                 dest_url, title, ..
             } => {
-                if let Some(id) = dest_url
-                    .strip_prefix(PAGE_PREFIX)
-                    .filter(|id| !id.is_empty())
-                {
+                if let Some(id) = self.addresses().page_id(&dest_url) {
                     self.page = Some(id.to_string());
                     self.links.push(None);
                 } else {
@@ -985,7 +1003,7 @@ impl Reader {
                     && self.image == 1
                     && self.links.is_empty()
                     && self.inline.as_ref().is_some_and(|i| i.content.is_empty());
-                self.attachment_image = attachment_id(&dest_url).filter(|_| opens);
+                self.attachment_image = self.addresses().attachment_id(&dest_url).filter(|_| opens);
             }
             _ => {}
         }

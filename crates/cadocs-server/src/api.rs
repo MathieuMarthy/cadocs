@@ -4,6 +4,7 @@ mod admin;
 mod attachments;
 pub mod auth;
 mod invitations;
+mod markdown;
 mod pages;
 mod revisions;
 mod search;
@@ -399,6 +400,7 @@ where
         .merge(spaces::routes(state))
         .merge(pages::routes(state))
         .merge(attachments::routes(state))
+        .merge(markdown::routes(state))
         .merge(search::routes(state))
         .merge(revisions::routes(state));
     finish(routes, state.http.clone())

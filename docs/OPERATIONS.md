@@ -41,6 +41,7 @@ Environment variables only, so no config file format has to be parsed or documen
 | `CADOCS_SESSION_DAYS` **P** | `30` | Session lifetime, 1 to 3650, extended by use |
 | `CADOCS_MAX_UPLOAD_MB` | `25` | Largest attachment, 1 to 1048576 |
 | `CADOCS_WORKSPACE_QUOTA_MB` | `0` | Attachment storage per workspace, `0` for no limit, at most 1048576 |
+| `CADOCS_MAX_IMPORT_MB` | `100` | Largest import body, a page zipped with its attachments, 1 to 1048576. Written to `data/tmp` as it arrives |
 | `CADOCS_TRASH_DAYS` | `30` | Time in the trash before purging, 1 to 3650. The purge runs at start and then every hour |
 | `CADOCS_REVISION_PAUSE_SECS` | `120` | Pause in editing that creates a revision. `0` takes one after each flush |
 | `CADOCS_REVISION_MAX_SECS` | `600` | Longest editing time without a revision. At least the pause |

@@ -289,6 +289,11 @@ impl FileStore for S3FileStore {
         Box::pin(self.inner.delete_file(id))
     }
 
+    /// Under `<data>/tmp`, as on disk: an import's zip never goes to the bucket.
+    fn scratch(&self) -> io::Result<std::fs::File> {
+        tempfile::tempfile_in(&self.inner.tmp)
+    }
+
     fn list(&self) -> FileList {
         enum Next {
             Start,

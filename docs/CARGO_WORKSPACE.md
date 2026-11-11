@@ -48,12 +48,14 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `argon2` (`alloc`, `getrandom`, `password-hash`) | Password hashing at OWASP settings | 19 MB per hash, one at a time, returned by a trim (ADR 0015) | With the next two rows, 0.4 MB in all, routes included |
 | `sha2`, `subtle`, `getrandom` | Session tokens, their hash and constant-time CSRF comparison. `sha2` and `getrandom` were already in the tree through `rust-embed` and `tempfile` | None | See `argon2` |
 | `uuid` (`std`, `v7`) | Sortable ids | None | See `argon2` |
-| `pulldown-cmark` (no default features), MIT | Markdown import in `cadocs-content` (ADR 0008). Its `html` and `getopts` features are off: HTML comes from the AST, and there is no binary | Low: a pull parser, nothing kept after an import | Low. Not linked into the server until a route uses it |
+| `pulldown-cmark` (no default features), MIT | Markdown import in `cadocs-content` (ADR 0008). Its `html` and `getopts` features are off: HTML comes from the AST, and there is no binary | Low: a pull parser, nothing kept after an import | Low. In the server since step 18 |
 | `bytes`, `futures-util` (`alloc` in `cadocs-files`), `percent-encoding` | The streams of `FileStore`, and the file name of an upload. All three were already in the tree through axum, so they add no code | None | None |
 | `tokio` `fs` and `io-util` features | Files on disk in `cadocs-files`, through the blocking pool | A buffer per upload or download in progress, up to a chunk of the body | Low |
 | `rust-stemmers`, MIT and BSD-3-Clause | Snowball stemmers for the 18 languages a workspace accepts, in `cadocs-search` (ADR 0007). Its `serde` dependency was already in the tree | A stemmer is a function pointer; the work buffer lives for one word | See step 18 in [benchmark notes](notes/benchmark.md) |
 | `tokio` `sync` feature in `cadocs-store` | `Notify`, so a write that adds a job wakes the worker. Already compiled for the other crates | None | None |
 | `zstd` (no default features: no legacy formats, no dictionary builder), MIT and BSD-3-Clause | Revision states, compressed at level 3 in `cadocs-jobs`. Bundles the C library | A compression or decompression context per call, sized to the input, freed after it | See step 19 in [benchmark notes](notes/benchmark.md) |
+| `async_zip` (`tokio` only, no compression features), MIT | Zips of one page and its attachments, exported as they are sent and imported from a scratch file (step 20). Entries are stored: attachments are mostly compressed already, and no `flate2` or `async-compression` comes in. Brings `crc32fast`, `futures-lite`, `pin-project` and `tokio-util` | A 64 KiB pipe per export in progress; an import parses at most a 1 MiB directory, checked before parsing | See step 20 in [benchmark notes](notes/benchmark.md) |
+| `tokio-util` (`compat`, `io`), `tempfile` in `cadocs-files`, `futures-util` `io` | Bridging async_zip's `futures` traits to tokio, reading a stream into a body, and the anonymous scratch file of an import, in `data/tmp`. `tempfile` was already in the tree | None | Low |
 | `serde_json` in `cadocs-store` | Revision authors stored and read as JSON arrays. Already in the tree | None | None |
 | `rusty-s3` 0.11 (`full`, `rustcrypto`), BSD-2-Clause, with `jiff` and `url` at its own versions. 0.11 parses with `instant-xml`, which replaced the `quick-xml` of 0.8 and its two advisories | S3 signatures and listing parsing, with no I/O of its own (ADR 0020). Only with the `s3` feature | None at rest | With the next row, 2.7 MB in a release binary, and nothing in a default build |
 | `reqwest` (`rustls-tls-native-roots`, `stream`, no default features), MIT or Apache-2.0 | Sends the S3 requests, with rustls and `ring`, the system roots and streamed bodies. Only with the `s3` feature | 1.4 MB of idle RSS once linked, 2.7 MB with S3 in use: the system roots and a pool of at most 2 idle connections (see step 20b in [benchmark notes](notes/benchmark.md)) | See `rusty-s3` |
@@ -85,7 +87,6 @@ Step 16 adds a `plugin` node of our own (`blocks.ts`, ADR 0016) and `web/scripts
 | --- | --- | --- | --- |
 | `tower-http` | MVP | Timeouts, compression, tracing, limited features | Low |
 | `jiff` | MVP | Dates, as in uptime-monitoring | Low without the bundled tz database |
-| `async_zip` | MVP | Streaming zip for exports with attachments and for imports | Low, nothing buffered whole |
 | `lettre` | V1 | SMTP, optional feature | Only in builds that enable it |
 | `totp-lite` | V1 | TOTP codes | Very low |
 | `openidconnect` or a smaller client | V1 | OIDC, optional feature. To evaluate against a hand-written flow | Pulls an HTTP client |

@@ -24,6 +24,17 @@ impl Document {
         ids
     }
 
+    /// Replaces the id of each image and file block for which `replace` answers one.
+    pub fn map_attachments(&mut self, replace: &mut impl FnMut(&str) -> Option<String>) {
+        visit_mut(&mut self.blocks, &mut |block| {
+            if let Block::Image { id, .. } | Block::File { id, .. } = block
+                && let Some(new) = replace(id)
+            {
+                *id = new;
+            }
+        });
+    }
+
     /// The ids of the pages the content links to, in order, each once: what a renderer needs the
     /// titles of.
     pub fn page_links(&self) -> Vec<String> {
@@ -65,6 +76,36 @@ fn visit(blocks: &[Block], action: &mut impl FnMut(&Block)) {
                 .iter()
                 .flat_map(|row| &row.cells)
                 .for_each(|cell| visit(&cell.blocks, action)),
+            Block::Paragraph(_)
+            | Block::Heading { .. }
+            | Block::CodeBlock { .. }
+            | Block::HorizontalRule
+            | Block::TableOfContents
+            | Block::Image { .. }
+            | Block::File { .. }
+            | Block::Plugin { .. } => {}
+        }
+    }
+}
+
+/// Calls `action` on every block, those inside others included, before their content.
+fn visit_mut(blocks: &mut [Block], action: &mut impl FnMut(&mut Block)) {
+    for block in blocks {
+        action(block);
+        match block {
+            Block::BulletList(items) | Block::OrderedList { items, .. } => items
+                .iter_mut()
+                .for_each(|item| visit_mut(&mut item.blocks, action)),
+            Block::TaskList(items) => items
+                .iter_mut()
+                .for_each(|item| visit_mut(&mut item.blocks, action)),
+            Block::Blockquote(inner)
+            | Block::Callout { blocks: inner, .. }
+            | Block::Details { content: inner, .. } => visit_mut(inner, action),
+            Block::Table(rows) => rows
+                .iter_mut()
+                .flat_map(|row| &mut row.cells)
+                .for_each(|cell| visit_mut(&mut cell.blocks, action)),
             Block::Paragraph(_)
             | Block::Heading { .. }
             | Block::CodeBlock { .. }

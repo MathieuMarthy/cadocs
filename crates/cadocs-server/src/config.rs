@@ -22,6 +22,8 @@ const MAX_SESSION_DAYS: u64 = 3650;
 const DEFAULT_TRASH_DAYS: u64 = 30;
 const DEFAULT_REVISION_DAYS: u64 = 30;
 const DEFAULT_MAX_UPLOAD_MB: u64 = 25;
+/// A zip of a page and its attachments, as an import receives it.
+const DEFAULT_MAX_IMPORT_MB: u64 = 100;
 /// 1 TiB: far past any wiki, and still far from overflowing once in bytes.
 const MAX_MB: u64 = 1024 * 1024;
 const MIB: u64 = 1024 * 1024;
@@ -61,6 +63,8 @@ pub struct AttachmentLimits {
     pub max_upload_bytes: u64,
     /// What each workspace's attachments may take, `None` for no limit.
     pub workspace_quota_bytes: Option<u64>,
+    /// The largest import body, written to `data/tmp` as it arrives.
+    pub max_import_bytes: u64,
 }
 
 impl Default for AttachmentLimits {
@@ -68,6 +72,7 @@ impl Default for AttachmentLimits {
         Self {
             max_upload_bytes: DEFAULT_MAX_UPLOAD_MB * MIB,
             workspace_quota_bytes: None,
+            max_import_bytes: DEFAULT_MAX_IMPORT_MB * MIB,
         }
     }
 }
@@ -305,9 +310,15 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
             quota <= MAX_MB,
             "CADOCS_WORKSPACE_QUOTA_MB must be at most {MAX_MB}"
         );
+        let import = self.value("CADOCS_MAX_IMPORT_MB", DEFAULT_MAX_IMPORT_MB)?;
+        ensure!(
+            (1..=MAX_MB).contains(&import),
+            "CADOCS_MAX_IMPORT_MB must be between 1 and {MAX_MB}"
+        );
         Ok(AttachmentLimits {
             max_upload_bytes: upload * MIB,
             workspace_quota_bytes: (quota > 0).then_some(quota * MIB),
+            max_import_bytes: import * MIB,
         })
     }
 
@@ -469,20 +480,25 @@ mod tests {
         let limits = config(&[]).unwrap().attachments;
         assert_eq!(limits.max_upload_bytes, 25 * 1024 * 1024);
         assert_eq!(limits.workspace_quota_bytes, None);
+        assert_eq!(limits.max_import_bytes, 100 * 1024 * 1024);
 
         let set = config(&[
             ("CADOCS_MAX_UPLOAD_MB", "2"),
             ("CADOCS_WORKSPACE_QUOTA_MB", "10"),
+            ("CADOCS_MAX_IMPORT_MB", "3"),
         ]);
         let limits = set.unwrap().attachments;
         assert_eq!(limits.max_upload_bytes, 2 * 1024 * 1024);
         assert_eq!(limits.workspace_quota_bytes, Some(10 * 1024 * 1024));
+        assert_eq!(limits.max_import_bytes, 3 * 1024 * 1024);
 
         for (name, refused) in [
             ("CADOCS_MAX_UPLOAD_MB", "0"),
             ("CADOCS_MAX_UPLOAD_MB", "1048577"),
             ("CADOCS_WORKSPACE_QUOTA_MB", "1048577"),
             ("CADOCS_WORKSPACE_QUOTA_MB", "-1"),
+            ("CADOCS_MAX_IMPORT_MB", "0"),
+            ("CADOCS_MAX_IMPORT_MB", "1048577"),
         ] {
             let error = config(&[(name, refused)]).unwrap_err();
             assert!(

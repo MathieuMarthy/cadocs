@@ -5,7 +5,7 @@
   import Shell from "../components/Shell.svelte";
   import { openPage } from "../editor/collab";
   import { copy, pageLink, trashPage } from "../lib/actions";
-  import { api, ApiError } from "../lib/api";
+  import { api, ApiError, exportUrl } from "../lib/api";
   import { describe } from "../lib/form.svelte";
   import { acquireNav, canEdit, lastWorkspace, type Nav, type PageView } from "../lib/nav.svelte";
   import { notify } from "../lib/notice.svelte";
@@ -69,11 +69,14 @@
 
   const shownTitle = $derived(name || row?.title || "untitled");
 
-  /** The top bar's menu: copy link and history for anyone, move to trash for those who may write. */
+  /** The top bar's menu: copy link, history, export and print for anyone, move to trash for those who may write. */
   const actions = $derived.by<MenuItem[]>(() => {
     const items: MenuItem[] = [
       { icon: "link", label: "copy link", select: () => void copy(pageLink(id)) },
       { icon: "history", label: "history", href: `/?page=${id}&history` },
+      { icon: "download", label: "export as markdown", href: exportUrl(id, false) },
+      { icon: "download", label: "export with attachments", href: exportUrl(id, true) },
+      { icon: "printer", label: "print", select: () => print() },
     ];
     const page = row;
     const held = nav;

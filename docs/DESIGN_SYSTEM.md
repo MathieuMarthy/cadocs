@@ -88,6 +88,8 @@ One set: **Lucide** 0.460.0 (ISC license, compatible with AGPL-3.0), redrawn wit
 | `log-out` | log out |
 | `user`, `settings` | account, settings |
 | `menu` | open the sidebar on a phone |
+| `download`, `upload` | export, import |
+| `printer` | print |
 
 ## Layout
 

@@ -102,6 +102,11 @@ pub trait FileStore: Send + Sync + 'static {
     fn download_origin(&self) -> Option<String> {
         None
     }
+
+    /// An anonymous file for work in progress, such as an import being read, gone once closed.
+    fn scratch(&self) -> io::Result<std::fs::File> {
+        tempfile::tempfile()
+    }
 }
 
 /// Files under `<data>/files`, two levels of directories down, with uploads in progress under
@@ -174,6 +179,12 @@ impl FileStore for LocalFileStore {
 
     fn delete<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<(), FileError>> {
         Box::pin(self.delete_file(id))
+    }
+
+    /// Under `<data>/tmp`, on the disk of the data folder. Unlinked at once, so a crash leaves
+    /// nothing behind.
+    fn scratch(&self) -> io::Result<std::fs::File> {
+        tempfile::tempfile_in(&self.tmp)
     }
 
     fn list(&self) -> FileList {
