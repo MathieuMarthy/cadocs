@@ -19,7 +19,7 @@ use tokio::time::{MissedTickBehavior, interval, sleep};
 use tracing::warn;
 use uuid::Uuid;
 
-pub use cleanup::{Cleanup, PURGE_EXPIRED, PURGE_ORPHAN_FILES, PURGE_TRASH};
+pub use cleanup::{Cleanup, MAINTAIN_DATABASE, PURGE_EXPIRED, PURGE_ORPHAN_FILES, PURGE_TRASH};
 pub use index::Index;
 pub use revisions::{Decoded, RevisionError, Revisions, capture, decode, decode_bounded, restore};
 
@@ -134,6 +134,7 @@ impl<S: DocStore + JobStore + AttachmentStore + SearchStore + RevisionStore> Han
         PURGE_EXPIRED,
         PURGE_TRASH,
         PURGE_ORPHAN_FILES,
+        MAINTAIN_DATABASE,
         THIN_REVISIONS,
     ];
 

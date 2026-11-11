@@ -1,4 +1,4 @@
-//! The recurring jobs: what expired goes away.
+//! The recurring jobs: what expired goes away, and the database gives its free pages back.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -15,6 +15,7 @@ use crate::{Handler, JobError};
 pub const PURGE_EXPIRED: &str = "purge_expired";
 pub const PURGE_TRASH: &str = "purge_trash";
 pub const PURGE_ORPHAN_FILES: &str = "purge_orphan_files";
+pub const MAINTAIN_DATABASE: &str = "maintain_database";
 
 /// How long a failed job stays for inspection.
 const FAILED_JOB_RETENTION: Duration = Duration::from_secs(30 * 24 * 3600);
@@ -139,13 +140,20 @@ fn before(now: i64, retention: Duration) -> i64 {
 }
 
 impl<S: DocStore + JobStore + AttachmentStore> Handler for Cleanup<S> {
-    const RECURRING: &'static [&'static str] = &[PURGE_EXPIRED, PURGE_TRASH, PURGE_ORPHAN_FILES];
+    /// The database maintenance comes after the purges, so it frees the pages they emptied.
+    const RECURRING: &'static [&'static str] = &[
+        PURGE_EXPIRED,
+        PURGE_TRASH,
+        PURGE_ORPHAN_FILES,
+        MAINTAIN_DATABASE,
+    ];
 
     async fn run(&self, job: &Job) -> Result<(), JobError> {
         match job.kind.as_str() {
             PURGE_EXPIRED => self.purge_expired().await,
             PURGE_TRASH => self.purge_trash().await,
             PURGE_ORPHAN_FILES => self.purge_orphan_files().await,
+            MAINTAIN_DATABASE => Ok(self.store.maintain_database().await?),
             kind => Err(format!("unknown job kind {kind}").into()),
         }
     }

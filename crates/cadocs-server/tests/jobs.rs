@@ -4,7 +4,9 @@ mod common;
 
 use std::time::Duration;
 
-use cadocs_jobs::{Cleanup, Handler, PURGE_EXPIRED, PURGE_ORPHAN_FILES, PURGE_TRASH, ServerJobs};
+use cadocs_jobs::{
+    Cleanup, Handler, MAINTAIN_DATABASE, PURGE_EXPIRED, PURGE_ORPHAN_FILES, PURGE_TRASH, ServerJobs,
+};
 use cadocs_store::{JobStore, SqliteStore, THIN_REVISIONS, now_ms};
 use common::{Api, Login, ORIGIN, Reply, logged_in};
 use futures_util::StreamExt;
@@ -167,7 +169,12 @@ async fn no_event(socket: &mut Socket) {
 fn every_cleanup_recurs() {
     assert_eq!(
         Cleanup::<SqliteStore>::RECURRING,
-        [PURGE_EXPIRED, PURGE_TRASH, PURGE_ORPHAN_FILES]
+        [
+            PURGE_EXPIRED,
+            PURGE_TRASH,
+            PURGE_ORPHAN_FILES,
+            MAINTAIN_DATABASE
+        ]
     );
     assert_eq!(
         ServerJobs::<SqliteStore>::RECURRING,
@@ -175,9 +182,27 @@ fn every_cleanup_recurs() {
             PURGE_EXPIRED,
             PURGE_TRASH,
             PURGE_ORPHAN_FILES,
+            MAINTAIN_DATABASE,
             THIN_REVISIONS
         ]
     );
+}
+
+#[tokio::test]
+async fn database_maintenance_gives_free_pages_back() {
+    let wiki = wiki().await;
+    let api = &wiki.api;
+    api.sql("CREATE TABLE filler (data BLOB)").await;
+    api.sql(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 500)
+         INSERT INTO filler SELECT randomblob(4000) FROM n",
+    )
+    .await;
+    api.sql("DROP TABLE filler").await;
+    assert!(api.number("PRAGMA freelist_count").await > 500);
+
+    wiki.run(MAINTAIN_DATABASE).await;
+    assert_eq!(api.number("PRAGMA freelist_count").await, 0);
 }
 
 #[tokio::test]

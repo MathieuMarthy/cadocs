@@ -2,7 +2,13 @@
 //! nothing a user typed ever reaches a path.
 //!
 //! The trait is object safe, so the server holds an `Arc<dyn FileStore>` and tests can put a
-//! failing store in its place.
+//! failing store in its place. The S3 store (ADR 0020) is behind the `s3` feature.
+
+#[cfg(feature = "s3")]
+mod s3;
+
+#[cfg(feature = "s3")]
+pub use s3::{Downloads, S3Config, S3FileStore, valid_prefix};
 
 use std::future::Future;
 use std::io;
@@ -60,6 +66,14 @@ pub struct StoredFile {
     pub modified: SystemTime,
 }
 
+/// What a browser must be told about a file it fetches straight from the storage.
+#[derive(Debug, Clone, Copy)]
+pub struct Download<'a> {
+    pub content_type: &'a str,
+    /// A whole `Content-Disposition` value.
+    pub disposition: &'a str,
+}
+
 pub trait FileStore: Send + Sync + 'static {
     /// Streams `body` into place under `id`, hashing it on the way. Nothing is kept of a body
     /// over `max_bytes` or one that fails, and a file only shows under `id` once complete.
@@ -75,8 +89,19 @@ pub trait FileStore: Send + Sync + 'static {
     /// Deleting a missing file succeeds.
     fn delete<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<(), FileError>>;
 
-    /// Every stored file, in no order, at most [`LIST_BATCH`] at a time.
+    /// Every stored file, in no order, at most [`LIST_BATCH`] at a time, and never an empty batch.
     fn list(&self) -> FileList;
+
+    /// A link the browser can fetch the file from itself, once the caller checked its access.
+    /// `None` when the server must stream the file.
+    fn download_url(&self, _id: &str, _download: &Download<'_>) -> Option<String> {
+        None
+    }
+
+    /// The origin `download_url` links point to, for the CSP.
+    fn download_origin(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Files under `<data>/files`, two levels of directories down, with uploads in progress under
@@ -91,27 +116,13 @@ impl LocalFileStore {
     /// locked, since another server could be writing there.
     pub fn open(data_dir: &Path) -> io::Result<Self> {
         let files = data_dir.join("files");
-        let tmp = data_dir.join("tmp");
         std::fs::create_dir_all(&files)?;
-        match std::fs::remove_dir_all(&tmp) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-            _ => {}
-        }
-        std::fs::create_dir_all(&tmp)?;
+        let tmp = empty_tmp(data_dir)?;
         Ok(Self { files, tmp })
     }
 
-    /// The fan-out comes from the end of the id: a UUIDv7 starts with its date, ends at random.
     fn path(&self, id: &str) -> Result<PathBuf, FileError> {
-        if !is_id(id) {
-            return Err(FileError::InvalidId);
-        }
-        let end = id.len();
-        Ok(self
-            .files
-            .join(&id[end - 2..])
-            .join(&id[end - 4..end - 2])
-            .join(id))
+        Ok(self.files.join(relative_path(id)?))
     }
 
     async fn put_file(
@@ -121,9 +132,7 @@ impl LocalFileStore {
         max_bytes: u64,
     ) -> Result<Stored, FileError> {
         let target = self.path(id)?;
-        let temp = Temp(self.tmp.join(format!("{id}.part")));
-        let file = File::create_new(&temp.0).await?;
-        let stored = receive(file, body, max_bytes).await?;
+        let (temp, stored) = receive_temp(&self.tmp, id, body, max_bytes).await?;
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).await?;
         }
@@ -135,18 +144,9 @@ impl LocalFileStore {
         let path = self.path(id)?;
         let file = File::open(&path).await.map_err(missing)?;
         let size = file.metadata().await?.len();
-        let bytes = stream::unfold(Some(file), |file| async move {
-            let mut file = file?;
-            let mut buffer = BytesMut::with_capacity(READ_CHUNK);
-            match file.read_buf(&mut buffer).await {
-                Ok(0) => None,
-                Ok(_) => Some((Ok(buffer.freeze()), Some(file))),
-                Err(error) => Some((Err(error), None)),
-            }
-        });
         Ok(FileBody {
             size,
-            bytes: Box::pin(bytes),
+            bytes: read_stream(file),
         })
     }
 
@@ -190,6 +190,53 @@ impl FileStore for LocalFileStore {
             receive.recv().await.map(|batch| (batch, receive))
         }))
     }
+}
+
+/// Empties `<data>/tmp`, which holds uploads in progress: what is there was cut short by a crash.
+fn empty_tmp(data_dir: &Path) -> io::Result<PathBuf> {
+    let tmp = data_dir.join("tmp");
+    match std::fs::remove_dir_all(&tmp) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    std::fs::create_dir_all(&tmp)?;
+    Ok(tmp)
+}
+
+/// Where a file lives under `files/`, and under the prefix on S3. The fan-out comes from the end
+/// of the id: a UUIDv7 starts with its date, ends at random.
+fn relative_path(id: &str) -> Result<String, FileError> {
+    if !is_id(id) {
+        return Err(FileError::InvalidId);
+    }
+    let end = id.len();
+    Ok(format!("{}/{}/{id}", &id[end - 2..], &id[end - 4..end - 2]))
+}
+
+/// Streams `body` into a new file of `tmp`, which goes when the returned guard drops.
+async fn receive_temp(
+    tmp: &Path,
+    id: &str,
+    body: ByteStream<'_>,
+    max_bytes: u64,
+) -> Result<(Temp, Stored), FileError> {
+    let temp = Temp(tmp.join(format!("{id}.part")));
+    let file = File::create_new(&temp.0).await?;
+    let stored = receive(file, body, max_bytes).await?;
+    Ok((temp, stored))
+}
+
+/// A file's bytes, [`READ_CHUNK`] at a time.
+fn read_stream(file: File) -> ByteStream<'static> {
+    Box::pin(stream::unfold(Some(file), |file| async move {
+        let mut file = file?;
+        let mut buffer = BytesMut::with_capacity(READ_CHUNK);
+        match file.read_buf(&mut buffer).await {
+            Ok(0) => None,
+            Ok(_) => Some((Ok(buffer.freeze()), Some(file))),
+            Err(error) => Some((Err(error), None)),
+        }
+    }))
 }
 
 /// A file in `tmp`, removed when this drops: on an error, and when the server drops a request

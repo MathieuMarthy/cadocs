@@ -58,6 +58,8 @@ pub enum StoreError {
         stored: i64,
         offered: i64,
     },
+    #[error("the snapshot of {doc_id} cannot be decompressed")]
+    CorruptSnapshot { doc_id: String },
     #[error("the instance is already set up")]
     AlreadySetUp,
     #[error("another account uses this email")]

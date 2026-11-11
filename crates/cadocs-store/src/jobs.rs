@@ -122,4 +122,8 @@ pub trait JobStore: Send + Sync + 'static {
         space_id: &str,
         before: i64,
     ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Gives free pages back to the disk, a batch at a time so a flush can pass between two, and
+    /// refreshes the statistics the query planner uses. Cheap when nothing changed.
+    fn maintain_database(&self) -> impl Future<Output = Result<(), StoreError>> + Send;
 }

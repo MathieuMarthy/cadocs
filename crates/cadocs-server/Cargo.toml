@@ -3,10 +3,15 @@ name = "cadocs-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [[bin]]
 name = "cadocs"
 path = "src/main.rs"
+
+[features]
+# Attachments in an S3 bucket, chosen with `CADOCS_FILE_STORE=s3` (ADR 0020).
+s3 = ["cadocs-files/s3"]
 
 [dependencies]
 anyhow.workspace = true

@@ -1,0 +1,129 @@
+# Tests on every pull request, and the full campaign, end-to-end included, on every push to main.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # The toolchain the suite was last checked with. Bump it on purpose: new lints can fail clippy.
+  RUST_TOOLCHAIN: "1.99.1"
+  NODE_VERSION: "24"
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            features: ""
+            minio: ""
+          - name: s3
+            features: "--features=cadocs-server/s3,cadocs-files/s3"
+            # MinIO stopped publishing community images in 2025 (docs/notes/server.md).
+            minio: bitnamilegacy/minio:2025.4.22
+    services:
+      minio:
+        # An empty image skips the service, for the default build.
+        image: ${{ matrix.minio }}
+        ports: ["9000:9000"]
+        env:
+          MINIO_ROOT_USER: cadocs
+          MINIO_ROOT_PASSWORD: cadocs-secret
+          MINIO_DEFAULT_BUCKETS: wiki
+    env:
+      CADOCS_TEST_S3_ENDPOINT: ${{ matrix.minio && 'http://127.0.0.1:9000' || '' }}
+      CADOCS_TEST_S3_BUCKET: wiki
+      CADOCS_TEST_S3_ACCESS_KEY_ID: cadocs
+      CADOCS_TEST_S3_SECRET_ACCESS_KEY: cadocs-secret
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
+        with:
+          key: ${{ matrix.name }}
+      - name: Wait for the bucket
+        if: matrix.minio != ''
+        run: |
+          for _ in $(seq 1 30); do
+            curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/wiki/ | grep -qE '^(200|403)$' && exit 0
+            sleep 2
+          done
+          exit 1
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets ${{ matrix.features }} -- -D warnings
+      - name: Tests
+        # An unset CADOCS_TEST_S3_ENDPOINT skips the real S3 test; an empty one must too.
+        run: |
+          [ -n "$CADOCS_TEST_S3_ENDPOINT" ] || unset CADOCS_TEST_S3_ENDPOINT
+          cargo test --workspace ${{ matrix.features }}
+
+  web:
+    name: Front end
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      # Type check, bundle, and the comparison of the editor schema with Rust's.
+      - run: npm --prefix web run build
+
+  e2e:
+    name: End-to-end
+    # The long campaign: after a merge to main, or by hand.
+    if: github.event_name != 'pull_request'
+    needs: [rust, web]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
+        with:
+          key: release
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      # The binary embeds web/dist, so the front end is built first.
+      - run: npm --prefix web run build
+      - run: cargo build --release
+      - run: npx --prefix web playwright install --with-deps chromium
+      - run: npm --prefix web run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-results
+          path: |
+            web/test-results
+            web/playwright-report
+          retention-days: 14

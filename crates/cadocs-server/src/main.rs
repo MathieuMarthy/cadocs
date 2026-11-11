@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use anyhow::Context;
 use cadocs_collab::{DocRegistry, PageAuthorizer};
-use cadocs_files::LocalFileStore;
+use cadocs_files::{FileStore, LocalFileStore};
 use cadocs_server::api::auth::normalize_email;
 use cadocs_server::assets::WebAssets;
 use cadocs_server::cli::{self, Command};
-use cadocs_server::config::Config;
+use cadocs_server::config::{Config, FileStoreConfig};
 use cadocs_server::password::Passwords;
 use cadocs_server::session::new_password_reset;
 use cadocs_server::{AppState, data_dir, serve, start_jobs};
@@ -74,13 +74,33 @@ async fn reset_password(config: Config, email: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The store `CADOCS_FILE_STORE` names (ADR 0020). S3 is checked here, so a wrong setting stops
+/// the start instead of failing the first upload.
+async fn open_files(config: &Config) -> anyhow::Result<Arc<dyn FileStore>> {
+    let data_dir = &config.data_dir;
+    Ok(match &config.files {
+        FileStoreConfig::Local => Arc::new(
+            LocalFileStore::open(data_dir)
+                .with_context(|| format!("cannot prepare {}", data_dir.display()))?,
+        ),
+        #[cfg(feature = "s3")]
+        FileStoreConfig::S3(s3) => {
+            let what = format!("cannot reach bucket {:?} at {}", s3.bucket, s3.endpoint);
+            Arc::new(
+                cadocs_files::S3FileStore::open(data_dir, s3.clone())
+                    .await
+                    .context(what)?,
+            )
+        }
+    })
+}
+
 async fn run(config: Config) -> anyhow::Result<()> {
     let _lock = data_dir::lock(&config.data_dir)?;
 
     let store = SqliteStore::open(&config.data_dir.join("cadocs.db")).await?;
     let store = Arc::new(store.with_revision_timing(config.revisions));
-    let files = LocalFileStore::open(&config.data_dir)
-        .with_context(|| format!("cannot prepare {}", config.data_dir.display()))?;
+    let files = open_files(&config).await?;
     let registry = DocRegistry::new(store.clone(), config.collab.clone());
     let state = AppState::new(
         registry.clone(),
@@ -88,7 +108,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
         Arc::new(PageAuthorizer::new(store)),
         config.socket,
         config.http,
-        Arc::new(files),
+        files,
         config.attachments,
     );
     tokio::spawn(return_freed_memory(registry, state.passwords.clone()));

@@ -9,14 +9,14 @@ use axum::body::Body;
 use axum::extract::{RawQuery, State};
 use axum::http::header::{
     CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE,
-    ETAG, IF_NONE_MATCH,
+    ETAG, IF_NONE_MATCH, LOCATION,
 };
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
-use cadocs_files::FileError;
+use cadocs_files::{Download, FileError};
 use cadocs_store::{AccountStore, Attachment, AttachmentStore, NewAttachment, StoreError, now_ms};
 use futures_util::TryStreamExt;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
@@ -178,6 +178,27 @@ async fn download<S: AttachmentStore, A>(
         return Ok((StatusCode::NOT_MODIFIED, cached).into_response());
     }
 
+    let inline = INLINE_TYPES.contains(&found.content_type.as_str());
+    let disposition = disposition(inline, &found.file_name);
+    let download = Download {
+        content_type: &found.content_type,
+        disposition: &disposition,
+    };
+    // The access check above runs on each view: the redirect is never cached, while the link it
+    // gives stays the same for a while, so the browser keeps the file (ADR 0020). Only safe
+    // images go there: the storage sends no sandbox or `nosniff`, and its origin may be shared.
+    let link = inline
+        .then(|| state.files.download_url(&id, &download))
+        .flatten();
+    if let Some(url) = link {
+        let location = HeaderValue::try_from(url).map_err(ApiError::internal)?;
+        let headers = [
+            (LOCATION, location),
+            (CACHE_CONTROL, HeaderValue::from_static("private, no-store")),
+        ];
+        return Ok((StatusCode::FOUND, headers).into_response());
+    }
+
     let file = match state.files.get(&id).await {
         Ok(file) => file,
         Err(FileError::NotFound) => {
@@ -186,8 +207,6 @@ async fn download<S: AttachmentStore, A>(
         }
         Err(error) => return Err(file_error(error)),
     };
-    let inline = INLINE_TYPES.contains(&found.content_type.as_str());
-    let disposition = disposition(inline, &found.file_name);
     let headers = [
         (CONTENT_TYPE, header(&found.content_type)),
         (CONTENT_LENGTH, HeaderValue::from(file.size)),

@@ -8,7 +8,7 @@ Status: accepted
 
 ## Decision
 
-- SQLite in WAL mode, with `synchronous=NORMAL`, foreign keys on and `cache_size` limited per connection.
+- SQLite in WAL mode, with `synchronous=NORMAL`, foreign keys on and `cache_size` limited per connection. Vacuum, WAL size and planner statistics are kept up by ADR 0019.
 - One writer connection and a few reader connections.
 - The schema uses a portable SQL subset ([DATA_MODEL.md](../DATA_MODEL.md)), and data access sits behind traits.
 - Only the SQLite implementation exists until V2. PostgreSQL is then added with its own migrations and search implementation, and runs against the same test suite.

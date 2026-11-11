@@ -55,6 +55,8 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `tokio` `sync` feature in `cadocs-store` | `Notify`, so a write that adds a job wakes the worker. Already compiled for the other crates | None | None |
 | `zstd` (no default features: no legacy formats, no dictionary builder), MIT and BSD-3-Clause | Revision states, compressed at level 3 in `cadocs-jobs`. Bundles the C library | A compression or decompression context per call, sized to the input, freed after it | See step 19 in [benchmark notes](notes/benchmark.md) |
 | `serde_json` in `cadocs-store` | Revision authors stored and read as JSON arrays. Already in the tree | None | None |
+| `rusty-s3` 0.11 (`full`, `rustcrypto`), BSD-2-Clause, with `jiff` and `url` at its own versions. 0.11 parses with `instant-xml`, which replaced the `quick-xml` of 0.8 and its two advisories | S3 signatures and listing parsing, with no I/O of its own (ADR 0020). Only with the `s3` feature | None at rest | With the next row, 2.7 MB in a release binary, and nothing in a default build |
+| `reqwest` (`rustls-tls-native-roots`, `stream`, no default features), MIT or Apache-2.0 | Sends the S3 requests, with rustls and `ring`, the system roots and streamed bodies. Only with the `s3` feature | 1.4 MB of idle RSS once linked, 2.7 MB with S3 in use: the system roots and a pool of at most 2 idle connections (see step 20b in [benchmark notes](notes/benchmark.md)) | See `rusty-s3` |
 | `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
 
 ### Dev tools only
@@ -67,6 +69,7 @@ These never reach the server binary.
 | `tower` (`util`) | Calling the router directly in tests |
 | `tempfile` | Temporary databases and data folders in tests |
 | `bytes` | Building file streams in the attachment tests |
+| `axum` (`query`) in `cadocs-files` | The in-memory S3 of the S3 store tests |
 
 `web/` has two npm dev dependencies for the same purpose: `@playwright/test` (Apache-2.0) for the browser tests, and `@types/node` to type-check them. Neither reaches `web/dist`. `svelte` (MIT) is a runtime dependency of the shell, and `@sveltejs/vite-plugin-svelte` (MIT) a build dependency. The shell is about 73 KB of JavaScript, 26 KB compressed, and TipTap stays in a chunk that only a page loads.
 
@@ -84,7 +87,6 @@ Step 16 adds a `plugin` node of our own (`blocks.ts`, ADR 0016) and `web/scripts
 | `jiff` | MVP | Dates, as in uptime-monitoring | Low without the bundled tz database |
 | `async_zip` | MVP | Streaming zip for exports with attachments and for imports | Low, nothing buffered whole |
 | `lettre` | V1 | SMTP, optional feature | Only in builds that enable it |
-| `rusty-s3` | V1 | Signs S3 requests, optional feature (ADR 0005) | Only in builds that enable it |
 | `totp-lite` | V1 | TOTP codes | Very low |
 | `openidconnect` or a smaller client | V1 | OIDC, optional feature. To evaluate against a hand-written flow | Pulls an HTTP client |
 

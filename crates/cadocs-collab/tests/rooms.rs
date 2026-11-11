@@ -7,7 +7,7 @@ use std::time::Duration;
 use cadocs_collab::{
     Authorizer, CLOSE_FRAME_TOO_LARGE, CLOSE_GOING_AWAY, CLOSE_PAGE_GONE, CLOSE_PROTOCOL_ERROR,
     CLOSE_STORAGE_FAILING, CLOSE_TOO_SLOW, Close, CollabConfig, CollabError, DocRegistry,
-    EventSeat, EventStanding, Outbound, Seat,
+    EventSeat, EventStanding, Outbound, ROOM_MIN_BYTES, Seat,
 };
 use cadocs_core::permissions::SocketMode::{ReadOnly, ReadWrite};
 use cadocs_core::permissions::{SocketMode, SocketOutcome};
@@ -1015,6 +1015,131 @@ async fn at_the_cap_the_oldest_idle_room_unloads_first() {
         .await
         .unwrap();
     assert_eq!(store.loads(), reloads, "the newer idle room stayed loaded");
+}
+
+fn budgeted(store: &Arc<MemStore>, rooms: usize) -> DocRegistry<MemStore> {
+    let config = CollabConfig {
+        room_memory: rooms * ROOM_MIN_BYTES,
+        ..config()
+    };
+    DocRegistry::new(store.clone(), config)
+}
+
+#[tokio::test(start_paused = true)]
+async fn at_the_memory_budget_with_only_live_rooms_a_connection_is_refused() {
+    let store = MemStore::new();
+    let registry = budgeted(&store, 2);
+    let _a = registry.connect("a", ReadWrite, AUTHOR, SESSION).await.unwrap();
+    let b = registry.connect("b", ReadWrite, AUTHOR, SESSION).await.unwrap();
+
+    let refused = registry.connect("c", ReadWrite, AUTHOR, SESSION).await;
+    assert!(matches!(refused, Err(CollabError::AtCapacity)));
+
+    // An idle room makes way, as at the room cap.
+    drop(b);
+    sleep(Duration::from_secs(1)).await;
+    let _c = registry.connect("c", ReadWrite, AUTHOR, SESSION).await.unwrap();
+    assert_eq!(registry.loaded_rooms(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_large_document_weighs_on_the_budget_by_its_size() {
+    let store = MemStore::new();
+    // Room for four small documents.
+    let registry = budgeted(&store, 4);
+    let big = Peer::new(registry.connect("big", ReadWrite, AUTHOR, SESSION).await.unwrap());
+    big.write(&"x".repeat(64 * 1024)).unwrap();
+    drop(big);
+    // Flushed, then unloaded past the idle delay.
+    sleep(Duration::from_secs(120)).await;
+    assert_eq!(registry.loaded_rooms(), 0);
+
+    // Loaded again from what is stored, it alone fills the budget.
+    let _big = registry.connect("big", ReadWrite, AUTHOR, SESSION).await.unwrap();
+    let refused = registry.connect("small", ReadWrite, AUTHOR, SESSION).await;
+    assert!(matches!(refused, Err(CollabError::AtCapacity)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn rooms_load_one_at_a_time() {
+    let store = MemStore::new();
+    let registry = budgeted(&store, 2);
+    let _a = registry.connect("a", ReadWrite, AUTHOR, SESSION).await.unwrap();
+
+    store.load_gate.hold();
+    let first = tokio::spawn({
+        let registry = registry.clone();
+        async move { registry.connect("b", ReadWrite, AUTHOR, SESSION).await }
+    });
+    store.load_gate.entered().await;
+    let second = tokio::spawn({
+        let registry = registry.clone();
+        async move { registry.connect("c", ReadWrite, AUTHOR, SESSION).await }
+    });
+    sleep(Duration::from_millis(10)).await;
+    // The second load waits for the first, whose size is not known yet.
+    assert_eq!(store.loads(), 2);
+
+    store.load_gate.release();
+    let _b = first.await.unwrap().unwrap();
+    // Then the budget is full of live rooms.
+    assert!(matches!(second.await.unwrap(), Err(CollabError::AtCapacity)));
+    assert_eq!(store.loads(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_burst_of_loads_from_an_empty_server_goes_one_at_a_time() {
+    let store = MemStore::new();
+    let registry = budgeted(&store, 64);
+    store.load_gate.hold();
+    let waiting: Vec<_> = ["a", "b", "c"]
+        .into_iter()
+        .map(|doc| {
+            let registry = registry.clone();
+            tokio::spawn(async move { registry.connect(doc, ReadWrite, AUTHOR, SESSION).await })
+        })
+        .collect();
+    store.load_gate.entered().await;
+    sleep(Duration::from_millis(10)).await;
+    assert_eq!(store.loads(), 1);
+    store.load_gate.release();
+    for connection in waiting {
+        connection.await.unwrap().unwrap();
+    }
+    assert_eq!(store.loads(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_room_the_server_wrote_to_can_be_evicted_once_idle() {
+    let store = MemStore::new();
+    let registry = capped(&store, 1);
+    registry.set_title("written", "Title", AUTHOR).await.unwrap();
+    sleep(Duration::from_secs(1)).await;
+    // Well before its idle delay, a connection elsewhere may evict it.
+    let other = registry.connect("other", ReadWrite, AUTHOR, SESSION).await;
+    assert!(other.is_ok(), "{:?}", other.err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_room_that_cannot_compact_is_still_counted_by_its_real_size() {
+    let store = MemStore::new();
+    let (base, bad) = common::inapplicable_update();
+    let rows = [(1, base), (2, bad)].map(|(seq, data)| cadocs_store::StoredUpdate { seq, data });
+    store
+        .append_updates(DOC, &rows, &DocEdit::default())
+        .await
+        .unwrap();
+    let registry = budgeted(&store, 4);
+    let alice = Peer::join(&registry, ReadWrite).await;
+    // Thousands of small edits: a few KB once merged, far more counted update by update.
+    for _ in 0..3000 {
+        alice.write("x").unwrap();
+    }
+    sleep(Duration::from_secs(5)).await;
+
+    let other = registry.connect("other", ReadWrite, AUTHOR, SESSION).await;
+    assert!(other.is_ok(), "{:?}", other.err());
+    drop(alice);
 }
 
 #[tokio::test(start_paused = true)]

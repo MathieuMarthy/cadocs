@@ -3,14 +3,27 @@ name = "cadocs-files"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
+
+[features]
+# The S3 store (ADR 0020). Off by default, so a default build carries none of its code.
+s3 = ["dep:jiff", "dep:reqwest", "dep:rusty-s3", "dep:url"]
 
 [dependencies]
 bytes.workspace = true
 futures-util = { workspace = true, features = ["alloc"] }
+jiff = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+rusty-s3 = { workspace = true, optional = true }
 sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "rt", "sync"] }
+url = { workspace = true, optional = true }
 
 [dev-dependencies]
+# An in-memory S3 for the tests of the S3 store.
+axum = { workspace = true, features = ["query"] }
+jiff.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
+url.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }

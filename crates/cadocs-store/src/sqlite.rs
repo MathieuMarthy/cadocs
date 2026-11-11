@@ -14,7 +14,8 @@ use std::time::Duration;
 use sqlx::Row;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
+    SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions,
+    SqliteSynchronous,
 };
 use tokio::sync::Notify;
 
@@ -31,6 +32,15 @@ const READER_CONNECTIONS: u32 = 2;
 /// Takes the write lock up front. A deferred transaction that reads first would fail at once when
 /// another process writes, because upgrading a read does not use the busy timeout.
 const BEGIN_WRITE: &str = "BEGIN IMMEDIATE";
+
+/// Bytes the WAL keeps on disk after a checkpoint. A large transaction, such as an import, grows
+/// it, and SQLite would otherwise never shrink the file back.
+const WAL_SIZE_LIMIT: i64 = 64 * 1024 * 1024;
+
+/// `doc_snapshots.codec` of a state compressed with zstd. `0` is a raw one.
+const ZSTD_CODEC: i64 = 1;
+/// The level revisions use too: most of the gain, for little CPU in the room's task.
+const ZSTD_LEVEL: i32 = 3;
 
 /// How long after an edit its page is indexed: the edits of that time share one run.
 const REINDEX_DELAY: Duration = Duration::from_secs(5);
@@ -54,10 +64,13 @@ impl SqliteStore {
         let writer = writer(
             connect_options(path)
                 .create_if_missing(true)
+                // Takes effect only on a database with no table yet: see below for the others.
+                .auto_vacuum(SqliteAutoVacuum::Incremental)
                 .journal_mode(SqliteJournalMode::Wal),
         )
         .await?;
         MIGRATOR.run(&writer).await?;
+        incremental_auto_vacuum(&writer).await?;
         Ok(Self::with_writer(path, writer))
     }
 
@@ -111,6 +124,23 @@ async fn writer(options: SqliteConnectOptions) -> Result<SqlitePool, sqlx::Error
         .await
 }
 
+/// A database created before `auto_vacuum` was set keeps `NONE`, and only a `VACUUM` changes
+/// that. It rewrites the whole file once, so it runs at startup, where `serve` holds the data
+/// folder alone.
+async fn incremental_auto_vacuum(writer: &SqlitePool) -> Result<(), StoreError> {
+    let mode: i64 = sqlx::query_scalar("PRAGMA auto_vacuum")
+        .fetch_one(writer)
+        .await?;
+    if mode != 2 {
+        sqlx::raw_sql("PRAGMA auto_vacuum = INCREMENTAL; VACUUM;")
+            .execute(writer)
+            .await?;
+    }
+    Ok(())
+}
+
+/// No `mmap_size`, on purpose: mapped pages count in the process RSS, which the RAM targets
+/// measure, while the OS page cache gives the same reads uncounted (ADR 0002).
 fn connect_options(path: &Path) -> SqliteConnectOptions {
     SqliteConnectOptions::new()
         .filename(path)
@@ -119,6 +149,7 @@ fn connect_options(path: &Path) -> SqliteConnectOptions {
         .foreign_keys(true)
         // 512 KiB per connection: the OS page cache does the real caching.
         .pragma("cache_size", "-512")
+        .pragma("journal_size_limit", WAL_SIZE_LIMIT.to_string())
 }
 
 impl DocStore for SqliteStore {
@@ -133,14 +164,29 @@ impl DocStore for SqliteStore {
     async fn load(&self, doc_id: &str) -> Result<StoredDoc, StoreError> {
         let mut tx = self.reader.begin().await?;
 
-        let snapshot = sqlx::query("SELECT state, upto_seq FROM doc_snapshots WHERE page_id = ?1")
+        let row = sqlx::query("SELECT state, upto_seq, codec FROM doc_snapshots WHERE page_id = ?1")
             .bind(doc_id)
             .fetch_optional(&mut *tx)
-            .await?
-            .map(|row| Snapshot {
-                state: row.get("state"),
-                upto_seq: row.get("upto_seq"),
-            });
+            .await?;
+        let snapshot = match row {
+            None => None,
+            Some(row) => {
+                let stored: Vec<u8> = row.get("state");
+                let state = if row.get::<i64, _>("codec") == ZSTD_CODEC {
+                    zstd::stream::decode_all(stored.as_slice()).map_err(|_| {
+                        StoreError::CorruptSnapshot {
+                            doc_id: doc_id.to_owned(),
+                        }
+                    })?
+                } else {
+                    stored
+                };
+                Some(Snapshot {
+                    state,
+                    upto_seq: row.get("upto_seq"),
+                })
+            }
+        };
 
         let after = snapshot.as_ref().map_or(0, |s| s.upto_seq);
         let updates = sqlx::query(
@@ -279,18 +325,23 @@ impl DocStore for SqliteStore {
             });
         }
 
+        // A Yjs state repeats its structure and client ids, so it shrinks several times.
+        let compressed = zstd::bulk::compress(&snapshot.state, ZSTD_LEVEL)
+            .map_err(|error| StoreError::Database(sqlx::Error::Encode(Box::new(error))))?;
         sqlx::query(
-            "INSERT INTO doc_snapshots (page_id, state, upto_seq, updated_at)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO doc_snapshots (page_id, state, upto_seq, updated_at, codec)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT (page_id) DO UPDATE SET
                  state = excluded.state,
                  upto_seq = excluded.upto_seq,
-                 updated_at = excluded.updated_at",
+                 updated_at = excluded.updated_at,
+                 codec = excluded.codec",
         )
         .bind(doc_id)
-        .bind(&snapshot.state)
+        .bind(&compressed)
         .bind(snapshot.upto_seq)
         .bind(now_ms())
+        .bind(ZSTD_CODEC)
         .execute(&mut *tx)
         .await?;
 
@@ -308,6 +359,8 @@ impl DocStore for SqliteStore {
 #[cfg(test)]
 mod tests {
     use tokio::time::timeout;
+
+    use crate::JobStore;
 
     use super::*;
 
@@ -363,6 +416,121 @@ mod tests {
             .append_updates("doc", &updates, &DocEdit::default())
             .await
             .unwrap();
+    }
+
+    async fn pragma(pool: &SqlitePool, name: &str) -> i64 {
+        sqlx::query_scalar(sqlx::AssertSqlSafe(format!("PRAGMA {name}")))
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_new_database_frees_pages_incrementally() {
+        let (store, _dir) = open().await;
+        assert_eq!(pragma(&store.writer, "auto_vacuum").await, 2);
+    }
+
+    #[tokio::test]
+    async fn an_older_database_turns_to_incremental_auto_vacuum() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cadocs.db");
+        let old = SqlitePoolOptions::new()
+            .connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true))
+            .await
+            .unwrap();
+        sqlx::raw_sql("CREATE TABLE older (x)")
+            .execute(&old)
+            .await
+            .unwrap();
+        assert_eq!(pragma(&old, "auto_vacuum").await, 0);
+        old.close().await;
+
+        let store = SqliteStore::open(&path).await.unwrap();
+        assert_eq!(pragma(&store.writer, "auto_vacuum").await, 2);
+    }
+
+    #[tokio::test]
+    async fn the_wal_is_cut_back_after_a_checkpoint() {
+        let (store, _dir) = open().await;
+        assert_eq!(
+            pragma(&store.writer, "journal_size_limit").await,
+            WAL_SIZE_LIMIT
+        );
+    }
+
+    #[tokio::test]
+    async fn maintenance_gives_free_pages_back_to_the_disk() {
+        let (store, _dir) = open().await;
+        sqlx::raw_sql(
+            "CREATE TABLE filler (data BLOB);
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000)
+             INSERT INTO filler SELECT randomblob(4000) FROM n;
+             DROP TABLE filler;",
+        )
+        .execute(&store.writer)
+        .await
+        .unwrap();
+        assert!(pragma(&store.writer, "freelist_count").await > 2000);
+
+        store.maintain_database().await.unwrap();
+        assert_eq!(pragma(&store.writer, "freelist_count").await, 0);
+    }
+
+    /// A Yjs state that compresses, as real ones do: repeated structure.
+    fn snapshot_state() -> Vec<u8> {
+        b"<paragraph>cadocs</paragraph>".repeat(200)
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_is_stored_compressed_and_loads_as_it_was() {
+        let (store, _dir) = open().await;
+        let state = snapshot_state();
+        let snapshot = Snapshot {
+            state: state.clone(),
+            upto_seq: 0,
+        };
+        store.compact("doc", &snapshot).await.unwrap();
+
+        let (codec, stored): (i64, Vec<u8>) =
+            sqlx::query_as("SELECT codec, state FROM doc_snapshots WHERE page_id = 'doc'")
+                .fetch_one(&store.writer)
+                .await
+                .unwrap();
+        assert_eq!(codec, 1);
+        assert!(stored.len() * 5 < state.len(), "{} bytes", stored.len());
+        assert_eq!(store.load("doc").await.unwrap().snapshot.unwrap().state, state);
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_stored_raw_before_compression_still_loads() {
+        let (store, _dir) = open().await;
+        sqlx::query(
+            "INSERT INTO doc_snapshots (page_id, state, upto_seq, updated_at)
+             VALUES ('doc', ?1, 0, 1)",
+        )
+        .bind(snapshot_state())
+        .execute(&store.writer)
+        .await
+        .unwrap();
+        let loaded = store.load("doc").await.unwrap().snapshot.unwrap();
+        assert_eq!(loaded.state, snapshot_state());
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_that_does_not_decompress_fails_the_load() {
+        let (store, _dir) = open().await;
+        sqlx::raw_sql(
+            "INSERT INTO doc_snapshots (page_id, state, upto_seq, updated_at, codec)
+             VALUES ('doc', x'0102', 0, 1, 1);",
+        )
+        .execute(&store.writer)
+        .await
+        .unwrap();
+        assert!(matches!(
+            store.load("doc").await,
+            Err(StoreError::CorruptSnapshot { .. })
+        ));
     }
 
     #[tokio::test]

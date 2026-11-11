@@ -23,7 +23,7 @@ use yrs::{
 use crate::connection::{Close, Connection, decode_untrusted};
 use crate::{
     CLOSE_PAGE_GONE, CLOSE_PROTOCOL_ERROR, CLOSE_STORAGE_FAILING, CLOSE_TOO_SLOW, CollabConfig,
-    CollabError,
+    CollabError, ROOM_BYTES_PER_ENCODED_BYTE, ROOM_MIN_BYTES,
 };
 
 /// `None` until a load or an unload ends.
@@ -144,6 +144,14 @@ pub(crate) struct RoomState {
     skipped_row: bool,
     /// Set when an unload is requested, and resolved when it ends.
     pub(crate) unload: Option<watch::Sender<Transition>>,
+    /// Someone entered the room since the load: a client, or the server writing to it. Until then
+    /// the room is idle only because whoever asked for it has not entered yet, so a cap must not
+    /// evict it.
+    pub(crate) joined: bool,
+    /// `Room::estimate` when it was last measured from the document. Updates add to the estimate
+    /// one by one, which counts far more than they cost once merged, so past twice this the
+    /// estimate is measured again: a room that never compacts does not grow without limit.
+    measured: usize,
 }
 
 /// Builds a document from what is stored, and tells whether a row had to be skipped. This can panic
@@ -290,8 +298,18 @@ impl RoomState {
     }
 }
 
+/// What a document of `encoded` bytes is counted as once loaded.
+fn room_estimate(encoded: usize) -> usize {
+    encoded
+        .saturating_mul(ROOM_BYTES_PER_ENCODED_BYTE)
+        .max(ROOM_MIN_BYTES)
+}
+
 pub(crate) struct Room {
     pub(crate) doc_id: String,
+    /// What the room is counted as against `room_memory`: set from the stored size at load and at
+    /// each compaction, and grown by each update in between.
+    pub(crate) estimate: AtomicUsize,
     state: Mutex<RoomState>,
     /// Wakes the room task: first queued update, last client gone, unload requested.
     pub(crate) wake: Notify,
@@ -307,6 +325,8 @@ impl Room {
     ) -> Result<Arc<Self>, CollabError> {
         let last_seq = stored.last_seq();
         let stored_updates = stored.updates.len();
+        let encoded = stored.snapshot.as_ref().map_or(0, |s| s.state.len())
+            + stored.updates.iter().map(|u| u.data.len()).sum::<usize>();
         let (doc, skipped_row) = rebuild(&doc_id, &stored)?;
 
         let applied = Arc::new(Mutex::new(None));
@@ -316,8 +336,10 @@ impl Room {
         })
         .expect("a new document has no open transaction");
 
+        let estimate = room_estimate(encoded);
         Ok(Arc::new(Self {
             doc_id,
+            estimate: AtomicUsize::new(estimate),
             state: Mutex::new(RoomState {
                 awareness: Awareness::new(doc),
                 applied,
@@ -336,6 +358,8 @@ impl Room {
                 failing: false,
                 skipped_row,
                 unload: None,
+                measured: estimate,
+                joined: false,
             }),
             wake: Notify::new(),
             config,
@@ -544,6 +568,21 @@ impl Room {
         let seq = state.next_seq;
         state.next_seq += 1;
         state.unflushed_bytes += data.len();
+        let grown = self
+            .estimate
+            .fetch_add(
+                data.len().saturating_mul(ROOM_BYTES_PER_ENCODED_BYTE),
+                Ordering::Relaxed,
+            )
+            .saturating_add(data.len().saturating_mul(ROOM_BYTES_PER_ENCODED_BYTE));
+        if grown > state.measured.saturating_mul(2) {
+            // The same encoding as a compaction, guarded the same way. A failure keeps the count.
+            if let Ok(encoded) = catch_unwind(AssertUnwindSafe(|| state.encode_full())) {
+                let measured = room_estimate(encoded.len());
+                self.estimate.store(measured, Ordering::Relaxed);
+                state.measured = measured;
+            }
+        }
         if state.queue.is_empty() {
             self.wake.notify_one();
         }
@@ -657,7 +696,7 @@ impl Room {
     }
 
     pub(crate) fn snapshot(&self) -> Option<Snapshot> {
-        let state = self.state();
+        let mut state = self.state();
         if state.stored_updates == 0 || state.skipped_row {
             return None;
         }
@@ -681,10 +720,15 @@ impl Room {
             }
         }));
         match encoded {
-            Ok(encoded) => Some(Snapshot {
-                state: encoded,
-                upto_seq: state.flushed_seq,
-            }),
+            Ok(encoded) => {
+                let measured = room_estimate(encoded.len());
+                self.estimate.store(measured, Ordering::Relaxed);
+                state.measured = measured;
+                Some(Snapshot {
+                    state: encoded,
+                    upto_seq: state.flushed_seq,
+                })
+            }
             Err(_) => {
                 warn!(doc_id = %self.doc_id, "cannot encode the document, keeping its log");
                 None

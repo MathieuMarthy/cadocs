@@ -37,7 +37,7 @@ Everything runs in one process, on purpose (ADR 0006). Channels between componen
 | Room | One yrs `Doc` and `Awareness`, its connected clients, its pending updates |
 | Event hub | One bounded in-memory broadcast per workspace with open event sockets (ADR 0011) |
 | Job worker | One task polling the `jobs` table: indexing, revisions, cleanup |
-| File store | Local disk by default, S3 as an option (ADR 0005) |
+| File store | Local disk by default, S3 chosen at runtime in builds with the `s3` feature (ADR 0005, ADR 0020) |
 | Content | Walks a yrs `XmlFragment` into an AST, renders Markdown, HTML or text (ADR 0008) |
 
 ## Flows
@@ -118,7 +118,7 @@ The `jobs` table is the queue: `INSERT` to enqueue, one worker task to claim wit
 
 Job types: reindex a page for search, create a revision, purge expired sessions and tokens, thin old revisions, purge the trash, delete orphaned files.
 
-Recurring jobs are queued at start and then every hour, with their kind as their key. A job that fails is retried after 30 seconds, then twice as long each time, up to five runs. A claim counts as a run, so a job that kills the process also ends as `failed`. A panic is a failure, and costs the worker nothing.
+Recurring jobs are queued at start and then every hour, with their kind as their key. The last cleanup, `maintain_database`, gives free pages back to the disk and refreshes the planner statistics (ADR 0019). A job that fails is retried after 30 seconds, then twice as long each time, up to five runs. A claim counts as a run, so a job that kills the process also ends as `failed`. A panic is a failure, and costs the worker nothing.
 
 ### Search
 
@@ -134,7 +134,7 @@ These figures are design estimates. The prototype's measurements are in [Measure
 | --- | --- | --- |
 | Code and static data actually touched | 4 to 8 MB | File-backed and reclaimable. The embedded front end costs nothing until served, and the kernel can evict it |
 | tokio runtime, 2 workers | 1 to 2 MB | `worker_threads = 2`, small `max_blocking_threads`, explicit thread stack size |
-| SQLite | 2 to 4 MB | Few connections, `cache_size` limited to 512 KiB each. The OS page cache does the real caching and is not counted against the process |
+| SQLite | 2 to 4 MB | Few connections, `cache_size` limited to 512 KiB each, and no `mmap_size` (ADR 0019). The OS page cache does the real caching and is not counted against the process |
 | Per WebSocket | tens of KB | Bounded send queue, capped socket count. A slow client is disconnected, never buffered without limit |
 | Per loaded document | a few times its encoded size | Unload after inactivity, compact on unload, capped room count |
 | Peaks: password hashing | 19 MB per hash at OWASP settings | A semaphore allows one hash at a time, and a `malloc_trim` follows 5 seconds after (ADR 0015) |

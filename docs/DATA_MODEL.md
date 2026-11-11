@@ -201,16 +201,17 @@ A trashed space keeps its pages as they are, and access rules treat the whole sp
 
 ## Document content
 
-`doc_updates` is an append-only log and `doc_snapshots` holds the compacted state. To load a page: read its snapshot, then apply every update with `seq` greater than `snapshot.upto_seq`.
+`doc_updates` is an append-only log and `doc_snapshots` holds the compacted state. A compaction writes the state compressed with zstd (`codec` 1). Snapshots from before that stay raw (`codec` 0) until their page compacts again, and both load. Updates stay raw: each is a few bytes to a few KB, and they are deleted at the next compaction. To load a page: read its snapshot, then apply every update with `seq` greater than `snapshot.upto_seq`.
 
 A Yjs document has two root types: `title`, a `Y.Text`, and `default`, the `XmlFragment` that TipTap edits. Each flush copies `title` to `pages.title`, at most 500 characters of it, and sets `updated_at` and `updated_by` to the last writer, in the transaction of its updates. A writer whose account is gone leaves `updated_by` as it was. Writing every time instead of on a change means a copy that ran ahead of the log before a crash gets corrected.
 
 ```sql
 CREATE TABLE doc_snapshots (
     page_id    TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
-    state      BLOB NOT NULL,                -- Yjs update v1, full document
+    state      BLOB NOT NULL,                -- Yjs update v1, full document, encoded as codec says
     upto_seq   BIGINT NOT NULL,              -- last doc_updates.seq included
-    updated_at BIGINT NOT NULL
+    updated_at BIGINT NOT NULL,
+    codec      SMALLINT NOT NULL DEFAULT 0   -- 0: raw, 1: zstd level 3
 );
 
 CREATE TABLE doc_updates (

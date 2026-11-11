@@ -56,6 +56,8 @@ enum Attempt<T> {
     WaitUnload(watch::Receiver<Transition>),
     /// Another room is unloading to make space.
     WaitEviction(watch::Receiver<Transition>),
+    /// Another room is loading, and rooms load one at a time. Whatever its outcome, try again.
+    WaitTurn(watch::Receiver<Transition>),
 }
 
 /// Maps a document id to its loaded room. Load and unload of a document go through one slot, so a
@@ -261,7 +263,7 @@ impl<S: DocStore> DocRegistry<S> {
             match self.inner.attempt(doc_id, &mut action)? {
                 Attempt::Entered(result) => return Ok(result),
                 Attempt::WaitLoad(transition) => outcome(transition).await?,
-                Attempt::WaitUnload(transition) => {
+                Attempt::WaitUnload(transition) | Attempt::WaitTurn(transition) => {
                     if let Err(CollabError::ShuttingDown) = outcome(transition).await {
                         return Err(CollabError::ShuttingDown);
                     }
@@ -421,7 +423,11 @@ impl<S: DocStore> Inner<S> {
             return Err(CollabError::ShuttingDown);
         }
         match rooms.slots.get(doc_id) {
-            Some(Slot::Live(room)) => return Ok(Attempt::Entered(action(room))),
+            Some(Slot::Live(room)) => {
+                // Whoever loaded it is here: from now on a cap may evict it once it is idle.
+                room.state().joined = true;
+                return Ok(Attempt::Entered(action(room)));
+            }
             Some(Slot::Loading(transition)) => return Ok(Attempt::WaitLoad(transition.clone())),
             Some(Slot::Unloading(transition)) => {
                 return Ok(Attempt::WaitUnload(transition.clone()));
@@ -429,7 +435,9 @@ impl<S: DocStore> Inner<S> {
             None => {}
         }
 
-        if rooms.slots.len() >= self.config.max_rooms {
+        if rooms.slots.len() >= self.config.max_rooms
+            || estimated_bytes(&rooms) >= self.config.room_memory
+        {
             if let Some(victim) = oldest_idle(&rooms) {
                 return Ok(Attempt::WaitEviction(begin_unload(&mut rooms, &victim)));
             }
@@ -441,6 +449,17 @@ impl<S: DocStore> Inner<S> {
                 Some(transition) => Ok(Attempt::WaitEviction(transition)),
                 None => Err(CollabError::AtCapacity),
             };
+        }
+
+        // A loading room's size is unknown until it is built, so rooms load one at a time: the
+        // budget is crossed by one room at most, even by a burst of reconnections after a restart.
+        // A load is a read and a rebuild, milliseconds for a page of a few hundred KB.
+        let loading = rooms.slots.values().find_map(|slot| match slot {
+            Slot::Loading(transition) => Some(transition.clone()),
+            _ => None,
+        });
+        if let Some(transition) = loading {
+            return Ok(Attempt::WaitTurn(transition));
         }
 
         let (done, transition) = watch::channel(None);
@@ -501,7 +520,22 @@ impl<S: DocStore> Inner<S> {
     }
 }
 
-/// The room to unload at the cap. A failing room is skipped: it could not unload anyway.
+/// What the live rooms are counted as together. A room loading or unloading counts for nothing,
+/// so a load can start while the room it evicted is still on its way out: one more transient room.
+fn estimated_bytes(rooms: &Rooms) -> usize {
+    rooms
+        .slots
+        .values()
+        .filter_map(|slot| match slot {
+            Slot::Live(room) => Some(room.estimate.load(Ordering::Relaxed)),
+            _ => None,
+        })
+        .sum()
+}
+
+/// The room to unload at the cap. A failing room is skipped: it could not unload anyway. So is one
+/// no client has joined yet: the client that loaded it is on its way, and evicting it would make
+/// two connections take turns loading and evicting. Its idle delay unloads it if nobody comes.
 fn oldest_idle(rooms: &Rooms) -> Option<Arc<Room>> {
     rooms
         .slots
@@ -509,7 +543,7 @@ fn oldest_idle(rooms: &Rooms) -> Option<Arc<Room>> {
         .filter_map(|slot| {
             let Slot::Live(room) = slot else { return None };
             let state = room.state();
-            let since = state.idle_since.filter(|_| !state.failing)?;
+            let since = state.idle_since.filter(|_| !state.failing && state.joined)?;
             Some((since, room.clone()))
         })
         .min_by_key(|(since, _)| *since)

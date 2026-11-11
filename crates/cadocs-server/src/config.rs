@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
-use anyhow::{Context, ensure};
+use anyhow::{Context, bail, ensure};
 use axum::http::{HeaderMap, Uri, header};
 use cadocs_collab::CollabConfig;
 use cadocs_jobs::JobConfig;
@@ -26,6 +26,11 @@ const DEFAULT_MAX_UPLOAD_MB: u64 = 25;
 const MAX_MB: u64 = 1024 * 1024;
 const MIB: u64 = 1024 * 1024;
 const MAX_TRASH_DAYS: u64 = 3650;
+#[cfg(feature = "s3")]
+const DEFAULT_S3_LINK_SECS: u64 = 3600;
+/// The longest a SigV4 presigned URL may live.
+#[cfg(feature = "s3")]
+const MAX_S3_LINK_SECS: u64 = 7 * 24 * 3600;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -39,6 +44,16 @@ pub struct Config {
     /// When an edit's revision is taken.
     pub revisions: RevisionTiming,
     pub attachments: AttachmentLimits,
+    pub files: FileStoreConfig,
+}
+
+/// Where attachments go: `CADOCS_FILE_STORE` (ADR 0020).
+#[derive(Debug, Clone)]
+pub enum FileStoreConfig {
+    /// `<data>/files`.
+    Local,
+    #[cfg(feature = "s3")]
+    S3(cadocs_files::S3Config),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,6 +187,7 @@ impl Config {
                 room_idle: read.secs("CADOCS_ROOM_IDLE_SECS", collab.room_idle)?,
                 room_queue_bytes: read.value("CADOCS_ROOM_QUEUE_BYTES", collab.room_queue_bytes)?,
                 max_rooms: read.value("CADOCS_MAX_ROOMS", collab.max_rooms)?,
+                room_memory: read.room_memory(collab.room_memory)?,
                 max_sockets: read.value("CADOCS_MAX_SOCKETS", collab.max_sockets)?,
                 max_frame_bytes: read.value("CADOCS_MAX_FRAME_BYTES", collab.max_frame_bytes)?,
                 send_queue: read.value("CADOCS_SEND_QUEUE", collab.send_queue)?,
@@ -189,6 +205,7 @@ impl Config {
             },
             revisions: read.revision_timing()?,
             attachments: read.attachment_limits()?,
+            files: read.file_store()?,
         };
         config.validate()?;
         Ok(config)
@@ -292,6 +309,95 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
             max_upload_bytes: upload * MIB,
             workspace_quota_bytes: (quota > 0).then_some(quota * MIB),
         })
+    }
+
+    fn room_memory(&self, default: usize) -> anyhow::Result<usize> {
+        let mb = self.value("CADOCS_ROOM_MEMORY_MB", default as u64 / MIB)?;
+        ensure!(
+            (1..=MAX_MB).contains(&mb),
+            "CADOCS_ROOM_MEMORY_MB must be between 1 and {MAX_MB}"
+        );
+        usize::try_from(mb * MIB).context("CADOCS_ROOM_MEMORY_MB is too large for this platform")
+    }
+
+    fn file_store(&self) -> anyhow::Result<FileStoreConfig> {
+        let name = "CADOCS_FILE_STORE";
+        match (self.0)(name).as_deref() {
+            None | Some("local") => Ok(FileStoreConfig::Local),
+            Some("s3") => self.s3(),
+            Some(other) => bail!("invalid {name}: {other:?}, expected local or s3"),
+        }
+    }
+
+    #[cfg(not(feature = "s3"))]
+    fn s3(&self) -> anyhow::Result<FileStoreConfig> {
+        bail!(
+            "CADOCS_FILE_STORE=s3 needs a build with S3 support: cargo build --release --features s3"
+        )
+    }
+
+    #[cfg(feature = "s3")]
+    fn s3(&self) -> anyhow::Result<FileStoreConfig> {
+        use cadocs_files::{Downloads, S3Config};
+
+        let required = |name: &str| {
+            (self.0)(name)
+                .filter(|value| !value.is_empty())
+                .with_context(|| format!("{name} is required when CADOCS_FILE_STORE is s3"))
+        };
+        let endpoint = required("CADOCS_S3_ENDPOINT")?;
+        ensure!(
+            endpoint.starts_with("https://") || endpoint.starts_with("http://"),
+            "invalid CADOCS_S3_ENDPOINT: {endpoint:?}, expected an http or https URL"
+        );
+        let downloads = match (self.0)("CADOCS_S3_DOWNLOADS").as_deref() {
+            None | Some("proxy") => Downloads::Proxy,
+            Some("redirect") => Downloads::Redirect,
+            Some(other) => {
+                bail!("invalid CADOCS_S3_DOWNLOADS: {other:?}, expected proxy or redirect")
+            }
+        };
+        let prefix = (self.0)("CADOCS_S3_PREFIX").unwrap_or_default();
+        ensure!(
+            cadocs_files::valid_prefix(&prefix),
+            "invalid CADOCS_S3_PREFIX: {prefix:?}, expected segments such as apps/cadocs, \
+             with no leading /, no empty segment, and no . or .."
+        );
+        let link = self.value("CADOCS_S3_LINK_SECS", DEFAULT_S3_LINK_SECS)?;
+        ensure!(
+            (2..=MAX_S3_LINK_SECS).contains(&link),
+            "CADOCS_S3_LINK_SECS must be between 2 and {MAX_S3_LINK_SECS}"
+        );
+        Ok(FileStoreConfig::S3(S3Config {
+            endpoint,
+            bucket: required("CADOCS_S3_BUCKET")?,
+            region: self.value("CADOCS_S3_REGION", "us-east-1".to_owned())?,
+            access_key_id: required("CADOCS_S3_ACCESS_KEY_ID")?,
+            secret_access_key: self.s3_secret()?,
+            prefix,
+            downloads,
+            link_lifetime: Duration::from_secs(link),
+            ca_file: (self.0)("CADOCS_S3_CA_FILE").map(PathBuf::from),
+        }))
+    }
+
+    /// From the variable, or from the file `_FILE` names, as container secrets are given.
+    #[cfg(feature = "s3")]
+    fn s3_secret(&self) -> anyhow::Result<String> {
+        let name = "CADOCS_S3_SECRET_ACCESS_KEY";
+        let file = "CADOCS_S3_SECRET_ACCESS_KEY_FILE";
+        match ((self.0)(name), (self.0)(file)) {
+            (Some(_), Some(_)) => bail!("set {name} or {file}, not both"),
+            (Some(secret), None) if !secret.is_empty() => Ok(secret),
+            (None, Some(path)) => {
+                let secret = std::fs::read_to_string(&path)
+                    .with_context(|| format!("cannot read {file}: {path:?}"))?;
+                let secret = secret.trim_end().to_owned();
+                ensure!(!secret.is_empty(), "{file} names an empty file: {path:?}");
+                Ok(secret)
+            }
+            _ => bail!("{name} or {file} is required when CADOCS_FILE_STORE is s3"),
+        }
     }
 
     fn session_lifetime(&self) -> anyhow::Result<Duration> {
@@ -496,6 +602,7 @@ mod tests {
         assert_eq!(config.collab.room_idle, Duration::from_secs(60));
         assert_eq!(config.collab.room_queue_bytes, 4_194_304);
         assert_eq!(config.collab.max_rooms, 256);
+        assert_eq!(config.collab.room_memory, 72 * 1024 * 1024);
         assert_eq!(config.collab.max_sockets, 512);
         assert_eq!(config.collab.max_frame_bytes, 8_388_608);
         assert_eq!(config.collab.send_queue, 256);
@@ -520,6 +627,7 @@ mod tests {
             ("CADOCS_ROOM_IDLE_SECS", "5"),
             ("CADOCS_ROOM_QUEUE_BYTES", "1024"),
             ("CADOCS_MAX_ROOMS", "2"),
+            ("CADOCS_ROOM_MEMORY_MB", "16"),
             ("CADOCS_MAX_SOCKETS", "3"),
             ("CADOCS_MAX_FRAME_BYTES", "512"),
             ("CADOCS_SEND_QUEUE", "4"),
@@ -545,6 +653,7 @@ mod tests {
         assert_eq!(config.collab.room_idle, Duration::from_secs(5));
         assert_eq!(config.collab.room_queue_bytes, 1024);
         assert_eq!(config.collab.max_rooms, 2);
+        assert_eq!(config.collab.room_memory, 16 * 1024 * 1024);
         assert_eq!(config.collab.max_sockets, 3);
         assert_eq!(config.collab.max_frame_bytes, 512);
         assert_eq!(config.collab.send_queue, 4);
@@ -585,6 +694,14 @@ mod tests {
         ] {
             let error = config(refused).unwrap_err();
             assert!(error.to_string().contains("CADOCS_REVISION"), "{error}");
+        }
+    }
+
+    #[test]
+    fn the_room_memory_budget_is_at_least_a_megabyte() {
+        for refused in ["0", "1048577"] {
+            let error = config(&[("CADOCS_ROOM_MEMORY_MB", refused)]).unwrap_err();
+            assert!(format!("{error:#}").contains("CADOCS_ROOM_MEMORY_MB"), "{error:#}");
         }
     }
 
@@ -632,5 +749,116 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn attachments_stay_on_disk_unless_s3_is_chosen() {
+        assert!(matches!(config(&[]).unwrap().files, FileStoreConfig::Local));
+        assert!(matches!(
+            config(&[("CADOCS_FILE_STORE", "local")]).unwrap().files,
+            FileStoreConfig::Local
+        ));
+        let error = config(&[("CADOCS_FILE_STORE", "nfs")]).unwrap_err();
+        assert!(format!("{error:#}").contains("CADOCS_FILE_STORE"), "{error:#}");
+    }
+
+    #[cfg(not(feature = "s3"))]
+    #[test]
+    fn a_build_without_s3_says_which_feature_it_lacks() {
+        let error = config(&[("CADOCS_FILE_STORE", "s3")]).unwrap_err();
+        assert!(format!("{error:#}").contains("--features s3"), "{error:#}");
+    }
+
+    #[cfg(feature = "s3")]
+    mod s3 {
+        use cadocs_files::{Downloads, S3Config};
+
+        use super::*;
+
+        const REQUIRED: [(&str, &str); 5] = [
+            ("CADOCS_FILE_STORE", "s3"),
+            ("CADOCS_S3_ENDPOINT", "https://s3.example.org"),
+            ("CADOCS_S3_BUCKET", "wiki"),
+            ("CADOCS_S3_ACCESS_KEY_ID", "cadocs"),
+            ("CADOCS_S3_SECRET_ACCESS_KEY", "secret"),
+        ];
+
+        fn read_s3(vars: &[(&str, &str)]) -> anyhow::Result<S3Config> {
+            match config(&[vars, &REQUIRED[..]].concat())?.files {
+                FileStoreConfig::S3(s3) => Ok(s3),
+                FileStoreConfig::Local => panic!("not S3"),
+            }
+        }
+
+        #[test]
+        fn s3_needs_its_endpoint_bucket_and_keys_and_defaults_the_rest() {
+            let s3 = read_s3(&[]).unwrap();
+            assert_eq!(s3.endpoint, "https://s3.example.org");
+            assert_eq!(s3.bucket, "wiki");
+            assert_eq!(s3.access_key_id, "cadocs");
+            assert_eq!(s3.secret_access_key, "secret");
+            assert_eq!(s3.region, "us-east-1");
+            assert_eq!(s3.prefix, "");
+            assert_eq!(s3.downloads, Downloads::Proxy);
+            assert_eq!(s3.link_lifetime, Duration::from_secs(3600));
+            assert_eq!(s3.ca_file, None);
+            // The secret never reaches a log through `Debug`.
+            assert!(!format!("{s3:?}").contains("secret"), "{s3:?}");
+
+            for (missing, _) in &REQUIRED[1..] {
+                let vars: Vec<_> = REQUIRED.iter().filter(|(k, _)| k != missing).copied().collect();
+                let error = config(&vars).unwrap_err();
+                assert!(format!("{error:#}").contains(missing), "{error:#}");
+            }
+        }
+
+        #[test]
+        fn every_s3_setting_is_read() {
+            let s3 = read_s3(&[
+                ("CADOCS_S3_REGION", "garage"),
+                ("CADOCS_S3_PREFIX", "cadocs/"),
+                ("CADOCS_S3_DOWNLOADS", "redirect"),
+                ("CADOCS_S3_LINK_SECS", "600"),
+                ("CADOCS_S3_CA_FILE", "/etc/ssl/internal.pem"),
+            ])
+            .unwrap();
+            assert_eq!(s3.region, "garage");
+            assert_eq!(s3.prefix, "cadocs/");
+            assert_eq!(s3.downloads, Downloads::Redirect);
+            assert_eq!(s3.link_lifetime, Duration::from_secs(600));
+            assert_eq!(s3.ca_file, Some(PathBuf::from("/etc/ssl/internal.pem")));
+
+            for (name, value) in [
+                ("CADOCS_S3_DOWNLOADS", "direct"),
+                ("CADOCS_S3_LINK_SECS", "1"),
+                ("CADOCS_S3_LINK_SECS", "604801"),
+                ("CADOCS_S3_ENDPOINT", "s3.example.org"),
+                ("CADOCS_S3_PREFIX", "/cadocs"),
+                ("CADOCS_S3_PREFIX", "a/../b"),
+            ] {
+                let error = read_s3(&[(name, value)]).unwrap_err();
+                assert!(format!("{error:#}").contains(name), "{name}={value}: {error:#}");
+            }
+        }
+
+        #[test]
+        fn the_secret_can_come_from_a_file() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("secret");
+            std::fs::write(&path, "from-file\n").unwrap();
+            let path = path.to_str().unwrap();
+            let vars: Vec<_> = REQUIRED[..4]
+                .iter()
+                .copied()
+                .chain([("CADOCS_S3_SECRET_ACCESS_KEY_FILE", path)])
+                .collect();
+            match config(&vars).unwrap().files {
+                FileStoreConfig::S3(s3) => assert_eq!(s3.secret_access_key, "from-file"),
+                FileStoreConfig::Local => panic!("not S3"),
+            }
+
+            let both = read_s3(&[("CADOCS_S3_SECRET_ACCESS_KEY_FILE", path)]).unwrap_err();
+            assert!(format!("{both:#}").contains("_FILE"), "{both:#}");
+        }
     }
 }
