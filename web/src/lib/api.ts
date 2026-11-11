@@ -104,3 +104,17 @@ export async function uploadAttachment(page: string, file: File): Promise<Attach
   const response = await call("POST", path, headers, file);
   return (await response.json()) as Attachment;
 }
+
+/** Where a page downloads as Markdown, or as a zip with its attachments. */
+export const exportUrl = (page: string, attachments: boolean) =>
+  `/api/v1/pages/${encodeURIComponent(page)}/export?format=md&attachments=${attachments ? 1 : 0}`;
+
+const isZip = (file: File) => /\.zip$/i.test(file.name) || file.type.includes("zip");
+
+/** Imports a Markdown file, or a zip of one with its attachments, as a new page at the root of `space`. */
+export async function importPage<T>(space: string, file: File): Promise<T> {
+  const path = `/spaces/${encodeURIComponent(space)}/import?name=${encodeURIComponent(file.name)}`;
+  const headers = { "content-type": isZip(file) ? "application/zip" : "text/markdown" };
+  const response = await call("POST", path, headers, file);
+  return (await response.json()) as T;
+}

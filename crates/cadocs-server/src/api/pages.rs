@@ -46,7 +46,7 @@ where
 }
 
 #[derive(Serialize)]
-struct PageBody {
+pub(super) struct PageBody {
     id: String,
     workspace_id: String,
     space_id: String,
@@ -164,19 +164,32 @@ async fn create<S: PageStore, A>(
     PathParam(space): PathParam,
     JsonBody(body): JsonBody<CreateRequest>,
 ) -> Result<Response, ApiError> {
+    let after = placement(body.after);
+    let page = add(&state, space, body.parent_id, after, current.user.id).await?;
+    Ok((StatusCode::CREATED, Json(PageBody::from(page))).into_response())
+}
+
+/// Creates an empty page and tells the workspace.
+pub(super) async fn add<S: PageStore, A>(
+    state: &AppState<S, A>,
+    space_id: String,
+    parent_id: Option<String>,
+    placement: Placement,
+    actor: String,
+) -> Result<PageRecord, ApiError> {
     let new = NewPage {
         id: Uuid::now_v7().to_string(),
-        space_id: space,
-        parent_id: body.parent_id,
-        placement: placement(body.after),
+        space_id,
+        parent_id,
+        placement,
         slug: new_slug().map_err(ApiError::internal)?,
-        actor: current.user.id,
+        actor,
         now: now_ms(),
     };
     let page = state.store.create_page(&new).await?;
     let event = Event::page(PageEvent::Created, &page.space_id, &page.id);
     state.registry.publish(&page.workspace_id, event);
-    Ok((StatusCode::CREATED, Json(PageBody::from(page))).into_response())
+    Ok(page)
 }
 
 async fn read<S: PageStore, A>(
@@ -323,14 +336,21 @@ async fn trash<S: PageStore, A>(
     Extension(current): Extension<CurrentSession>,
     PathParam(page): PathParam,
 ) -> Result<StatusCode, ApiError> {
-    let site = state
-        .store
-        .trash_page(&page, &current.user.id, now_ms())
-        .await?;
-    state.access_changed();
-    let event = Event::page(PageEvent::Trashed, &site.space_id, &page);
-    state.registry.publish(&site.workspace_id, event);
+    move_to_trash(&state, &page, &current.user.id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Moves a page to the trash and tells whoever it concerns.
+pub(super) async fn move_to_trash<S: PageStore, A>(
+    state: &AppState<S, A>,
+    page: &str,
+    actor: &str,
+) -> Result<(), ApiError> {
+    let site = state.store.trash_page(page, actor, now_ms()).await?;
+    state.access_changed();
+    let event = Event::page(PageEvent::Trashed, &site.space_id, page);
+    state.registry.publish(&site.workspace_id, event);
+    Ok(())
 }
 
 async fn restore<S: PageStore, A>(

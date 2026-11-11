@@ -42,7 +42,7 @@ const INLINE_TYPES: [&str; 5] = [
 /// For a download opened by itself: nothing in it may run or load.
 const DOWNLOAD_POLICY: &str = "default-src 'none'; frame-ancestors 'none'; sandbox";
 /// RFC 8187: what `filename*` may hold unescaped.
-const ATTR_CHARS: &AsciiSet = &NON_ALPHANUMERIC
+pub(super) const ATTR_CHARS: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'!')
     .remove(b'#')
     .remove(b'$')
@@ -236,7 +236,7 @@ fn quota_reached() -> ApiError {
     StoreError::QuotaExceeded.into()
 }
 
-fn file_error(error: FileError) -> ApiError {
+pub(super) fn file_error(error: FileError) -> ApiError {
     match error {
         FileError::TooLarge(_) => ApiError::new(ErrorCode::TooLarge),
         FileError::Body(_) => {
@@ -249,7 +249,7 @@ fn file_error(error: FileError) -> ApiError {
 }
 
 /// Values checked when they were stored, so this never falls back in practice.
-fn header(value: &str) -> HeaderValue {
+pub(super) fn header(value: &str) -> HeaderValue {
     HeaderValue::from_str(value).unwrap_or(HeaderValue::from_static(UNKNOWN_TYPE))
 }
 
@@ -314,7 +314,7 @@ fn content_type(headers: &HeaderMap) -> String {
 }
 
 /// RFC 6266: an ASCII fallback for old clients, and the real name in `filename*`.
-fn disposition(inline: bool, name: &str) -> String {
+pub(super) fn disposition(inline: bool, name: &str) -> String {
     let kind = if inline { "inline" } else { "attachment" };
     let fallback: String = name
         .chars()

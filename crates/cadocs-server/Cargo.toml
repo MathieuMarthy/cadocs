@@ -15,6 +15,7 @@ s3 = ["cadocs-files/s3"]
 
 [dependencies]
 anyhow.workspace = true
+async_zip.workspace = true
 argon2.workspace = true
 axum.workspace = true
 cadocs-collab.workspace = true
@@ -24,7 +25,7 @@ cadocs-files.workspace = true
 cadocs-jobs.workspace = true
 cadocs-search.workspace = true
 cadocs-store.workspace = true
-futures-util.workspace = true
+futures-util = { workspace = true, features = ["io"] }
 getrandom.workspace = true
 percent-encoding.workspace = true
 rust-embed.workspace = true
@@ -32,13 +33,15 @@ serde = { workspace = true, features = ["derive"] }
 sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { workspace = true, features = ["compat", "io"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tungstenite.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+async_zip.workspace = true
 bytes.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

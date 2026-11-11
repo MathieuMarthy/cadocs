@@ -189,11 +189,18 @@ impl Api {
         let head = String::from_utf8_lossy(&answer[..split]).into_owned();
         let mut lines = head.lines();
         let status = lines.next().unwrap().split(' ').nth(1).unwrap();
-        let headers = lines
+        let headers: Vec<(String, String)> = lines
             .map(|line| line.split_once(": ").unwrap())
             .map(|(name, value)| (name.to_ascii_lowercase(), value.to_owned()))
             .collect();
-        let bytes = answer[split + 4..].to_vec();
+        let chunked = headers
+            .iter()
+            .any(|(name, value)| name == "transfer-encoding" && value == "chunked");
+        let bytes = if chunked {
+            dechunk(&answer[split + 4..])
+        } else {
+            answer[split + 4..].to_vec()
+        };
         Reply {
             status: status.parse().unwrap(),
             headers,
@@ -293,4 +300,23 @@ pub async fn logged_in() -> (Api, Login) {
     assert_eq!(reply.status, 201, "{reply:?}");
     let login = Login::from(&reply);
     (api, login)
+}
+
+/// The body of a chunked answer. A body cut short, as a failed stream ends, panics.
+fn dechunk(mut raw: &[u8]) -> Vec<u8> {
+    let mut body = Vec::new();
+    loop {
+        let line = raw
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .expect("a chunk size");
+        let size = std::str::from_utf8(&raw[..line]).unwrap();
+        let size = usize::from_str_radix(size.split(';').next().unwrap(), 16).unwrap();
+        raw = &raw[line + 2..];
+        if size == 0 {
+            return body;
+        }
+        body.extend_from_slice(&raw[..size]);
+        raw = &raw[size + 2..];
+    }
 }

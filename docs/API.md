@@ -1,6 +1,6 @@
 # API
 
-All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today `/ws/pages/{page_id}`, and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces, grants, pages, attachments, search and revisions, apart from `/duplicate`, the imports and the exports. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
+All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today `/ws/pages/{page_id}`, and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces, grants, pages, attachments, search and revisions, with the export and import of one page, apart from `/duplicate` and the space exports. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
 
 ## Conventions
 
@@ -111,7 +111,7 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 - `GET /invitations/{token}` answers `{ workspace_id, workspace_name, email, role, expires_at, has_account }`. `has_account` tells the page to ask for a login rather than a password.
 - `POST /invitations/{token}/accept` always takes a JSON body. `{ name, password }` makes the account of the invited email, and answers `201` with the session body and the cookie, or `409` with `email: taken` if that email has an account. `{}` joins with the current session, needs the CSRF token, and answers `200` with the session body: `401` with no session, `403` for an account with another email. A member keeps their role. A refused password leaves the link usable.
 - A link that is unknown, used, replaced, revoked or expired, or whose workspace is gone, is a `404`. Answers that hold a link or a session have `Cache-Control: no-store`.
-| GET | `/jobs/{id}` | the user who started it | Status of an import or export |
+| GET | `/jobs/{id}` | the user who started it | Status of a space export (V1) |
 
 ### Spaces
 
@@ -147,12 +147,14 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 | DELETE | `/pages/{page}` | editor | Move to trash |
 | POST | `/pages/{page}/restore` | editor | Restore from trash |
 | DELETE | `/pages/{page}/purge` | space admin | Delete a trashed page for good |
-| GET | `/pages/{page}/export?format=md\|html&attachments=0\|1` | viewer | Export. Without attachments, one file with absolute links. With them, a zip |
-| POST | `/spaces/{space}/import` | editor | Import Markdown or a zip, as a job |
+| GET | `/pages/{page}/export?format=md&attachments=0\|1` | viewer | Export. Without attachments, one file with absolute links. With them, a zip. `format=html` is V1 |
+| POST | `/spaces/{space}/import?name=&parent_id=` | editor | Import Markdown or a zip as a new page |
 | GET | `/pages/{page}/revisions` | viewer | List revisions |
 | GET | `/pages/{page}/revisions/{n}` | viewer | Rendered content of a revision |
 | POST | `/pages/{page}/revisions/{n}/restore` | editor | Apply a revision as a new edit |
 
+- An export writes the title as a first `#` heading, then the content, by the conventions of `cadocs-content`'s `markdown.rs`. Without attachments it is `<title>.md`, `text/markdown`, whose links to pages and attachments start with `CADOCS_PUBLIC_URL`. With `attachments=1` it is `<title>.zip`: `<title>.md` at its root, and each attachment the caller can download as `attachments/<id>/<file name>`, which the Markdown links to; an attachment they cannot download keeps its absolute link and stays out. A title or file name loses `/ \ : * ? " < > |` and control characters. Zip entries are stored, not compressed, and the zip is written as it is sent: a failure midway drops the connection rather than end a truncated file. A missing `format` is `md`, anything else `400` with `format: invalid`, and an `attachments` other than `0` or `1` is `attachments: invalid`.
+- An import is the raw file as the body, like an upload, and answers `201` with the new page, last at the root of the space or under `parent_id`. `Content-Type: application/zip` (or `application/x-zip-compressed`) reads a zip, anything else Markdown, in UTF-8. The title is a first `#` heading, which is taken out of the content, else `name` without `.md`, `.markdown` or `.zip`. Links to the server's own pages and attachments, relative or under `CADOCS_PUBLIC_URL`, read as page links, images and files; in a zip, a link to one of its entries becomes a copy of that entry, as a new attachment of the page, named after the entry and typed by its extension. Synchronous, not a job: one page is quick, and its body goes to `data/tmp`, which a restart empties. Limits: a body over `CADOCS_MAX_IMPORT_MB` or Markdown over 2 MiB is `413`, as is an entry over `CADOCS_MAX_UPLOAD_MB` or the quota. `file` in `fields` says what else is wrong: `not_utf8`, `invalid` (not a zip, zip64, or a directory over 1 MiB), `too_many_entries` (over 1000), `compressed` (only stored entries are read, as exports write them), `no_markdown` or `several_markdown` (one `.md` file at the root of the zip). A failure once the page exists moves it to the trash.
 - A revision summary is `{ number, title, authors: [{ id, name }], created_at }`, the most recent first, paginated with the number as the cursor. `authors` are who wrote since the revision before, minus deleted accounts. `GET /pages/{page}/revisions/{n}` adds `html`, rendered by the server with the titles of the linked pages the caller can open (`page not found` for the others). A number that is not a positive integer is `400` with `n: invalid`, an unknown one `404`.
 - A restore answers `204`. It first keeps the current content as a revision when it differs from the latest one, then replaces the title and content through the room in one transaction: open clients receive it as an edit, and the next revision job records it with the restorer as its author.
 

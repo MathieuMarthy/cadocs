@@ -53,7 +53,7 @@ Other rules:
 
 What later steps must know, by topic. Read the file of the code you touch, and add to it. Keep this section short: every session and subagent pays for it.
 
-- **Prototype limits:** there is no Markdown import or export yet. The server binds to `127.0.0.1`. Do not expose it.
+- **Prototype limits:** the server binds to `127.0.0.1`. Do not expose it.
 - **Access changes:** a handler whose change can alter what a user reaches calls `state.access_changed()` once it is stored ([store notes](docs/notes/store.md)).
 - [docs/notes/collab.md](docs/notes/collab.md): rooms, yrs, y-websocket, Yjs layout, socket RAM.
 - [docs/notes/content.md](docs/notes/content.md): schema check, Yjs layout of nodes, renderers, Markdown conventions.

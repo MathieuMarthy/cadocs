@@ -1,7 +1,7 @@
 mod common;
 
 use cadocs_content::ast::*;
-use cadocs_content::markdown::{from_markdown, to_markdown};
+use cadocs_content::markdown::{from_markdown, from_markdown_with, to_markdown, to_markdown_with};
 use common::*;
 
 fn titles(id: &str) -> Option<String> {
@@ -642,4 +642,84 @@ fn marks_written_as_tags_inside_others_keep_their_bounds() {
         Block::Paragraph(vec![text("foo"), marked("bar", under), text("baz")]),
         Block::Paragraph(vec![marked("a", bold()), marked("(b)c", both), text("d")]),
     ]);
+}
+
+/// Addresses of an export folder: attachments under `files/`, pages on another host.
+struct Folder;
+
+impl cadocs_content::Links for Folder {
+    fn attachment(&self, id: &str) -> String {
+        format!("files/{id}/name.png")
+    }
+
+    fn page(&self, id: &str) -> String {
+        format!("https://wiki.example/?page={id}")
+    }
+
+    fn attachment_id(&self, href: &str) -> Option<String> {
+        let id = href.strip_prefix("files/")?.split('/').next()?;
+        (!id.is_empty()).then(|| id.to_string())
+    }
+
+    fn page_id(&self, href: &str) -> Option<String> {
+        href.strip_prefix("https://wiki.example/?page=")
+            .map(str::to_string)
+    }
+}
+
+#[test]
+fn links_choose_the_addresses_of_attachments_and_pages() {
+    let document = Document {
+        blocks: vec![
+            Block::Image {
+                id: "a1".into(),
+                alt: Some("chart".into()),
+            },
+            Block::File {
+                id: "f1".into(),
+                name: "report.pdf".into(),
+            },
+            Block::Paragraph(vec![Inline::PageLink {
+                id: "0190a0b0-0000-7000-8000-000000000001".into(),
+            }]),
+        ],
+    };
+    let written = to_markdown_with(&document, &titles, &Folder);
+    assert_eq!(
+        written,
+        "![chart](files/a1/name.png)\n\n[report.pdf](files/f1/name.png)\n\n\
+         [Other page](https://wiki.example/?page=0190a0b0-0000-7000-8000-000000000001)\n"
+    );
+    assert_eq!(from_markdown_with(&written, &Folder), document);
+    // The server's own addresses are not attachments or pages for these links.
+    let relative = to_markdown(&document, &titles);
+    assert!(
+        from_markdown_with(&relative, &Folder)
+            .attachments()
+            .is_empty()
+    );
+}
+
+#[test]
+fn attachment_ids_can_be_replaced_anywhere() {
+    let mut document = Document {
+        blocks: vec![
+            Block::Image {
+                id: "old".into(),
+                alt: None,
+            },
+            Block::Blockquote(vec![Block::BulletList(vec![ListItem {
+                blocks: vec![Block::File {
+                    id: "old".into(),
+                    name: "a".into(),
+                }],
+            }])]),
+            Block::File {
+                id: "kept".into(),
+                name: "b".into(),
+            },
+        ],
+    };
+    document.map_attachments(&mut |id| (id == "old").then(|| "new".to_string()));
+    assert_eq!(document.attachments(), vec!["new", "kept"]);
 }

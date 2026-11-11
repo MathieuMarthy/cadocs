@@ -924,3 +924,64 @@ h2 {
   border-left: 3px solid var(--ink);
   background: var(--panel);
 }
+
+/* Printing (to paper or PDF): the page alone, in the light theme, with no interface around it. */
+
+@media print {
+  :root {
+    color-scheme: light;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .sidebar,
+  .topbar,
+  .notice-region,
+  .source-line,
+  .banner,
+  .table-edges,
+  .collaboration-carets__caret,
+  .collaboration-carets__label {
+    display: none !important;
+  }
+
+  .shell {
+    display: block;
+    min-height: 0;
+  }
+
+  .page,
+  .content {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .title::placeholder {
+    color: transparent;
+  }
+
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+
+  pre,
+  blockquote,
+  img,
+  tr,
+  [data-type="callout"] {
+    break-inside: avoid;
+  }
+
+  /* A link shows where it goes, since paper cannot follow it. */
+  .tiptap a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    color: var(--muted);
+    font-size: 0.85em;
+    word-break: break-all;
+  }
+}

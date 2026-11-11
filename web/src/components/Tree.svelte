@@ -6,6 +6,7 @@
   import { describe } from "../lib/form.svelte";
   import { canEdit, type Nav, type PageRow, type Place, type Space } from "../lib/nav.svelte";
   import { trashPage } from "../lib/actions";
+  import { importPage } from "../lib/api";
   import { navigate } from "../lib/router.svelte";
 
   let { nav }: { nav: Nav } = $props();
@@ -42,12 +43,36 @@
   const move = (page: PageRow, place: Place) => void attempt(() => nav.move(page, place));
   const trash = (page: PageRow) => void attempt(() => trashPage(nav, page));
 
-  /** Every reader reaches the settings, which show the grants; editors also reach the trash. */
+  /** The file picker of `import markdown`, and the space it imports into. */
+  let picker = $state<HTMLInputElement>();
+  let importing: Space | null = null;
+
+  function pick(space: Space) {
+    importing = space;
+    picker?.click();
+  }
+
+  function imported() {
+    const file = picker?.files?.[0];
+    const space = importing;
+    if (picker) picker.value = "";
+    if (!file || !space) return;
+    void attempt(async () => {
+      const page = await importPage<PageRow>(space.id, file);
+      navigate(`/?page=${page.id}`);
+    });
+  }
+
+  /** Every reader reaches the settings, which show the grants; editors also import and reach the trash. */
   function spaceItems(space: Space): MenuItem[] {
     const base = `/w/${nav.workspace.slug}`;
     const settings: MenuItem = { icon: "settings", label: "settings", href: `${base}/settings/${space.slug}` };
     if (!canEdit(space.role)) return [settings];
-    return [{ icon: "trash-2", label: "open the trash", href: `${base}/trash/${space.slug}` }, settings];
+    return [
+      { icon: "upload", label: "import markdown", select: () => pick(space) },
+      { icon: "trash-2", label: "open the trash", href: `${base}/trash/${space.slug}` },
+      settings,
+    ];
   }
 
   /** A page dropped on a space goes last at its root. */
@@ -139,4 +164,13 @@
     {/each}
   </ul>
   {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
+  <input
+    bind:this={picker}
+    hidden
+    type="file"
+    accept=".md,.markdown,.zip,text/markdown,application/zip"
+    aria-label="markdown file to import"
+    tabindex="-1"
+    onchange={imported}
+  />
 </nav>
