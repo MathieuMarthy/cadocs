@@ -72,6 +72,12 @@ jobs:
           tar -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "$name.tar.gz" "$name.tar.gz.sha256"
+      - name: Check the image
+        # This architecture's image serves, backs up and restores before anything is pushed.
+        run: |
+          docker buildx build --platform "linux/$ARCH" --build-arg "FEATURES=$FEATURES" \
+            --tag cadocs-check --load .
+          scripts/check-image.sh cadocs-check
       - name: Image
         # The same builder still holds the layers of the binary, so this only adds the last stage.
         run: |

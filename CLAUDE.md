@@ -2,7 +2,7 @@
 
 Self-hosted collaborative wiki, a lightweight Docmost alternative. Top priority: minimal server RAM (10 to 30 MB idle, under 100 MB for a few dozen active users). One binary plus one data folder, no mandatory external service.
 
-Design lives in `docs/`: read only what the current task needs. `ARCHITECTURE.md` for the flows, `API.md` for the wire protocol, `DATA_MODEL.md` for the schema, `PERMISSIONS.md` for the access matrix, `OPERATIONS.md` for configuration and deployment, `CARGO_WORKSPACE.md` for crates, `ROADMAP.md` for stages and progress, `adr/` for the reasons behind a decision, `notes/` for what past steps learned. Do not reopen a decision recorded in an ADR unless a measurement contradicts it. If it does, write a new ADR.
+Design lives in `docs/`: read only what the current task needs. `ARCHITECTURE.md` for the flows, `API.md` for the wire protocol, `DATA_MODEL.md` for the schema, `PERMISSIONS.md` for the access matrix, `OPERATIONS.md` for configuration and deployment, `CARGO_WORKSPACE.md` for crates, `ROADMAP.md` for stages and progress, `COVERAGE.md` for which tests cover each scope item, `adr/` for the reasons behind a decision, `notes/` for what past steps learned. Do not reopen a decision recorded in an ADR unless a measurement contradicts it. If it does, write a new ADR.
 
 ## Commands
 

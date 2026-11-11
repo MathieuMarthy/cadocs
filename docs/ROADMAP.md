@@ -77,7 +77,7 @@ Steps, one session each. Each step adds the migration for the tables it needs, a
 - [x] **Step 20d:** Room memory budget: `CADOCS_ROOM_MEMORY_MB`, each room counted from its encoded size. Done when the budget refuses or evicts as `CADOCS_MAX_ROOMS` does, and a large document weighs by its size.
 - [x] **Step 20:** Markdown import and export for one page, with or without attachments, and the print stylesheet. Done when an export imports back with its content and attachments.
 - [x] **Step 21:** Delivery: `cadocs backup` and `cadocs restore`, Docker image, `aarch64` and `x86_64` binaries, [OPERATIONS.md](OPERATIONS.md) complete. Done when a backup and restore round trip passes on a running server.
-- [ ] **Step 22:** Coverage: the whole permission matrix over REST and WebSocket, and a check of each scope item against its tests. Done when nothing in the scope lacks an automated test.
+- [x] **Step 22:** Coverage: the whole permission matrix over REST and WebSocket, and a check of each scope item against its tests. Done when nothing in the scope lacks an automated test.
 - [ ] **Step 23:** MVP benchmark: idle, 30 active users, login peaks, 10,000 pages, and the value of `CADOCS_MAX_ROOMS`. Comes last, after step 24, whose fixes could invalidate the measures. Done when the results are recorded against the exit criteria, as measured.
 - [ ] **Step 24:** Security review of auth, uploads and rendered HTML. Done when its findings are fixed or recorded.
 
@@ -113,8 +113,8 @@ When steps run in parallel:
 
 Exit criteria:
 
-- [ ] All of the scope is covered by automated tests, including the permission matrix over REST and WebSocket.
-- [ ] Revoking a role closes the user's open sockets, and this is tested.
+- [x] All of the scope is covered by automated tests, including the permission matrix over REST and WebSocket ([COVERAGE.md](COVERAGE.md)).
+- [x] Revoking a role closes the user's open sockets, and this is tested.
 - [ ] Idle RSS under 30 MB.
 - [ ] RSS under 100 MB with 30 simulated active users on 30 pages, each with one page socket and one events socket.
 - [ ] After login peaks, RSS returns to the idle target plus at most 10 MB.

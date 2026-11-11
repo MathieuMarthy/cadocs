@@ -127,3 +127,16 @@ jobs:
             web/test-results
             web/playwright-report
           retention-days: 14
+
+  image:
+    name: Docker image
+    # The image as releases build it, then served, backed up and restored.
+    if: github.event_name != 'pull_request'
+    needs: [rust, web]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker build -t cadocs .
+      - run: scripts/check-image.sh cadocs
