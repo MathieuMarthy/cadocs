@@ -30,7 +30,7 @@
     "@tiptap/starter-kit": "3.33.0",
     "@tiptap/suggestion": "3.33.0",
     "@tiptap/y-tiptap": "3.2.0",
-    "highlight.js": "11.11.2",
+    "highlight.js": "11.12.0",
     "lowlight": "3.3.0",
     "svelte": "5.57.3",
     "y-protocols": "1.0.7",
