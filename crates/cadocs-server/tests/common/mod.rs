@@ -21,6 +21,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
 pub const ORIGIN: &str = "https://wiki.example.org";
+/// The session cookie's name over HTTPS, which `ORIGIN` uses.
+pub const COOKIE: &str = "__Host-session";
 pub const PASSWORD: &str = "correct horse battery";
 
 #[derive(Embed)]
@@ -33,6 +35,8 @@ pub struct Api {
     pub store: Arc<SqliteStore>,
     pub registry: DocRegistry<SqliteStore>,
     pub queue: JobQueue<SqliteStore>,
+    /// What the server's log shows, and first-run setup needs.
+    pub setup_code: String,
     _stop: oneshot::Sender<()>,
     _dir: TempDir,
 }
@@ -152,6 +156,7 @@ async fn start_custom_in(
         config.attachments,
     );
     let queue = start_jobs(&state, config.jobs);
+    let setup_code = state.setup_code.to_string();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -168,6 +173,7 @@ async fn start_custom_in(
         store,
         registry,
         queue,
+        setup_code,
         _stop: stop,
         _dir: dir,
     }
@@ -249,6 +255,7 @@ impl Api {
             "name": "Ada",
             "password": PASSWORD,
             "workspace_name": "Acme Docs",
+            "code": self.setup_code,
         });
         self.send("POST", "/auth/setup", &[], body).await
     }

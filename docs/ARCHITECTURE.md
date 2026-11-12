@@ -212,5 +212,6 @@ Not measured: documents much larger than 20 KB, peaks on `aarch64`, and variance
 - A power cut can lose recent edits that no connected client still holds (see [Persistence and compaction](#persistence-and-compaction)).
 - Files removed from a page stay on disk until the page is purged or the file is deleted explicitly ([DATA_MODEL.md](DATA_MODEL.md#attachments)).
 - **yrs 0.28 is not memory safe on crafted updates.** A fuzz of mutated frames gave a `SIGSEGV` inside `apply_update`, in dev and release builds, with no panic first, so `catch_unwind` cannot stop it. Anyone who can write to a page can therefore crash the server, which loses unflushed edits. Read-only sockets never reach that code. Write access therefore means trust, and the server must not be open to untrusted writers (ADR 0014).
+- The risks the security review of step 24 accepted are listed in [OPERATIONS.md](OPERATIONS.md#security).
 - yrs does not always converge when every update arrives shuffled: about one order in 2,000 in a test with no cadocs code. Real clients send in order over one socket and resync through the handshake.
 - Yjs history grows with edits. Compaction limits overhead, but deleted content keeps small tombstones.

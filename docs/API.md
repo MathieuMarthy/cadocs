@@ -4,7 +4,7 @@ All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Tod
 
 ## Conventions
 
-- **Authentication**: an `HttpOnly`, `Secure`, `SameSite=Lax` session cookie.
+- **Authentication**: an `HttpOnly`, `Secure`, `SameSite=Lax` session cookie, named `__Host-session` over HTTPS so that no other host can set it, and `session` over plain HTTP, where `Secure` and the prefix are impossible.
 - **CSRF**: mutating requests with a session require the `X-CSRF-Token` header, whose value comes from `GET /session`. It is derived from the session token, so it needs no storage and lasts as long as the session. Routes that run before a session exists (`/auth/setup`, `/auth/login`, `/auth/password-reset/{token}`, and `/invitations/{token}/accept` for a new account) have no token to check: they rely on the `Origin` check and on requiring a JSON content type, which a cross-site form cannot send.
 - **Ids**: UUIDv7 strings.
 - **Pagination**: `?limit=` (maximum 100) and an opaque `?cursor=`. Responses have the form `{ "items": [...], "next_cursor": "..." | null }`.
@@ -54,7 +54,7 @@ Minimum role per route: `member` is a workspace role. Space roles are `viewer` <
 Bodies and answers:
 
 - `GET /auth/setup` answers `{ required }`, `true` while no account exists.
-- `POST /auth/setup` takes `{ email, name, password, workspace_name }`, and answers `201` with the session body and the cookie. Once an account exists it answers `409`.
+- `POST /auth/setup` takes `{ email, name, password, workspace_name, code }`, and answers `201` with the session body and the cookie. `code` is the one of the link the server logs at each start while setup is pending (ADR 0021): missing or empty is `400` with `code: required`, any other value `400` with `code: wrong`. Once an account exists it answers `409`, whatever the code.
 - `POST /auth/login` takes `{ email, password }`, and answers `200` with the session body and the cookie. An unknown email, a wrong password and a disabled account all answer the same `401`, in the same time.
 - `GET /session` answers `{ user: { id, email, name, is_instance_admin }, workspaces: [{ id, slug, name, role }], csrf_token }`.
 - `POST /auth/logout` and `DELETE /me` answer `204` and clear the cookie.
@@ -189,12 +189,12 @@ The role in `GET /pages/{page}` tells the front end whether to make the editor r
 | --- | --- | --- | --- |
 | POST | `/pages/{page}/attachments?name=` | editor | Streaming upload |
 | GET | `/attachments/{id}` | viewer of a referencing page | Download |
-| DELETE | `/attachments/{id}` | editor of a referencing page | Delete, for every page that references it |
+| DELETE | `/attachments/{id}` | editor of every referencing page | Delete, for every page that references it |
 
 - An upload is the file itself as the body, not multipart: it streams to disk with no parser in between, and a browser sends a `File` as is. `name` is the file name, percent-encoded, `+` for a space, 1 to 255 characters with no control character, else a `400` naming `name`. `Content-Type` is the file's type: its parameters are dropped, and a missing or malformed one is stored as `application/octet-stream`. It answers `201` with `{ id, workspace_id, file_name, content_type, size, uploaded_by, created_at }`.
 - A file over `CADOCS_MAX_UPLOAD_MB`, or over what the workspace quota leaves, is a `413`: at once when `Content-Length` announces it, else as soon as the stream passes the limit. A full quota refuses even an empty file. A storage failure, a full disk among them, is a `500`, and nothing is recorded.
 - A download sends the stored type, `Content-Length`, an `ETag` of the SHA-256 and `Cache-Control: private, no-cache`, so a reader revalidates and gets `304` while the file is unchanged. `Content-Disposition` is `inline` for PNG, JPEG, GIF, WebP and AVIF, `attachment` for anything else, SVG included, with the name in `filename*`. Its `Content-Security-Policy` is `default-src 'none'; sandbox`, so a file opened by itself runs nothing.
-- `DELETE` answers `204`. A reader who is not an editor of any referencing page gets `403`, and someone who reads none of them `404`.
+- `DELETE` answers `204`. It needs `editor` on every page that references the file, a page in the trash included, since it removes the file from all of them. Someone who reads a referencing page but misses that role on one of them gets `403`, and someone who reads none of them `404`.
 
 ### Search
 
@@ -232,7 +232,7 @@ Public routes are rate limited, send an `ETag` based on `updated_at`, and render
 ```
 GET /ws/pages/{page_id}
 Upgrade: websocket
-Cookie: session=...
+Cookie: __Host-session=...
 Origin: https://wiki.example.org
 ```
 

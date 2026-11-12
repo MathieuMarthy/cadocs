@@ -1,4 +1,4 @@
-use cadocs_core::permissions::{Scope, SpaceAction, download_allowed};
+use cadocs_core::permissions::{Scope, SpaceAction, delete_allowed, download_allowed};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, QueryBuilder, Row, SqliteConnection};
 
@@ -125,10 +125,7 @@ impl AttachmentStore for SqliteStore {
     async fn delete_attachment(&self, id: &str, actor: &str) -> Result<(), StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
         let scopes = referencing_scopes(&mut tx, id, actor).await?;
-        if !scopes
-            .iter()
-            .any(|scope| scope.allows(SpaceAction::ManageAttachments))
-        {
+        if !delete_allowed(scopes.iter().copied()) {
             return Err(if download_allowed(scopes) {
                 StoreError::NotAllowed
             } else {

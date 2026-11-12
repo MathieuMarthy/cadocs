@@ -337,6 +337,28 @@ fn download_needs_one_readable_referencing_page() {
 }
 
 #[test]
+fn delete_needs_an_editor_of_every_referencing_page() {
+    let editable = Scope::live(Some(SpaceRole::Editor));
+    let readable = Scope::live(Some(SpaceRole::Viewer));
+    let hidden = Scope::live(None);
+    let trashed = Scope {
+        page_trashed: true,
+        ..editable
+    };
+    let trashed_space = Scope {
+        space_trashed: true,
+        ..editable
+    };
+
+    assert!(delete_allowed([editable]));
+    assert!(delete_allowed([editable, trashed, trashed_space]));
+    assert!(delete_allowed([Scope::live(Some(SpaceRole::Admin)), editable]));
+    assert!(!delete_allowed([editable, readable]));
+    assert!(!delete_allowed([editable, hidden]));
+    assert!(!delete_allowed([]));
+}
+
+#[test]
 fn owner_rows_are_needed_to_touch_an_owner() {
     use WorkspaceRole::*;
     let manage_member = WorkspaceAction::ManageMember;

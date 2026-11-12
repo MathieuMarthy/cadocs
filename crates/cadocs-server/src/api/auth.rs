@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use super::{ApiError, ErrorCode, JsonBody, PathParam, count_request, rate_limit};
 use crate::AppState;
-use crate::session::{self, CurrentSession, csrf_token, new_token, token_hash};
+use crate::session::{self, CurrentSession, check_setup_code, csrf_token, new_token, token_hash};
 
 /// Each client can guess this many passwords at once, then one per `GUESS_REFILL`. Setup, login,
 /// using a reset link and a `PATCH /me` that checks the current password share this budget.
@@ -168,6 +168,10 @@ struct SetupRequest {
     name: String,
     password: String,
     workspace_name: String,
+    /// From the link in the server's log (ADR 0021). Missing reads as empty, so the form can
+    /// name it like any other field.
+    #[serde(default)]
+    code: String,
 }
 
 async fn setup<S: AccountStore, A>(
@@ -180,6 +184,7 @@ async fn setup<S: AccountStore, A>(
     }
 
     let mut fields = Fields::default();
+    fields.check("code", check_setup_code(&body.code, &state.setup_code));
     let email = fields.check("email", clean_email(&body.email));
     let name = fields.check("name", clean_name(&body.name));
     fields.check("password", check_password(&body.password));

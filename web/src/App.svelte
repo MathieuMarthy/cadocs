@@ -20,7 +20,8 @@
 
   type View =
     | { name: "redirect"; to: string }
-    | { name: "setup" | "login" | "account" | "admin" | "home" | "not-found" }
+    | { name: "login" | "account" | "admin" | "home" | "not-found" }
+    | { name: "setup"; code: string }
     | { name: "invite" | "reset"; token: string }
     | { name: "workspace" | "settings" | "search"; workspace: WorkspaceRow }
     | { name: "space-settings"; workspace: WorkspaceRow; space: string }
@@ -39,7 +40,9 @@
     }
 
     if (app.setupRequired) {
-      return first === "setup" ? { name: "setup" } : { name: "redirect", to: "/setup" };
+      // The link in the server's log carries the code (ADR 0021). Without it, the page asks.
+      if (first === "setup" && rest.length === 0) return { name: "setup", code: second ?? "" };
+      return { name: "redirect", to: "/setup" };
     }
 
     const session = app.session;
@@ -98,7 +101,7 @@
     <button class="button" type="button" onclick={boot}>retry</button>
   </Message>
 {:else if view.name === "setup"}
-  <Setup />
+  <Setup code={view.code} />
 {:else if view.name === "login"}
   <Login />
 {:else if view.name === "invite"}

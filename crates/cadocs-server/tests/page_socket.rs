@@ -204,7 +204,7 @@ async fn a_socket_needs_a_session() {
     assert_eq!(refused(wiki.request(&wiki.page, None)).await, 401);
 
     let stale = Login {
-        cookie: "session=stale".to_owned(),
+        cookie: format!("{}=stale", common::COOKIE),
         csrf: String::new(),
     };
     assert_eq!(refused(wiki.request(&wiki.page, Some(&stale))).await, 401);

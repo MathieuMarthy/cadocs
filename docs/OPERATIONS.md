@@ -189,6 +189,19 @@ Give cadocs its own key, limited to its bucket and prefix. With bucket versionin
 
 In `redirect` mode, only safe images (AVIF, GIF, JPEG, PNG, WebP) are redirected, and S3 serves them with the type, disposition and cache lifetime cadocs signed into the link. Every other file, SVG and HTML included, is still streamed by cadocs, with its sandbox CSP and `nosniff`, because S3 sends neither and its origin may be shared. `img-src` in the CSP adds the endpoint's origin.
 
+## Security
+
+- **First run:** until the first account exists, `cadocs serve` logs `first-run setup is pending: open <public url>/setup/<code> to create the first account` at each start. Setup needs that code, so whoever reaches the instance first cannot claim it (ADR 0021). Read it with `docker logs cadocs` or `journalctl -u cadocs`. The code changes at each start, and a log filter above `warn` hides it.
+- **Writers are trusted:** anyone with write access to a page can crash the server with a crafted update, which loses unflushed edits (ADR 0014). Give write access to known people only. Public shares stay read-only.
+- **TLS:** the session cookie is `__Host-session` over HTTPS, so no other host of the domain can set or replace it. Let the proxy send `Strict-Transport-Security`, which cadocs leaves to it (with Caddy: `header Strict-Transport-Security "max-age=31536000"`).
+- **Accepted by the review of step 24:**
+  - Password guesses are limited per client (a burst of 10, then one every 15 seconds), not per account, and hashes run one at a time. Many addresses can guess in parallel, and a flood of logins makes others wait, then answer `503`. On an instance open to the internet, a limit at the proxy helps.
+  - A session lasts `CADOCS_SESSION_DAYS` after its last use, with no absolute limit. Logout, a password change or reset, disabling and deletion end it.
+  - Invitation links can be read without a limit: a token has 256 bits, so this only costs a hash and a read per request.
+  - An attachment id works as a key inside its workspace ([PERMISSIONS.md](PERMISSIONS.md#special-cases)).
+  - A page's position key grows a little with each move between two close siblings, so an editor scripting moves can make the keys of their own spaces long. Writers are trusted.
+  - `style-src` allows inline styles (see below). Scripts only load from the instance itself.
+
 ## Security headers
 
 Sent on every response, unless a handler sets its own value.

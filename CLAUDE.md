@@ -54,7 +54,7 @@ Other rules:
 
 What later steps must know, by topic. Read the file of the code you touch, and add to it. Keep this section short: every session and subagent pays for it.
 
-- **Binding:** the server binds to `127.0.0.1` by default. The Docker image sets `CADOCS_BIND=0.0.0.0:3000`, and its port is published on `127.0.0.1` behind a TLS proxy ([OPERATIONS.md](docs/OPERATIONS.md#deployment)). Do not expose it without the security review of step 24.
+- **Binding:** the server binds to `127.0.0.1` by default. The Docker image sets `CADOCS_BIND=0.0.0.0:3000`, and its port is published on `127.0.0.1` behind a TLS proxy ([OPERATIONS.md](docs/OPERATIONS.md#deployment)). Exposing it follows the Security section there, which step 24 wrote.
 - **Access changes:** a handler whose change can alter what a user reaches calls `state.access_changed()` once it is stored ([store notes](docs/notes/store.md)).
 - [docs/notes/collab.md](docs/notes/collab.md): rooms, yrs, y-websocket, Yjs layout, socket RAM.
 - [docs/notes/content.md](docs/notes/content.md): schema check, Yjs layout of nodes, renderers, Markdown conventions.

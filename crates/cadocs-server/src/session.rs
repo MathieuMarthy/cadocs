@@ -19,6 +19,9 @@ use crate::api::{ApiError, ErrorCode};
 use crate::config::{HttpConfig, PublicUrl};
 
 const COOKIE_NAME: &str = "session";
+/// The name over HTTPS. A browser takes a `__Host-` cookie only from this host, so a site on a
+/// sibling subdomain can neither plant its own session here nor bury ours under junk ones.
+const HOST_COOKIE_NAME: &str = "__Host-session";
 const CSRF_HEADER: &str = "x-csrf-token";
 /// `docs/DATA_MODEL.md`: so that reads do not turn into writes.
 const TOUCH_INTERVAL_MS: i64 = 5 * 60 * 1000;
@@ -98,6 +101,23 @@ pub fn new_invitation(
     Ok((link, invitation))
 }
 
+/// The link to first-run setup, which only the server's log shows (ADR 0021). The page behind
+/// it sends the code to `POST /auth/setup`.
+pub fn setup_link(public_url: &PublicUrl, code: &str) -> String {
+    format!("{}/setup/{code}", public_url.origin())
+}
+
+/// Says whether `given` is the setup code, in a time that does not tell how much of it matched.
+pub fn check_setup_code(given: &str, code: &str) -> Result<(), &'static str> {
+    if given.is_empty() {
+        Err("required")
+    } else if bool::from(given.as_bytes().ct_eq(code.as_bytes())) {
+        Ok(())
+    } else {
+        Err("wrong")
+    }
+}
+
 /// Derived from the token, so it needs no column, and it lasts as long as the session. Only a
 /// page of our origin can read it, through `GET /session`.
 pub fn csrf_token(token: &str) -> String {
@@ -126,21 +146,32 @@ pub fn removal_cookie(http: &HttpConfig) -> HeaderValue {
     cookie_with("", 0, http)
 }
 
+/// `__Host-` needs `Secure`, which plain HTTP cannot have: there the name stays plain.
+fn cookie_name(http: &HttpConfig) -> &'static str {
+    if http.public_url.secure() {
+        HOST_COOKIE_NAME
+    } else {
+        COOKIE_NAME
+    }
+}
+
 fn cookie_with(token: &str, max_age: u64, http: &HttpConfig) -> HeaderValue {
     let secure = if http.public_url.secure() {
         "; Secure"
     } else {
         ""
     };
+    let name = cookie_name(http);
     let cookie =
-        format!("{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}");
+        format!("{name}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}");
     HeaderValue::try_from(cookie).expect("a token is hexadecimal")
 }
 
-/// Every value of our cookie. Another app of the parent domain may use the same name, and a browser
-/// sends both. Bytes, not text: one foreign cookie that is not ASCII must not hide ours.
-fn tokens_of(headers: &HeaderMap) -> Vec<String> {
-    let prefix = format!("{COOKIE_NAME}=");
+/// Every value of our cookie. Over plain HTTP, another app of the parent domain may use the same
+/// name, and a browser sends both. Bytes, not text: one foreign cookie that is not ASCII must not
+/// hide ours.
+fn tokens_of(headers: &HeaderMap, http: &HttpConfig) -> Vec<String> {
+    let prefix = format!("{}=", cookie_name(http));
     headers
         .get_all(COOKIE)
         .iter()
@@ -165,7 +196,7 @@ async fn find<S: AccountStore, A>(
     headers: &HeaderMap,
     now: i64,
 ) -> Result<Option<(String, ActiveSession)>, ApiError> {
-    for token in tokens_of(headers) {
+    for token in tokens_of(headers, &state.http) {
         if let Some(session) = state.store.session(&token_hash(&token), now).await? {
             return Ok(Some((token, session)));
         }
@@ -265,6 +296,47 @@ mod tests {
             token_hash("abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    fn http(public_url: &str) -> HttpConfig {
+        HttpConfig {
+            public_url: PublicUrl::parse(public_url).unwrap(),
+            trusted_proxies: crate::client_ip::TrustedProxies::default(),
+            session_lifetime: Duration::from_secs(60),
+        }
+    }
+
+    #[test]
+    fn the_setup_link_is_a_page_of_the_front_end() {
+        let url = PublicUrl::parse("https://wiki.example.org").unwrap();
+        assert_eq!(
+            setup_link(&url, "abc"),
+            "https://wiki.example.org/setup/abc"
+        );
+    }
+
+    #[test]
+    fn over_https_the_cookie_is_bound_to_its_host() {
+        let secure = cookie("t", &http("https://wiki.example.org"));
+        let secure = secure.to_str().unwrap();
+        assert!(secure.starts_with("__Host-session=t; Path=/;"), "{secure}");
+        assert!(!secure.contains("Domain"), "{secure}");
+        let removal = removal_cookie(&http("https://wiki.example.org"));
+        assert!(removal.to_str().unwrap().starts_with("__Host-session=;"));
+
+        let plain = cookie("t", &http("http://localhost:3000"));
+        assert!(plain.to_str().unwrap().starts_with("session=t;"), "{plain:?}");
+    }
+
+    #[test]
+    fn only_the_cookie_of_our_name_is_read() {
+        let mut headers = HeaderMap::new();
+        let sent = "session=planted; __Host-session=ours; other=x";
+        headers.insert(COOKIE, HeaderValue::from_static(sent));
+        let secure = http("https://wiki.example.org");
+        assert_eq!(tokens_of(&headers, &secure), ["ours"]);
+        let plain = http("http://localhost:3000");
+        assert_eq!(tokens_of(&headers, &plain), ["planted"]);
     }
 
     #[test]

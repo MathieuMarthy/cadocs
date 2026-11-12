@@ -378,29 +378,45 @@ async fn a_download_needs_one_readable_page_that_references_the_file() {
 }
 
 #[tokio::test]
-async fn an_editor_of_a_referencing_page_deletes_the_file_for_every_page() {
+async fn a_delete_needs_an_editor_of_every_page_that_references_the_file() {
     let wiki = wiki().await;
     let closed = wiki.page(&wiki.space(Value::Null).await).await;
     let read_only = wiki.page(&wiki.space(json!("viewer")).await).await;
-    let editable = wiki.page(&wiki.space(json!("editor")).await).await;
+    let editable_space = wiki.space(json!("editor")).await;
+    let editable = wiki.page(&editable_space).await;
     let attachment = wiki.attach(&closed, "a.txt", "text/plain", b"x").await;
+    let reference = |page: &str| {
+        format!("INSERT INTO attachment_refs (attachment_id, page_id) VALUES ('{attachment}', '{page}')")
+    };
 
     assert_eq!(wiki.delete(&wiki.bob, &attachment).await.status, 404);
-    wiki.api
-        .sql(&format!(
-            "INSERT INTO attachment_refs (attachment_id, page_id) VALUES ('{attachment}', '{read_only}')"
-        ))
-        .await;
+    wiki.api.sql(&reference(&read_only)).await;
     let reply = wiki.delete(&wiki.bob, &attachment).await;
     assert_eq!((reply.status, reply.code()), (403, "forbidden"));
     assert_eq!(wiki.delete(&wiki.eve, &attachment).await.status, 404);
 
+    // Pasted into a page Bob edits, the file stays out of his reach in the pages he only reads
+    // or cannot see.
+    wiki.api.sql(&reference(&editable)).await;
+    let reply = wiki.delete(&wiki.bob, &attachment).await;
+    assert_eq!((reply.status, reply.code()), (403, "forbidden"));
+    assert!(wiki.file(&attachment).exists());
+
+    // A page in the trash counts: restoring it must find its file.
+    let mine = wiki.attach(&editable, "b.txt", "text/plain", b"y").await;
+    let trashed = wiki.page(&editable_space).await;
     wiki.api
         .sql(&format!(
-            "INSERT INTO attachment_refs (attachment_id, page_id) VALUES ('{attachment}', '{editable}')"
+            "INSERT INTO attachment_refs (attachment_id, page_id) VALUES ('{mine}', '{trashed}')"
         ))
         .await;
-    let reply = wiki.delete(&wiki.bob, &attachment).await;
+    let path = format!("/pages/{trashed}");
+    let reply = wiki.api.raw("DELETE", &path, &wiki.ada.headers(), b"").await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    let reply = wiki.delete(&wiki.bob, &mine).await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+
+    let reply = wiki.delete(&wiki.ada, &attachment).await;
     assert_eq!(reply.status, 204, "{reply:?}");
     assert_eq!(wiki.attachments().await, 0);
     assert_eq!(

@@ -502,7 +502,7 @@ async fn an_upgrade_is_refused_for_who_has_no_place_there() {
     assert_eq!(wiki.refusal("", &wiki.ada).await, 404);
 
     let nobody = Login {
-        cookie: "session=nothing".to_owned(),
+        cookie: format!("{}=nothing", common::COOKIE),
         ..wiki.ada.clone()
     };
     assert_eq!(wiki.refusal(&query, &nobody).await, 401);
