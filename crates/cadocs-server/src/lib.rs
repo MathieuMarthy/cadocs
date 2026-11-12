@@ -56,6 +56,8 @@ pub struct AppState<S, A> {
     pub attachments: AttachmentLimits,
     /// Shared by the routes that check or hash a password.
     pub password_guesses: Arc<RateLimiter>,
+    /// What first-run setup needs, new at each start and shown only in the log (ADR 0021).
+    pub setup_code: Arc<str>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
     sockets: watch::Sender<()>,
     /// Wakes the recheck of every socket.
@@ -74,6 +76,7 @@ impl<S, A> Clone for AppState<S, A> {
             files: self.files.clone(),
             attachments: self.attachments,
             password_guesses: self.password_guesses.clone(),
+            setup_code: self.setup_code.clone(),
             sockets: self.sockets.clone(),
             access: self.access.clone(),
         }
@@ -103,6 +106,10 @@ impl<S, A> AppState<S, A> {
                 api::auth::GUESS_BURST,
                 api::auth::GUESS_REFILL,
             )),
+            // Without a random source no session could start either.
+            setup_code: session::new_token()
+                .expect("the system's random source")
+                .into(),
             sockets: watch::Sender::new(()),
             access: Arc::default(),
         }

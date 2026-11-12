@@ -97,6 +97,18 @@ export class TestServer {
     return response;
   }
 
+  /** The setup code the server logged at its last start, which first-run setup needs (ADR 0021). */
+  async setupCode() {
+    const until = Date.now() + STARTUP_MS;
+    while (Date.now() < until) {
+      const codes = [...this.log.matchAll(/\/setup\/([0-9a-f]{64})\b/g)];
+      const last = codes.at(-1)?.[1];
+      if (last) return last;
+      await new Promise((done) => setTimeout(done, 20));
+    }
+    throw new Error(`no setup link in the log:\n${this.log}`);
+  }
+
   /** First run, then a space to put pages in. Every client of a test uses this one account. */
   private async setUp(): Promise<Login> {
     const response = await this.post("/auth/setup", {
@@ -104,6 +116,7 @@ export class TestServer {
       name: "Ada",
       password: PASSWORD,
       workspace_name: "Tests",
+      code: await this.setupCode(),
     });
     const token = /^session=([^;]*)/.exec(response.headers.getSetCookie()[0] ?? "")?.[1];
     if (!token) throw new Error("no session cookie");

@@ -4,7 +4,7 @@
 mod common;
 
 use cadocs_store::{AccountStore, NewSession, StoreError, UpdateBasis, UserChanges};
-use common::{Api, Login, ORIGIN, PASSWORD, logged_in, start, start_with};
+use common::{Api, COOKIE, Login, ORIGIN, PASSWORD, logged_in, start, start_with};
 use serde_json::{Value, json};
 
 const FIVE_MINUTES_MS: i64 = 5 * 60 * 1000;
@@ -83,6 +83,7 @@ async fn setup_names_the_fields_it_refuses() {
     assert_eq!(
         reply.body["error"]["fields"],
         json!({
+            "code": "required",
             "email": "invalid",
             "name": "required",
             "password": "too_short",
@@ -92,12 +93,52 @@ async fn setup_names_the_fields_it_refuses() {
     assert_eq!(api.number("SELECT count(*) FROM users").await, 0);
 }
 
+/// Whoever reaches a new instance first must not become its admin: setup needs the code that
+/// only the server's log shows.
+#[tokio::test]
+async fn setup_needs_the_code_of_the_log() {
+    let api = start().await;
+    assert_eq!(api.setup_code.len(), 64);
+    let body = |code: Option<&str>| {
+        let mut body = json!({
+            "email": "eve@example.org",
+            "name": "Eve",
+            "password": PASSWORD,
+            "workspace_name": "Mine",
+        });
+        if let Some(code) = code {
+            body["code"] = json!(code);
+        }
+        body
+    };
+    let other = "0".repeat(64);
+    let tries = [
+        (None, "required"),
+        (Some(""), "required"),
+        (Some(other.as_str()), "wrong"),
+        (Some(&api.setup_code[..63]), "wrong"),
+    ];
+    for (code, problem) in tries {
+        let reply = api.send("POST", "/auth/setup", &[], body(code)).await;
+        assert_eq!(reply.status, 400, "{code:?}");
+        assert_eq!(reply.body["error"]["fields"], json!({ "code": problem }));
+        assert!(reply.header("set-cookie").is_none());
+    }
+    assert_eq!(api.number("SELECT count(*) FROM users").await, 0);
+
+    let code = api.setup_code.clone();
+    let reply = api.send("POST", "/auth/setup", &[], body(Some(&code))).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let reply = api.send("POST", "/auth/setup", &[], body(None)).await;
+    assert_eq!(reply.status, 409, "{reply:?}");
+}
+
 #[tokio::test]
 async fn the_cookie_has_the_flags_of_the_api_guide() {
     let api = start().await;
     let reply = api.setup().await;
     let cookie = reply.header("set-cookie").unwrap();
-    assert!(cookie.starts_with("session="), "{cookie}");
+    assert!(cookie.starts_with(&format!("{COOKIE}=")), "{cookie}");
     for flag in [
         "HttpOnly",
         "Secure",
@@ -120,7 +161,7 @@ async fn plain_http_drops_the_secure_flag() {
 #[tokio::test]
 async fn only_a_hash_of_the_token_is_stored() {
     let (api, login) = logged_in().await;
-    let token = login.cookie.strip_prefix("session=").unwrap();
+    let token = login.cookie.strip_prefix(&format!("{COOKIE}=")).unwrap();
     let stored: String = sqlx::query_scalar("SELECT token_hash FROM sessions")
         .fetch_one(&api.db)
         .await
@@ -168,8 +209,9 @@ async fn no_valid_cookie_means_401() {
     let invalid = "0".repeat(64);
     for cookie in [
         String::new(),
-        "session=".to_owned(),
-        "session=nonsense".to_owned(),
+        format!("{COOKIE}="),
+        format!("{COOKIE}=nonsense"),
+        format!("{COOKIE}={invalid}"),
         format!("session={invalid}"),
         format!("other={invalid}"),
     ] {
@@ -240,7 +282,7 @@ async fn logout_ends_the_session_and_clears_the_cookie() {
         .await;
     assert_eq!(reply.status, 204, "{reply:?}");
     let cookie = reply.header("set-cookie").unwrap();
-    assert!(cookie.starts_with("session=;"), "{cookie}");
+    assert!(cookie.starts_with(&format!("{COOKIE}=;")), "{cookie}");
     assert!(cookie.contains("Max-Age=0"), "{cookie}");
     assert_eq!(api.session(&login).await.status, 401);
     assert_eq!(api.number("SELECT count(*) FROM sessions").await, 0);
@@ -561,9 +603,12 @@ async fn a_disabled_owner_does_not_count_as_another_owner() {
     assert_eq!(reply.status, 409, "{reply:?}");
 }
 
+/// Over HTTPS the `__Host-` name keeps other hosts out, so this matters over plain HTTP.
 #[tokio::test]
 async fn a_same_named_cookie_of_another_app_does_not_hide_ours() {
-    let (api, login) = logged_in().await;
+    let api = start_with("http://127.0.0.1:3000", "").await;
+    let login = Login::from(&api.setup().await);
+    assert!(login.cookie.starts_with("session="), "{}", login.cookie);
     let invalid = "0".repeat(64);
     let cookie = format!("session={invalid}; {}", login.cookie);
     let reply = api
@@ -635,7 +680,7 @@ async fn a_login_checked_against_an_old_password_opens_no_session() {
 async fn a_change_checked_against_an_old_password_is_refused() {
     let (api, login) = logged_in().await;
     let (id, hash) = stored_user(&api).await;
-    let token = login.cookie.strip_prefix("session=").unwrap();
+    let token = login.cookie.strip_prefix(&format!("{COOKIE}=")).unwrap();
     let session = cadocs_server::session::token_hash(token);
     let changes = UserChanges {
         password_hash: Some("new hash".to_owned()),

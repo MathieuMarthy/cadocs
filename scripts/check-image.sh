@@ -35,9 +35,12 @@ setup_required() {
 
 serve "$name-data"
 [ "$(setup_required)" = '{"required":true}' ] || { echo "setup should be pending" >&2; exit 1; }
+# The server logs the link to setup, with the code that setup needs (ADR 0021).
+code=$(docker logs "$name" 2>&1 | grep -o '/setup/[0-9a-f]\{64\}' | tail -n 1 | cut -d / -f 3)
+[ -n "$code" ] || { docker logs "$name"; echo "no setup link in the log" >&2; exit 1; }
 status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/api/v1/auth/setup" \
     -H "Origin: $url" -H 'Content-Type: application/json' \
-    -d '{"email":"ada@example.org","name":"Ada","password":"correct horse battery","workspace_name":"Acme"}')
+    -d '{"email":"ada@example.org","name":"Ada","password":"correct horse battery","workspace_name":"Acme","code":"'"$code"'"}')
 [ "$status" = 201 ] || { docker logs "$name"; echo "setup answered $status" >&2; exit 1; }
 
 docker exec "$name" cadocs backup /home/nonroot/one

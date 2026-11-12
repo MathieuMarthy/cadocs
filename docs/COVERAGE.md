@@ -14,6 +14,7 @@ Paths are short: `server/auth.rs` is `crates/cadocs-server/tests/auth.rs`, `e2e/
 | Trashed space and page | `trashed_space_denies_everything_but_its_restoration`, `trashed_page_is_absent_…` | `server/matrix.rs` `a_trashed_space_denies_everything_but_its_restoration`, `server/pages.rs` |
 | Move across spaces | `move_needs_editor_on_both_spaces_of_one_workspace` | `server/pages.rs`, `server/events.rs` |
 | Attachment download | `download_needs_one_readable_referencing_page` | `server/attachments.rs` `a_download_needs_one_readable_page_that_references_the_file` |
+| Attachment delete | `delete_needs_an_editor_of_every_referencing_page` | `server/attachments.rs` `a_delete_needs_an_editor_of_every_page_that_references_the_file` |
 | Workspace actions | `workspace_matrix`, `owner_rows_are_needed_to_touch_an_owner`, `a_workspace_keeps_one_owner` | `server/workspaces.rs` (update, delete, members, invitations, last owner), `server/matrix.rs` (reads, search, events socket, space creation) |
 | Instance actions | `instance_matrix`, `an_instance_keeps_one_enabled_admin` | `server/admin.rs`, `server/workspaces.rs` `only_an_instance_admin_creates_a_workspace_and_they_own_it`, `server/auth.rs` (own account) |
 | Reacting to changes, page sockets | `recompute_keeps_or_closes_the_socket` and the two after it | `server/socket_closes.rs`, one test per trigger and outcome |
@@ -25,7 +26,7 @@ Comments, public shares, groups and plugins have no route before V1 or V2: their
 
 | Item | Tests |
 | --- | --- |
-| Accounts, sessions, invitation and reset links | `server/auth.rs`, `server/admin.rs` (reset links), `server/workspaces.rs` (invitations), `server/cli.rs` (`reset-password`), `e2e/shell` (setup, login, invitation, reset) |
+| Accounts, sessions, invitation and reset links | `server/auth.rs` (with the setup code of ADR 0021), `server/admin.rs` (reset links), `server/workspaces.rs` (invitations), `server/cli.rs` (`reset-password`), `session.rs` unit tests (the `__Host-` cookie), `e2e/shell` (setup with and without the link, login, invitation, reset) |
 | Instance administration | `server/admin.rs`, `e2e/shell` `instance administration lists, disables and promotes users`, `e2e/screens` |
 | Workspaces, spaces, tree, trash, recent pages | `server/workspaces.rs`, `server/spaces.rs`, `server/pages.rs`, `server/jobs.rs` (trash purge), `e2e/navigation`, `e2e/settings` |
 | Per-space roles | Permission matrix above, `e2e/settings` (grants and roles while a page is open), `e2e/editor` (read-only viewer) |

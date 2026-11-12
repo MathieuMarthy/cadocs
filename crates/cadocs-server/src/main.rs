@@ -11,7 +11,7 @@ use cadocs_server::assets::WebAssets;
 use cadocs_server::cli::{self, Command};
 use cadocs_server::config::{Config, FileStoreConfig};
 use cadocs_server::password::Passwords;
-use cadocs_server::session::new_password_reset;
+use cadocs_server::session::{new_password_reset, setup_link};
 use cadocs_server::{AppState, backup, data_dir, serve, start_jobs};
 use cadocs_store::{AccountStore, DocStore, SqliteStore};
 use tokio::net::TcpListener;
@@ -146,6 +146,11 @@ async fn run(config: Config) -> anyhow::Result<()> {
         .await
         .with_context(|| format!("cannot listen on {}", config.bind))?;
     tracing::info!(address = %config.bind, "listening");
+    // The only place the code shows, so whoever reaches the instance first cannot claim it.
+    if !state.store.has_users().await? {
+        let link = setup_link(&state.http.public_url, &state.setup_code);
+        tracing::warn!("first-run setup is pending: open {link} to create the first account");
+    }
     serve::<_, _, WebAssets>(listener, state, shutdown_signal()).await
 }
 

@@ -59,7 +59,7 @@ A workspace always keeps at least one owner. Any change that would remove the la
 - **Move across spaces:** needs `editor` on both spaces. A move across workspaces is refused.
 - **Trashed space:** every action is denied except restoring it, for a space `admin`, who also finds it in the list of trashed spaces of the workspace.
 - **Trashed page:** it behaves as absent for all actions except listing the trash, restoring and purging.
-- **Attachments:** a download needs read access to at least one page that references the file ([DATA_MODEL.md](DATA_MODEL.md#attachments)).
+- **Attachments:** a download needs read access to at least one page that references the file ([DATA_MODEL.md](DATA_MODEL.md#attachments)). A delete removes the file from every page that references it, so it needs `editor` on each of them, a page in the trash included. An attachment id works as a key inside its workspace: an editor who learns one can paste it into a page they edit, and the indexing job then lets that page's readers download the file. Ids are random and only shown to readers of a referencing page, who could keep the file anyway, so this is accepted (step 24).
 - **Public shares** bypass these rules for rendered content only (ADR 0009).
 
 ## Instance actions

@@ -326,6 +326,14 @@ pub fn download_allowed(referencing_pages: impl IntoIterator<Item = Scope>) -> b
         .any(|page| page.allows(SpaceAction::ReadPage))
 }
 
+/// A delete removes the file from every page that references it, so it needs the role that
+/// uploads on each of them. A page in the trash counts: restoring it must find its file.
+pub fn delete_allowed(referencing_pages: impl IntoIterator<Item = Scope>) -> bool {
+    let needed = SpaceAction::ManageAttachments.required_role();
+    let mut pages = referencing_pages.into_iter().peekable();
+    pages.peek().is_some() && pages.all(|page| page.role.is_some_and(|role| role >= needed))
+}
+
 /// The mode a page socket opens in, `None` when it must not open.
 pub fn page_socket_mode(scope: Scope) -> Option<SocketMode> {
     if scope.allows(SpaceAction::OpenSocketReadWrite) {

@@ -56,6 +56,8 @@ use yrs::{Doc, GetString, ReadTxn, StateVector, Text, Transact, Update};
 type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 const PUBLIC_ORIGIN: &str = "https://wiki.example.org";
+/// The session cookie's name over HTTPS.
+const COOKIE: &str = "__Host-session";
 const TOKEN: &str = "token";
 
 #[derive(Embed)]
@@ -793,7 +795,7 @@ impl Running {
     fn request(&self, doc: &str) -> WsRequest {
         let url = format!("ws://{}/ws/pages/{doc}", self.addr);
         let mut request = url.into_client_request().unwrap();
-        let cookie = format!("session={TOKEN}").parse().unwrap();
+        let cookie = format!("{COOKIE}={TOKEN}").parse().unwrap();
         request.headers_mut().insert(header::COOKIE, cookie);
         request
     }
@@ -936,7 +938,7 @@ async fn open_session(state: &AppState<FlakyStore, Fixed>, last_seen_at: i64) ->
             .await
             .unwrap()
     );
-    "session=other".to_owned()
+    format!("{COOKIE}=other")
 }
 
 async fn get_session(state: AppState<FlakyStore, Fixed>, cookie: &str) -> axum::response::Response {
@@ -1508,7 +1510,7 @@ async fn a_rename_that_waits_for_its_room_checks_the_role_again() {
     let registry = state.registry.clone();
     store.hold_load.store(true, Ordering::SeqCst);
     let request = Request::patch("/api/v1/pages/doc")
-        .header(header::COOKIE, format!("session={TOKEN}"))
+        .header(header::COOKIE, format!("{COOKIE}={TOKEN}"))
         .header("x-csrf-token", csrf_token(TOKEN))
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(r#"{"title":"Too late"}"#))

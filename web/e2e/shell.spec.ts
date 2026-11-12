@@ -23,17 +23,27 @@ test("first run goes from setup to an empty workspace, and login comes back to i
   page,
   server,
 }) => {
+  const fill = async (password: string) => {
+    await page.getByLabel("name", { exact: true }).fill("Ada");
+    await page.getByLabel("email").fill("ada@example.org");
+    await page.getByLabel("password").fill(password);
+    await page.getByLabel("workspace name").fill("Acme Docs");
+  };
   await page.goto(server.url);
   await expect(page).toHaveURL(`${server.url}/setup`);
 
-  await page.getByLabel("name", { exact: true }).fill("Ada");
-  await page.getByLabel("email").fill("ada@example.org");
-  await page.getByLabel("password").fill("short");
-  await page.getByLabel("workspace name").fill("Acme Docs");
+  // Without the link of the server's log, the page asks for its code.
+  await page.getByLabel("setup code").fill("0".repeat(64));
+  await fill("short");
   await page.getByRole("button", { name: "create workspace" }).click();
-  await expect(page.getByRole("alert")).toContainText("too short");
+  await expect(page.getByRole("alert").filter({ hasText: "wrong" })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "too short" })).toBeVisible();
 
-  await page.getByLabel("password").fill(PASSWORD);
+  const code = await server.setupCode();
+  await page.goto(`${server.url}/setup/${code}`);
+  await expect(page.getByRole("button", { name: "create workspace" })).toBeVisible();
+  await expect(page.getByLabel("setup code")).toHaveCount(0);
+  await fill(PASSWORD);
   await page.getByRole("button", { name: "create workspace" }).click();
   await expect(page).toHaveURL(`${server.url}/w/acme-docs`);
   await expect(page.getByRole("heading", { name: "Acme Docs" })).toBeVisible();
@@ -91,6 +101,7 @@ test("setup taken by someone else leads to login", async ({ page, server }) => {
   await expect(page.getByRole("button", { name: "create workspace" })).toBeVisible();
   await server.session();
 
+  await page.getByLabel("setup code").fill(await server.setupCode());
   await page.getByLabel("name", { exact: true }).fill("Eve");
   await page.getByLabel("email").fill("eve@example.org");
   await page.getByLabel("password").fill(PASSWORD);
