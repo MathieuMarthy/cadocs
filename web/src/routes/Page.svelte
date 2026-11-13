@@ -4,7 +4,7 @@
   import Menu, { type MenuItem } from "../components/Menu.svelte";
   import Shell from "../components/Shell.svelte";
   import { openPage } from "../editor/collab";
-  import { copy, pageLink, trashPage } from "../lib/actions";
+  import { copy, pageLink, showPage, trashPage } from "../lib/actions";
   import { api, ApiError, exportUrl } from "../lib/api";
   import { describe } from "../lib/form.svelte";
   import { acquireNav, canEdit, lastWorkspace, type Nav, type PageView } from "../lib/nav.svelte";
@@ -68,6 +68,18 @@
   });
 
   const shownTitle = $derived(name || row?.title || "untitled");
+
+  // A trash from the tree must know whether it takes this page away, through an ancestor too.
+  const path = $derived([...(row?.ancestors ?? []).map((crumb) => crumb.id), id]);
+  $effect(() => showPage(path));
+
+  /** Where to go from a page that went: its parent, or its workspace for a page at the root. */
+  const wayOut = $derived.by(() => {
+    if (!row) return null;
+    if (row.parent_id) return { href: `/?page=${row.parent_id}`, label: "open the parent page" };
+    const home = known(row.workspace_id);
+    return home ? { href: `/w/${home.slug}`, label: "open the workspace" } : null;
+  });
 
   /** The top bar's menu: copy link, history, export and print for anyone, move to trash for those who may write. */
   const actions = $derived.by<MenuItem[]>(() => {
@@ -200,7 +212,11 @@
 </script>
 
 {#if gone}
-  <Message title={gone} />
+  {#if wayOut && gone !== "access revoked"}
+    <Message title={gone}><a class="button" href={wayOut.href}>{wayOut.label}</a></Message>
+  {:else}
+    <Message title={gone} />
+  {/if}
 {:else if !showing}
   <Shell title="loading…" {workspace} guess={false} crumbWorkspace={false}>
     <p class="meta" role="status">loading…</p>

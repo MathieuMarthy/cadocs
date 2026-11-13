@@ -476,6 +476,9 @@ test.describe("an open page reacts to its socket closing", () => {
     await server.call("DELETE", `/pages/${await server.page("doc")}`);
     await expect(page.getByRole("heading", { name: "page deleted" })).toBeVisible();
     await expect(page.getByLabel("page content")).toHaveCount(0);
+    // A page at the root of its space has no parent: the way out is its workspace.
+    await page.getByRole("link", { name: "open the workspace" }).click();
+    await expect(page).toHaveURL(`${server.url}/w/tests`);
   });
 
   test("a page opens even when REST fails for a moment", async ({ page, server }) => {

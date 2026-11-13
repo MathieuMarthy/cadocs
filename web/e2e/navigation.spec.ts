@@ -346,10 +346,12 @@ test("a page trashed while open comes back with undo, and the notice then goes",
   // The page opened its space in the tree.
   await expect(pageLink(page, "Open one")).toBeVisible();
 
+  // A page at the root of its space leaves for the workspace, and undo brings it back.
   await pick(page, "Open one", "move to trash");
-  await expect(page.getByRole("heading", { name: "page deleted" })).toBeVisible();
+  await expect(page).toHaveURL(`${server.url}/w/tests`);
   const notice = page.getByRole("status").filter({ hasText: "moved to trash" });
   await notice.getByRole("button", { name: "undo" }).click();
+  await expect(page).toHaveURL(`${server.url}/?page=${id}`);
   await expect(page.getByLabel("page title")).toHaveValue("Open one");
 
   // Focus given to undo does not hold the notice: it leaves on its own.
@@ -365,6 +367,76 @@ async function nested(server: TestServer) {
   const deploy = await newPage(server, "Deploy", runbooks);
   return { runbooks, deploy };
 }
+
+test("a page trashed from its top bar leaves for its parent, and undo comes back", async ({
+  page,
+  server,
+}) => {
+  const { runbooks, deploy } = await nested(server);
+  await asOwner(page, server);
+  await page.goto(`${server.url}/?page=${deploy}`);
+  await expect(page.getByRole("banner").getByRole("status")).toContainText("synced");
+
+  const banner = page.getByRole("banner");
+  await banner.getByRole("button", { name: "more actions for Deploy" }).click();
+  await page.getByRole("menuitem", { name: "move to trash" }).click();
+  await expect(page).toHaveURL(`${server.url}/?page=${runbooks}`);
+  await expect(page.getByLabel("page title")).toHaveValue("Runbooks");
+  await expect(page.getByRole("heading", { name: /page (not found|deleted)/ })).toHaveCount(0);
+
+  const notice = page.getByRole("status").filter({ hasText: "moved to trash" });
+  await notice.getByRole("button", { name: "undo" }).click();
+  await expect(page).toHaveURL(`${server.url}/?page=${deploy}`);
+  await expect(page.getByLabel("page title")).toHaveValue("Deploy");
+});
+
+test("undo after going back to the trashed page opens it again", async ({ page, server }) => {
+  const { runbooks, deploy } = await nested(server);
+  await asOwner(page, server);
+  await page.goto(`${server.url}/?page=${deploy}`);
+  await expect(page.getByRole("banner").getByRole("status")).toContainText("synced");
+
+  const banner = page.getByRole("banner");
+  await banner.getByRole("button", { name: "more actions for Deploy" }).click();
+  await page.getByRole("menuitem", { name: "move to trash" }).click();
+  await expect(page).toHaveURL(`${server.url}/?page=${runbooks}`);
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "page not found" })).toBeVisible();
+
+  const notice = page.getByRole("status").filter({ hasText: "moved to trash" });
+  await notice.getByRole("button", { name: "undo" }).click();
+  await expect(page.getByLabel("page title")).toHaveValue("Deploy");
+});
+
+test("an ancestor trashed from the tree takes the open page with it to its own parent", async ({
+  page,
+  server,
+}) => {
+  const { deploy } = await nested(server);
+  await asOwner(page, server);
+  await page.goto(`${server.url}/?page=${deploy}`);
+  await expect(pageLink(page, "Runbooks/")).toBeVisible();
+
+  await pick(page, "Runbooks", "move to trash");
+  await expect(page).toHaveURL(`${server.url}/w/tests`);
+  const notice = page.getByRole("status").filter({ hasText: "moved to trash" });
+  await notice.getByRole("button", { name: "undo" }).click();
+  await expect(page).toHaveURL(`${server.url}/?page=${deploy}`);
+  await expect(page.getByLabel("page title")).toHaveValue("Deploy");
+});
+
+test("a page trashed elsewhere offers its parent", async ({ page, server }) => {
+  const { runbooks, deploy } = await nested(server);
+  await asOwner(page, server);
+  await page.goto(`${server.url}/?page=${deploy}`);
+  await expect(page.getByRole("banner").getByRole("status")).toContainText("synced");
+
+  await server.call("DELETE", `/pages/${deploy}`);
+  await expect(page.getByRole("heading", { name: "page deleted" })).toBeVisible();
+  await page.getByRole("link", { name: "open the parent page" }).click();
+  await expect(page).toHaveURL(`${server.url}/?page=${runbooks}`);
+  await expect(page.getByLabel("page title")).toHaveValue("Runbooks");
+});
 
 test("on a phone, a nested page opens from the drawer", async ({ page, server }) => {
   const { deploy } = await nested(server);
