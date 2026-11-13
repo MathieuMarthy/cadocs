@@ -1,5 +1,4 @@
 use std::env;
-use std::ffi::c_int;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,7 +9,7 @@ use cadocs_server::api::auth::normalize_email;
 use cadocs_server::assets::WebAssets;
 use cadocs_server::cli::{self, Command};
 use cadocs_server::config::{Config, FileStoreConfig};
-use cadocs_server::password::Passwords;
+use cadocs_server::memory;
 use cadocs_server::session::{new_password_reset, setup_link};
 use cadocs_server::{AppState, backup, data_dir, serve, start_jobs};
 use cadocs_store::{AccountStore, DocStore, SqliteStore};
@@ -23,16 +22,11 @@ const WORKER_THREADS: usize = 2;
 const MAX_BLOCKING_THREADS: usize = 4;
 /// The default made explicit: only the pages a thread touches count towards RSS.
 const THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
-/// Rooms left idle together unload together, and one trim is enough for all of them. So is one
-/// for a burst of logins.
+/// Rooms left idle together unload together, and one trim is enough for all of them.
 const TRIM_DELAY: Duration = Duration::from_secs(5);
 
-unsafe extern "C" {
-    /// glibc, the only C library cadocs targets (`docs/OPERATIONS.md`).
-    fn malloc_trim(pad: usize) -> c_int;
-}
-
 fn main() -> anyhow::Result<()> {
+    memory::fix_mmap_threshold();
     // First, so a mistyped command is not answered with a missing setting.
     let command = cli::parse(env::args_os().skip(1))?;
     let config = Config::from_env()?;
@@ -142,7 +136,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
         files,
         config.attachments,
     );
-    tokio::spawn(return_freed_memory(registry, state.passwords.clone()));
+    tokio::spawn(return_freed_memory(registry));
     start_jobs(&state, config.jobs);
 
     let listener = TcpListener::bind(config.bind)
@@ -158,17 +152,11 @@ async fn run(config: Config) -> anyhow::Result<()> {
 }
 
 /// glibc keeps what an unloaded room frees, because the free blocks sit below live ones (ADR 0015).
-/// It keeps the 19 MB of a password hash too, as its mmap threshold grows after the first one.
-async fn return_freed_memory<S: DocStore>(registry: DocRegistry<S>, passwords: Arc<Passwords>) {
+async fn return_freed_memory<S: DocStore>(registry: DocRegistry<S>) {
     loop {
-        tokio::select! {
-            () = registry.room_unloaded() => {}
-            () = passwords.hash_finished() => {}
-        }
+        registry.room_unloaded().await;
         sleep(TRIM_DELAY).await;
-        // Blocking: it walks each heap with that arena locked.
-        // SAFETY: takes no pointer, and glibc locks each arena itself.
-        let _ = spawn_blocking(|| unsafe { malloc_trim(0) }).await;
+        let _ = spawn_blocking(memory::trim).await;
     }
 }
 

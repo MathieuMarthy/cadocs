@@ -45,7 +45,7 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `thiserror` | Typed errors in the library crates | None | None |
 | `anyhow` | Error context in the binary and tools | None | Low |
 | `serde` (`derive` in the server), `serde_json` | Checking that awareness states are JSON, and the REST bodies. Already pulled in by yrs | None extra | None extra |
-| `argon2` (`alloc`, `getrandom`, `password-hash`) | Password hashing at OWASP settings | 19 MB per hash, one at a time, returned by a trim (ADR 0015) | With the next two rows, 0.4 MB in all, routes included |
+| `argon2` (`alloc`, `getrandom`, `password-hash`) | Password hashing at OWASP settings | 19 MB per hash, one at a time, unmapped when it ends (ADR 0023) | With the next two rows, 0.4 MB in all, routes included |
 | `sha2`, `subtle`, `getrandom` | Session tokens, their hash and constant-time CSRF comparison. `sha2` and `getrandom` were already in the tree through `rust-embed` and `tempfile` | None | See `argon2` |
 | `uuid` (`std`, `v7`) | Sortable ids | None | See `argon2` |
 | `pulldown-cmark` (no default features), MIT | Markdown import in `cadocs-content` (ADR 0008). Its `html` and `getopts` features are off: HTML comes from the AST, and there is no binary | Low: a pull parser, nothing kept after an import | Low. In the server since step 18 |

@@ -44,4 +44,4 @@ Comments, public shares, groups and plugins have no route before V1 or V2: their
 | Backup and restore | `server/backup.rs`, `scripts/check-image.sh` |
 | `OPERATIONS.md` complete | A document, checked by reading in step 21 |
 
-Not automated: the RAM targets (step 23, `bench/rss.sh`), and the release workflow as a whole, which runs on a tag.
+Not automated: the RAM targets (step 23, `bench/rss.sh`), except that a hash's memory goes back with no trim (`server/hash_memory.rs`, ADR 0023), and the release workflow as a whole, which runs on a tag.
