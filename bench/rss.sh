@@ -5,6 +5,7 @@
 #   bench/rss.sh build                build the servers and the load tool
 #   bench/rss.sh run [out-dir]        build, then the scenario with each allocator
 #   bench/rss.sh extras [out-dir]     per-socket cost and load peak, outside the scenario
+#   bench/rss.sh mvp [out-dir]        build, then the MVP scenario
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -14,6 +15,15 @@ PORT=${CADOCS_BENCH_PORT:-3917}
 ROOM_IDLE_SECS=60 # the default of CADOCS_ROOM_IDLE_SECS
 # mimalloc was measured and dropped: see ADR 0015.
 ALLOCATORS=(glibc glibc-arena2)
+# The MVP scenario, in docs/ARCHITECTURE.md.
+MVP_PAGES=10000
+MVP_FANOUT=20
+MVP_USERS=30
+MVP_IDLE_SECS=45
+MAX_ROOMS=256 # the default of CADOCS_MAX_ROOMS
+# Set by the MVP: whether to pin the server to one CPU, and settings added to the defaults.
+PIN=false
+EXTRA_ENV=()
 
 # Prints: label rss pss anonymous peak, all in KiB.
 read_measures() {
@@ -41,8 +51,15 @@ start_server() {
     local arena=()
     if [[ $allocator == glibc-arena2 ]]; then arena=(MALLOC_ARENA_MAX=2); fi
     # `-i`: the scenario uses default settings, whatever this shell exports.
-    env -i "${arena[@]}" CADOCS_DATA_DIR="$DATA_DIR" CADOCS_BIND="127.0.0.1:$PORT" \
-        CADOCS_PUBLIC_URL="http://127.0.0.1:$PORT" \
+    local pin=()
+    # The first CPU this shell may use now: the list can change during a run, and CPU 0 is not
+    # always in it.
+    if $PIN; then
+        pin=(taskset -c "$(awk '$1 == "Cpus_allowed_list:" { split($2, a, /[,-]/); print a[1] }' /proc/self/status)")
+    fi
+    # `taskset` and `env` exec the server, so `$!` is its pid.
+    "${pin[@]}" env -i "${arena[@]}" "${EXTRA_ENV[@]}" CADOCS_DATA_DIR="$DATA_DIR" \
+        CADOCS_BIND="127.0.0.1:$PORT" CADOCS_PUBLIC_URL="http://127.0.0.1:$PORT" \
         target/release/cadocs >>"$WORK/server.log" 2>&1 &
     SERVER_PID=$!
     for _ in $(seq 100); do
@@ -134,13 +151,67 @@ extras() {
     done
 }
 
+# The MVP scenario. Its databases take about 1 GB, so they stay on disk in the output folder, not
+# in a /tmp that may be held in RAM.
+mvp() {
+    OUT_DIR=$1
+    build
+    mkdir -p "$OUT_DIR"
+    local out="$OUT_DIR/mvp.txt" url="ws://127.0.0.1:$PORT"
+    WORK=$(mktemp -d -p "$OUT_DIR")
+    trap clean_up EXIT
+    PIN=true
+    EXTRA_ENV=(CADOCS_TRUSTED_PROXIES=127.0.0.1)
+    local started=$SECONDS
+    seed "$WORK/mvp.db" "$MVP_PAGES" --users "$MVP_USERS" --fanout "$MVP_FANOUT" --index true
+    seed "$WORK/rooms.db" 0 --pages "$MAX_ROOMS"
+    echo "seeded in $((SECONDS - started)) s, $(du -m "$WORK/mvp.db" | cut -f1) MB" | tee "$OUT_DIR/mvp-seed.txt"
+    printf '%-24s %8s %8s %8s %8s\n' measure rss pss anon peak | tee "$out"
+
+    start_server glibc "$WORK/mvp.db"
+    sleep "$MVP_IDLE_SECS"
+    read_measures "$SERVER_PID" idle-users | tee -a "$out"
+    "$BENCH" load --url "$url" --docs "$MVP_USERS" --clients-per-doc 1 --users "$MVP_USERS" \
+        --events true --then "$SCRIPT read $SERVER_PID $MVP_USERS-users '$out'" 2>>"$out.load"
+    sleep $((ROOM_IDLE_SECS + 10))
+    read_measures "$SERVER_PID" "$MVP_USERS-users-unloaded" | tee -a "$out"
+    stop_server
+
+    start_server glibc "$WORK/mvp.db"
+    sleep "$MVP_IDLE_SECS"
+    read_measures "$SERVER_PID" idle-logins | tee -a "$out"
+    for peak in 1 2 3; do
+        if ((peak > 1)); then sleep 20; fi
+        "$BENCH" logins --url "$url" --users "$MVP_USERS" --forwarded true | tee -a "$out.logins"
+    done
+    sleep 10
+    read_measures "$SERVER_PID" after-login-peaks | tee -a "$out"
+    stop_server
+
+    start_server glibc "$WORK/mvp.db"
+    sleep "$MVP_IDLE_SECS"
+    read_measures "$SERVER_PID" idle-latency | tee -a "$out"
+    "$BENCH" latency --url "$url" --pages "$MVP_PAGES" --fanout "$MVP_FANOUT" \
+        | tee "$OUT_DIR/mvp-latency.txt"
+    read_measures "$SERVER_PID" after-latency | tee -a "$out"
+    stop_server
+
+    start_server glibc "$WORK/rooms.db"
+    sleep "$MVP_IDLE_SECS"
+    read_measures "$SERVER_PID" idle-empty-pages | tee -a "$out"
+    "$BENCH" load --url "$url" --docs "$MAX_ROOMS" --clients-per-doc 1 --duration-secs 0 \
+        --hold-secs 5 --then "$SCRIPT read $SERVER_PID $MAX_ROOMS-rooms '$out'" 2>>"$out.load"
+    stop_server
+}
+
 case ${1:-} in
     read) read_measures "$2" "$3" | tee -a "${4:-/dev/null}" ;;
     build) build ;;
     run) run "${2:-target/bench}" ;;
     extras) extras "${2:-target/bench}" ;;
+    mvp) mvp "${2:-target/bench}" ;;
     *)
-        sed -n 2,7p "$0"
+        sed -n 2,8p "$0"
         exit 1
         ;;
 esac
