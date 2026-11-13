@@ -154,7 +154,7 @@ test("the top bar menu of a page copies its link and moves it to trash", async (
   await banner.getByRole("button", { name: "more actions for Kept" }).click();
   await page.getByRole("menuitem", { name: "move to trash" }).click();
   await expect(notice(page)).toContainText("moved to trash");
-  await expect(page.getByRole("heading", { name: /page (not found|deleted)/ })).toBeVisible();
+  await expect(page).toHaveURL(`${server.url}/w/tests`);
   await notice(page).getByRole("button", { name: "undo" }).click();
   await expect(page.getByLabel("page title")).toHaveValue("Kept");
 });
