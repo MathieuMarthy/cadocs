@@ -82,6 +82,9 @@ Steps, one session each. Each step adds the migration for the tables it needs, a
 - [x] **Step 24:** Security review of auth, uploads and rendered HTML. Done when its findings are fixed or recorded.
 - [x] **Step 23b:** Remove `CADOCS_MAX_ROOMS`: step 23 found that the room budget and `CADOCS_MAX_SOCKETS` already bound what it bounds ([MVP results](ARCHITECTURE.md#mvp-results)). A short ADR, the setting gone from the configuration and `OPERATIONS.md` (a server that still gets it says it is ignored), eviction and `503` driven by the budget alone, and the tests that used the cap moved to the budget. Done when the collab tests pass without the cap and a page opens past 256 rooms of small documents.
 - [x] **Step 23a:** Give back the memory of password hashes (step 23 found that `malloc_trim` misses it, see [MVP results](ARCHITECTURE.md#mvp-results)). A new ADR chooses between a fixed mmap threshold set with `mallopt` at start, a single arena, or a hash block mapped by cadocs itself, measured on the login peaks. Done when the login peak phase of `bench/rss.sh mvp` ends at idle plus 10 MB or less.
+- [ ] **Step 25:** Leave a trashed page for its parent. Moving the shown page, or one of its ancestors, to the trash opens the parent, or the workspace when it has none, and `undo` opens the restored page again. A page deleted by someone else names its parent as a way out. Done when Playwright covers a trash from the top bar, from the tree on an ancestor, and from another browser.
+- [ ] **Step 26:** Any user creates a workspace (ADR). `POST /workspaces` needs a user, unless `CADOCS_WORKSPACE_CREATION=admins` keeps it to instance admins (default `all`). The `new workspace` form moves from the admin screen to the workspace switcher and to the screen of a user with no workspace. Done when the permission matrix covers both settings over REST and Playwright creates a workspace as a plain member.
+- [ ] **Step 27:** Motion. A `motion` section in [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) and its tokens: short, linear, no bounce, none under `prefers-reduced-motion`. It applies to opening and closing tree levels, menus, the notice and the confirm dialog. Done when each is animated, and a Playwright test with reduced motion finds no transition.
 
 The two weeks of daily use start once steps 23 and 24 are both done.
 
@@ -103,6 +106,8 @@ Steps keep their numbers, but this order wins over them: the next step is the fi
 | 7 | 22, 24 | Every feature step |
 | 8 | 23 | Everything, alone on a quiet machine |
 | 9 | 23a, 23b | 23. 23a alone on a quiet machine for its measure. Both touch the server's start and configuration |
+| 10 | 25, 26 | Feedback from daily use. Both touch the Svelte routes |
+| 11 | 27 | 25 and 26, since it touches the tree, the shell and their styles |
 
 Step 21 needs nothing left and fits any wave before 7. If it runs before step 17, its round trip test gains attachments afterwards, and `OPERATIONS.md` is finished at the end. Step 16 can start beside 14 and 15 for the AST and renderers, once the node list is fixed, but it only ends after 15.
 
