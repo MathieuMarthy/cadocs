@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use cadocs_collab::{CollabConfig, CollabError, DocRegistry};
+use cadocs_collab::{CollabConfig, CollabError, DocRegistry, ROOM_MIN_BYTES};
 use cadocs_core::permissions::SocketMode::ReadWrite;
 use cadocs_store::{DocEdit, DocStore, StoredUpdate};
 use common::{DOC, MemStore, Peer, config, title};
@@ -109,7 +109,7 @@ async fn a_full_registry_still_reads() {
     let store = MemStore::new();
     store_title(&store, "stored").await;
     let config = CollabConfig {
-        max_rooms: 1,
+        room_memory: ROOM_MIN_BYTES,
         ..config()
     };
     let registry = DocRegistry::new(store.clone(), config);

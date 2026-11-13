@@ -70,7 +70,11 @@ async fn run_seed(args: &Args) -> anyhow::Result<()> {
     let config = Seed {
         pages: args.number("pages", Some(docs))?,
         users: args.number("users", Some(defaults.users))?,
-        fanout: args.0.get("fanout").map(|_| args.number("fanout", None)).transpose()?,
+        fanout: args
+            .0
+            .get("fanout")
+            .map(|_| args.number("fanout", None))
+            .transpose()?,
         index: args.number("index", Some(false))?,
         seed: args.number("seed", Some(defaults.seed))?,
         compact_updates: (!args.number("keep-log", Some(false))?)
@@ -143,7 +147,11 @@ async fn run_latency(args: &Args) -> anyhow::Result<()> {
 async fn run_logins(args: &Args) -> anyhow::Result<()> {
     let url = args.text("url")?.to_owned();
     let config = LoginConfig {
-        origin: args.0.get("origin").cloned().unwrap_or_else(|| http_origin(&url)),
+        origin: args
+            .0
+            .get("origin")
+            .cloned()
+            .unwrap_or_else(|| http_origin(&url)),
         url,
         users: args.number("users", None)?,
         forwarded: args.number("forwarded", Some(false))?,

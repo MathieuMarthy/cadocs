@@ -91,10 +91,18 @@ async fn get_object(
     if !signed(&query) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let found = objects.lock().unwrap().get(&key).map(|(data, _)| data.clone());
+    let found = objects
+        .lock()
+        .unwrap()
+        .get(&key)
+        .map(|(data, _)| data.clone());
     match found {
         Some(data) => data.into_response(),
-        None => (StatusCode::NOT_FOUND, "<Error><Code>NoSuchKey</Code></Error>").into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            "<Error><Code>NoSuchKey</Code></Error>",
+        )
+            .into_response(),
     }
 }
 
@@ -144,7 +152,9 @@ async fn list(
     }
     if truncated {
         let last = page.last().unwrap().0;
-        xml.push_str(&format!("<NextContinuationToken>{last}</NextContinuationToken>"));
+        xml.push_str(&format!(
+            "<NextContinuationToken>{last}</NextContinuationToken>"
+        ));
     }
     xml.push_str("</ListBucketResult>");
     xml.into_response()
@@ -215,7 +225,10 @@ async fn contract(store: &dyn FileStore, tmp: &std::path::Path) {
 
     let other = "0190a1b2-c3d4-7e5f-8a9b-000000000001";
     let refused = store.put(other, body(&[b"0123456789", b"x"]), 10).await;
-    assert!(matches!(refused, Err(FileError::TooLarge(10))), "{refused:?}");
+    assert!(
+        matches!(refused, Err(FileError::TooLarge(10))),
+        "{refused:?}"
+    );
     assert!(matches!(store.get(other).await, Err(FileError::NotFound)));
 
     assert!(matches!(
@@ -296,7 +309,10 @@ async fn opening_checks_the_bucket_and_empties_the_temporary_folder() {
     S3FileStore::open(dir.path(), config(&fake.endpoint, "", Downloads::Proxy))
         .await
         .unwrap();
-    assert_eq!(std::fs::read_dir(dir.path().join("tmp")).unwrap().count(), 0);
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("tmp")).unwrap().count(),
+        0
+    );
 }
 
 const IMAGE: Download<'static> = Download {
@@ -395,32 +411,64 @@ async fn real_s3() {
 async fn a_prefix_or_endpoint_that_would_leave_the_bucket_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     for prefix in ["/cadocs", "../x", "a/../b", "./a", "a//b", "/"] {
-        let refused = S3FileStore::new(dir.path(), config("http://127.0.0.1:9", prefix, Downloads::Proxy));
+        let refused = S3FileStore::new(
+            dir.path(),
+            config("http://127.0.0.1:9", prefix, Downloads::Proxy),
+        );
         assert!(refused.is_err(), "prefix {prefix:?}");
     }
     for prefix in ["", "cadocs", "cadocs/", "apps/cadocs"] {
-        let kept = S3FileStore::new(dir.path(), config("http://127.0.0.1:9", prefix, Downloads::Proxy));
+        let kept = S3FileStore::new(
+            dir.path(),
+            config("http://127.0.0.1:9", prefix, Downloads::Proxy),
+        );
         assert!(kept.is_ok(), "prefix {prefix:?}");
     }
     // A path on the endpoint would be dropped by the bucket's URL.
     // So would credentials in it, which would also go out as a Basic header.
-    for endpoint in ["http://127.0.0.1:9/s3", "http://127.0.0.1:9/s3/", "http://u:p@127.0.0.1:9"] {
+    for endpoint in [
+        "http://127.0.0.1:9/s3",
+        "http://127.0.0.1:9/s3/",
+        "http://u:p@127.0.0.1:9",
+    ] {
         let refused = S3FileStore::new(dir.path(), config(endpoint, "", Downloads::Proxy));
         assert!(refused.is_err(), "endpoint {endpoint:?}");
     }
-    assert!(S3FileStore::new(dir.path(), config("http://127.0.0.1:9/", "", Downloads::Proxy)).is_ok());
+    assert!(
+        S3FileStore::new(
+            dir.path(),
+            config("http://127.0.0.1:9/", "", Downloads::Proxy)
+        )
+        .is_ok()
+    );
 }
 
 #[tokio::test]
 async fn a_transport_error_never_shows_a_presigned_url() {
     let dir = tempfile::tempdir().unwrap();
     // Nothing listens on port 9 of the loopback.
-    let store = S3FileStore::new(dir.path(), config("http://127.0.0.1:9", "", Downloads::Proxy)).unwrap();
+    let store = S3FileStore::new(
+        dir.path(),
+        config("http://127.0.0.1:9", "", Downloads::Proxy),
+    )
+    .unwrap();
     let errors = [
         store.get(ID).await.err().unwrap().to_string(),
         store.delete(ID).await.err().unwrap().to_string(),
-        store.put(ID, body(&[b"x"]), 10).await.err().unwrap().to_string(),
-        store.list().next().await.unwrap().err().unwrap().to_string(),
+        store
+            .put(ID, body(&[b"x"]), 10)
+            .await
+            .err()
+            .unwrap()
+            .to_string(),
+        store
+            .list()
+            .next()
+            .await
+            .unwrap()
+            .err()
+            .unwrap()
+            .to_string(),
     ];
     for error in errors {
         assert!(!error.contains("X-Amz-"), "{error}");

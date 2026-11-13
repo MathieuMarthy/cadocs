@@ -83,7 +83,15 @@ fn stored_text(stored: &cadocs_store::StoredDoc) -> String {
 async fn seeding_follows_the_compaction_of_a_room() {
     let dir = TempDir::new().unwrap();
     let store = store(&dir).await;
-    seed(&store, &Seed { seed: 7, ..Seed::docs(2) }).await.unwrap();
+    seed(
+        &store,
+        &Seed {
+            seed: 7,
+            ..Seed::docs(2)
+        },
+    )
+    .await
+    .unwrap();
 
     for index in 0..2 {
         let stored = store.load(&doc_id(index)).await.unwrap();
@@ -127,9 +135,15 @@ struct Server {
 
 async fn start(dir: &TempDir) -> Server {
     let store = Arc::new(self::store(dir).await);
-    seed(store.as_ref(), &Seed { seed: 7, ..Seed::docs(2) })
-        .await
-        .unwrap();
+    seed(
+        store.as_ref(),
+        &Seed {
+            seed: 7,
+            ..Seed::docs(2)
+        },
+    )
+    .await
+    .unwrap();
     let collab = CollabConfig {
         flush_interval: Duration::from_millis(10),
         ..Default::default()

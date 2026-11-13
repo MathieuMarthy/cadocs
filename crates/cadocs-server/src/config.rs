@@ -47,7 +47,15 @@ pub struct Config {
     pub revisions: RevisionTiming,
     pub attachments: AttachmentLimits,
     pub files: FileStoreConfig,
+    /// Retired settings that are set, which the server names at start and otherwise ignores.
+    pub ignored: Vec<&'static str>,
 }
+
+/// Settings a past version read, still accepted so an old deployment starts.
+const RETIRED: &[&str] = &[
+    // ADR 0022: the room budget and `CADOCS_MAX_SOCKETS` bound rooms.
+    "CADOCS_MAX_ROOMS",
+];
 
 /// Where attachments go: `CADOCS_FILE_STORE` (ADR 0020).
 #[derive(Debug, Clone)]
@@ -191,7 +199,6 @@ impl Config {
                 compact_updates: read.value("CADOCS_COMPACT_UPDATES", collab.compact_updates)?,
                 room_idle: read.secs("CADOCS_ROOM_IDLE_SECS", collab.room_idle)?,
                 room_queue_bytes: read.value("CADOCS_ROOM_QUEUE_BYTES", collab.room_queue_bytes)?,
-                max_rooms: read.value("CADOCS_MAX_ROOMS", collab.max_rooms)?,
                 room_memory: read.room_memory(collab.room_memory)?,
                 max_sockets: read.value("CADOCS_MAX_SOCKETS", collab.max_sockets)?,
                 max_frame_bytes: read.value("CADOCS_MAX_FRAME_BYTES", collab.max_frame_bytes)?,
@@ -211,6 +218,11 @@ impl Config {
             revisions: read.revision_timing()?,
             attachments: read.attachment_limits()?,
             files: read.file_store()?,
+            ignored: RETIRED
+                .iter()
+                .copied()
+                .filter(|name| (read.0)(name).is_some())
+                .collect(),
         };
         config.validate()?;
         Ok(config)
@@ -617,7 +629,6 @@ mod tests {
         assert_eq!(config.collab.compact_updates, 500);
         assert_eq!(config.collab.room_idle, Duration::from_secs(60));
         assert_eq!(config.collab.room_queue_bytes, 4_194_304);
-        assert_eq!(config.collab.max_rooms, 256);
         assert_eq!(config.collab.room_memory, 72 * 1024 * 1024);
         assert_eq!(config.collab.max_sockets, 512);
         assert_eq!(config.collab.max_frame_bytes, 8_388_608);
@@ -642,7 +653,6 @@ mod tests {
             ("CADOCS_COMPACT_UPDATES", "10"),
             ("CADOCS_ROOM_IDLE_SECS", "5"),
             ("CADOCS_ROOM_QUEUE_BYTES", "1024"),
-            ("CADOCS_MAX_ROOMS", "2"),
             ("CADOCS_ROOM_MEMORY_MB", "16"),
             ("CADOCS_MAX_SOCKETS", "3"),
             ("CADOCS_MAX_FRAME_BYTES", "512"),
@@ -668,7 +678,6 @@ mod tests {
         assert_eq!(config.collab.compact_updates, 10);
         assert_eq!(config.collab.room_idle, Duration::from_secs(5));
         assert_eq!(config.collab.room_queue_bytes, 1024);
-        assert_eq!(config.collab.max_rooms, 2);
         assert_eq!(config.collab.room_memory, 16 * 1024 * 1024);
         assert_eq!(config.collab.max_sockets, 3);
         assert_eq!(config.collab.max_frame_bytes, 512);
@@ -717,14 +726,24 @@ mod tests {
     fn the_room_memory_budget_is_at_least_a_megabyte() {
         for refused in ["0", "1048577"] {
             let error = config(&[("CADOCS_ROOM_MEMORY_MB", refused)]).unwrap_err();
-            assert!(format!("{error:#}").contains("CADOCS_ROOM_MEMORY_MB"), "{error:#}");
+            assert!(
+                format!("{error:#}").contains("CADOCS_ROOM_MEMORY_MB"),
+                "{error:#}"
+            );
         }
     }
 
     #[test]
+    fn a_retired_setting_is_ignored_and_named() {
+        let old = config(&[("CADOCS_MAX_ROOMS", "many")]).unwrap();
+        assert_eq!(old.ignored, ["CADOCS_MAX_ROOMS"]);
+        assert!(config(&[]).unwrap().ignored.is_empty());
+    }
+
+    #[test]
     fn an_invalid_value_names_its_variable() {
-        let error = config(&[("CADOCS_MAX_ROOMS", "many")]).unwrap_err();
-        assert!(error.to_string().contains("CADOCS_MAX_ROOMS"), "{error}");
+        let error = config(&[("CADOCS_MAX_SOCKETS", "many")]).unwrap_err();
+        assert!(error.to_string().contains("CADOCS_MAX_SOCKETS"), "{error}");
         let error = config(&[("CADOCS_TRUSTED_PROXIES", "many")]).unwrap_err();
         assert!(
             error.to_string().contains("CADOCS_TRUSTED_PROXIES"),
@@ -775,7 +794,10 @@ mod tests {
             FileStoreConfig::Local
         ));
         let error = config(&[("CADOCS_FILE_STORE", "nfs")]).unwrap_err();
-        assert!(format!("{error:#}").contains("CADOCS_FILE_STORE"), "{error:#}");
+        assert!(
+            format!("{error:#}").contains("CADOCS_FILE_STORE"),
+            "{error:#}"
+        );
     }
 
     #[cfg(not(feature = "s3"))]
@@ -822,7 +844,11 @@ mod tests {
             assert!(!format!("{s3:?}").contains("secret"), "{s3:?}");
 
             for (missing, _) in &REQUIRED[1..] {
-                let vars: Vec<_> = REQUIRED.iter().filter(|(k, _)| k != missing).copied().collect();
+                let vars: Vec<_> = REQUIRED
+                    .iter()
+                    .filter(|(k, _)| k != missing)
+                    .copied()
+                    .collect();
                 let error = config(&vars).unwrap_err();
                 assert!(format!("{error:#}").contains(missing), "{error:#}");
             }
@@ -853,7 +879,10 @@ mod tests {
                 ("CADOCS_S3_PREFIX", "a/../b"),
             ] {
                 let error = read_s3(&[(name, value)]).unwrap_err();
-                assert!(format!("{error:#}").contains(name), "{name}={value}: {error:#}");
+                assert!(
+                    format!("{error:#}").contains(name),
+                    "{name}={value}: {error:#}"
+                );
             }
         }
 

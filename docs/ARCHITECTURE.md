@@ -100,7 +100,7 @@ An unload whose flush fails puts the room back as live: its edits exist nowhere 
 
 Load and unload are serialized per document. A client that arrives during an unload waits for it to finish and then loads the persisted state. It must never receive a second copy of a document that is still being written.
 
-Loaded rooms are capped by `CADOCS_MAX_ROOMS`. At the cap, the oldest idle room unloads first, skipping rooms whose flush is failing. If every room is live, the new connection gets a `503` before the upgrade.
+Loaded rooms are bounded by the room memory budget, `CADOCS_ROOM_MEMORY_MB`, which counts each room from its encoded size (ADR 0022). Past it, the oldest idle room unloads first, skipping rooms whose flush is failing. If every room is live, the new connection gets a `503` before the upgrade.
 
 ### Reading a document outside a room
 
@@ -188,7 +188,7 @@ Fixed in step 23, before its first measurement, for the exit criteria of the MVP
 | After unload | All clients gone, `CADOCS_ROOM_IDLE_SECS` plus 10 seconds later | Recorded, no target |
 | Login peaks | 3 peaks 20 seconds apart, each the 30 users logging in at once from 30 addresses. Read 10 seconds after the last, past the trim | RSS at most the measured idle plus 10 MB |
 | Latency | 200 samples of each request, one at a time: a page's REST read, opening a page not loaded yet up to its SyncStep2, the root of the tree, the children of a page, a search matching every page, a search matching one title | p95 under 100 ms for each |
-| `CADOCS_MAX_ROOMS` | Second database, 256 clients on the 256 empty pages, no edits, held 5 seconds | RSS under 100 MB, so that the cap holds the target when the room budget does not bind |
+| 256 rooms | Second database, 256 clients on the 256 empty pages, no edits, held 5 seconds | RSS under 100 MB. Step 23 sized `CADOCS_MAX_ROOMS` with it, which ADR 0022 then removed |
 
 The machine is faster than a Raspberry Pi 4, so a latency close to the target there is not a pass on a Pi.
 
@@ -250,7 +250,7 @@ A login of the peak takes 0.4 seconds at p50 and 0.8 at p95, since 30 hashes run
 
 - **Login peaks miss the target by 30 MB.** Each hash runs on a blocking thread, and glibc gives such a thread its own arena. After the first hash the mmap threshold has grown past 19 MB, so the next hashes take their block from those arenas, and `malloc_trim` does not give it back: 41 MB of anonymous memory stay, 40 seconds later and after the threads ended. Measured outside the scenario, on 30 users and no page: `MALLOC_ARENA_MAX=1` returns to idle plus 0.9 MB after the trim, and `GLIBC_TUNABLES=glibc.malloc.mmap_threshold=4194304`, which keeps the threshold fixed, never holds the block at all (idle plus 1.0 MB, at most 1.5 MB during the peaks). ADR 0015's trim covers rooms, not hashes. The fix is step 23a.
 - **Latency holds on one core of this machine, with a margin of 6 at the slowest p95.** A Raspberry Pi 4 core is several times slower, and that was not measured, so the criterion is not checked yet.
-- **`CADOCS_MAX_ROOMS` no longer binds, and step 23b removes it.** 256 small rooms with their sockets take 9 MB over idle, about 36 KiB each, under the 64 KiB the room budget counts at least per room. So the budget alone caps rooms at 1,152, and `CADOCS_MAX_SOCKETS` (512) caps the live ones at 512, about 18 MB over idle for such rooms. Larger documents reach the budget first, at about 110 benchmark documents. Not measured: an idle room with no socket, waiting to unload, which should cost less than one with its socket.
+- **`CADOCS_MAX_ROOMS` no longer binds, and step 23b removed it (ADR 0022).** 256 small rooms with their sockets take 9 MB over idle, about 36 KiB each, under the 64 KiB the room budget counts at least per room. So the budget alone caps rooms at 1,152, and `CADOCS_MAX_SOCKETS` (512) caps the live ones at 512, about 18 MB over idle for such rooms. Larger documents reach the budget first, at about 110 benchmark documents. Not measured: an idle room with no socket, waiting to unload, which should cost less than one with its socket.
 - **A reindex of every page slows search.** A first run seeded the pages with their 20,000 reindex and revision jobs still queued, which each server then ran on its one core. Meanwhile a search matching every page took 3.6 to 4.5 seconds, against 16 ms once the reindexes were done. A change of the workspace language queues the same reindex of every page.
 
 ## Limits accepted by design
