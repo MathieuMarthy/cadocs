@@ -1,5 +1,6 @@
 //! Argon2id at OWASP settings. One hash takes about 19 MB, so a semaphore bounds how many run at
-//! once (`docs/ARCHITECTURE.md`).
+//! once (`docs/ARCHITECTURE.md`), and the fixed mmap threshold gives it back when it ends
+//! (ADR 0023).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,7 +8,7 @@ use std::time::Duration;
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
-use tokio::sync::{Notify, Semaphore};
+use tokio::sync::Semaphore;
 use tokio::task::spawn_blocking;
 use tokio::time::timeout;
 
@@ -32,7 +33,6 @@ pub enum PasswordError {
 pub struct Passwords {
     permits: Arc<Semaphore>,
     max_wait: Duration,
-    finished: Arc<Notify>,
 }
 
 impl Default for Passwords {
@@ -46,7 +46,6 @@ impl Passwords {
         Self {
             permits: Arc::new(Semaphore::new(concurrent)),
             max_wait,
-            finished: Arc::default(),
         }
     }
 
@@ -75,11 +74,6 @@ impl Passwords {
         .await?
     }
 
-    /// Resolves once a hash has ended since the last call. Several hashes may count as one.
-    pub async fn hash_finished(&self) {
-        self.finished.notified().await;
-    }
-
     /// The blocking task owns the permit: a client that hangs up cannot free it while the memory
     /// of its hash is still in use.
     async fn run<T: Send + 'static>(
@@ -90,12 +84,9 @@ impl Passwords {
             .await
             .map_err(|_| PasswordError::Busy)?
             .map_err(|_| PasswordError::Busy)?;
-        let finished = self.finished.clone();
         spawn_blocking(move || {
             let _permit = permit;
-            let result = work();
-            finished.notify_one();
-            result
+            work()
         })
         .await
         .map_err(|error| PasswordError::Failed(error.to_string()))
@@ -134,15 +125,6 @@ mod tests {
         assert_eq!(params.m_cost(), default.m_cost());
         assert_eq!(params.t_cost(), default.t_cost());
         assert_eq!(params.p_cost(), default.p_cost());
-    }
-
-    #[tokio::test]
-    async fn a_finished_hash_is_announced() {
-        let passwords = Passwords::default();
-        passwords.hash("password".to_owned()).await.unwrap();
-        timeout(Duration::from_secs(5), passwords.hash_finished())
-            .await
-            .expect("the memory of a hash must get a chance to go back");
     }
 
     #[tokio::test]

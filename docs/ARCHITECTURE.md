@@ -137,12 +137,12 @@ These figures are design estimates. The prototype's measurements are in [Measure
 | SQLite | 2 to 4 MB | Few connections, `cache_size` limited to 512 KiB each, and no `mmap_size` (ADR 0019). The OS page cache does the real caching and is not counted against the process |
 | Per WebSocket | tens of KB | Bounded send queue, capped socket count. A slow client is disconnected, never buffered without limit |
 | Per loaded document | a few times its encoded size | Unload after inactivity, compact on unload, capped room count |
-| Peaks: password hashing | 19 MB per hash at OWASP settings | A semaphore allows one hash at a time, and a `malloc_trim` follows 5 seconds after (ADR 0015) |
+| Peaks: password hashing | 19 MB per hash at OWASP settings | A semaphore allows one hash at a time, and a fixed mmap threshold unmaps its block when it ends (ADR 0023) |
 | Peaks: uploads, imports and exports | bounded | Stream to disk, never buffer a whole file. A page export streams its zip through a 64 KiB pipe, and its content read is bounded by `CADOCS_DOC_READS`. One space export job at a time (V1) |
 
 Other strategies:
 
-- **Allocator.** Freed memory does not always return to the OS. The server stays on glibc and calls `malloc_trim` after a room unloads (ADR 0015).
+- **Allocator.** Freed memory does not always return to the OS. The server stays on glibc and calls `malloc_trim` after a room unloads (ADR 0015). It fixes the mmap threshold at 4 MiB at start, so a larger block goes back as soon as it is freed (ADR 0023).
 - **Dependencies.** Each crate must justify its cost ([CARGO_WORKSPACE.md](CARGO_WORKSPACE.md)).
 - **No in-memory caches of database rows.** SQLite and the OS page cache are already fast enough at this scale.
 - **Backpressure everywhere.** Every queue is bounded, so load shows up as latency or a refused connection instead of memory growth.
@@ -233,7 +233,7 @@ Step 23, on 2026-11-12, with `bench/rss.sh mvp`, one run, on the machine above (
 | Idle, 10,000 pages | under 30 | 11.0 | 2.0 | holds |
 | 30 active users, 30 page and 30 events sockets | under 100 | 32.3 | 22.1 | holds |
 | After unload of the 30 | none | 19.9 | 9.7 | idle plus 8.9 |
-| After 3 login peaks of 30 | idle plus 10, so 20.9 | 50.7 | 41.7 | **missed** |
+| After 3 login peaks of 30 | idle plus 10, so 20.9 | 50.7 | 41.7 | missed, then 12.2 after step 23a |
 | 256 rooms on empty pages | under 100 | 19.8 | 10.3 | holds |
 | After the latency phase, 200 rooms opened | none | 69.0 | 58.5 | the room budget, as designed |
 
@@ -248,8 +248,8 @@ Step 23, on 2026-11-12, with `bench/rss.sh mvp`, one run, on the machine above (
 
 A login of the peak takes 0.4 seconds at p50 and 0.8 at p95, since 30 hashes run one at a time. None waited past 10 seconds.
 
-- **Login peaks miss the target by 30 MB.** Each hash runs on a blocking thread, and glibc gives such a thread its own arena. After the first hash the mmap threshold has grown past 19 MB, so the next hashes take their block from those arenas, and `malloc_trim` does not give it back: 41 MB of anonymous memory stay, 40 seconds later and after the threads ended. Measured outside the scenario, on 30 users and no page: `MALLOC_ARENA_MAX=1` returns to idle plus 0.9 MB after the trim, and `GLIBC_TUNABLES=glibc.malloc.mmap_threshold=4194304`, which keeps the threshold fixed, never holds the block at all (idle plus 1.0 MB, at most 1.5 MB during the peaks). ADR 0015's trim covers rooms, not hashes. The fix is step 23a.
-- **Latency holds on one core of this machine, with a margin of 6 at the slowest p95.** A Raspberry Pi 4 core is several times slower, and that was not measured, so the criterion is not checked yet.
+- **Login peaks miss the target by 30 MB.** Each hash runs on a blocking thread, and glibc gives such a thread its own arena. After the first hash the mmap threshold has grown past 19 MB, so the next hashes take their block from those arenas, and `malloc_trim` does not give it back: 41 MB of anonymous memory stay, 40 seconds later and after the threads ended. Measured outside the scenario, on 30 users and no page: `MALLOC_ARENA_MAX=1` returns to idle plus 0.9 MB after the trim, and `GLIBC_TUNABLES=glibc.malloc.mmap_threshold=4194304`, which keeps the threshold fixed, never holds the block at all (idle plus 1.0 MB, at most 1.5 MB during the peaks). ADR 0015's trim covers rooms, not hashes. Step 23a fixed the threshold at 4 MiB with `mallopt` (ADR 0023): the same phase then ended at 12.2 MB, idle plus 1.4, with a peak of 31.4 MB.
+- **Latency holds on one core of this machine, with a margin of 6 at the slowest p95.** The pinned core matters: step 23a found the shell limited to the slower efficiency cores (4 to 7), where a search matching every page took 30 ms at p95 on both sides of its change. A Raspberry Pi 4 core is several times slower, and that was not measured, so the criterion is not checked yet.
 - **`CADOCS_MAX_ROOMS` no longer binds, and step 23b removed it (ADR 0022).** 256 small rooms with their sockets take 9 MB over idle, about 36 KiB each, under the 64 KiB the room budget counts at least per room. So the budget alone caps rooms at 1,152, and `CADOCS_MAX_SOCKETS` (512) caps the live ones at 512, about 18 MB over idle for such rooms. Larger documents reach the budget first, at about 110 benchmark documents. Not measured: an idle room with no socket, waiting to unload, which should cost less than one with its socket.
 - **A reindex of every page slows search.** A first run seeded the pages with their 20,000 reindex and revision jobs still queued, which each server then ran on its one core. Meanwhile a search matching every page took 3.6 to 4.5 seconds, against 16 ms once the reindexes were done. A change of the workspace language queues the same reindex of every page.
 
