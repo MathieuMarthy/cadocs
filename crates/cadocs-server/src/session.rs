@@ -325,7 +325,10 @@ mod tests {
         assert!(removal.to_str().unwrap().starts_with("__Host-session=;"));
 
         let plain = cookie("t", &http("http://localhost:3000"));
-        assert!(plain.to_str().unwrap().starts_with("session=t;"), "{plain:?}");
+        assert!(
+            plain.to_str().unwrap().starts_with("session=t;"),
+            "{plain:?}"
+        );
     }
 
     #[test]

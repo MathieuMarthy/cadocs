@@ -25,7 +25,8 @@ const SHUTDOWN_FLUSH_RETRIES: usize = 3;
 enum Slot {
     Loading(watch::Receiver<Transition>),
     Live(Arc<Room>),
-    Unloading(watch::Receiver<Transition>),
+    /// With the room's estimate when its unload began: it is in memory until the unload ends.
+    Unloading(watch::Receiver<Transition>, usize),
 }
 
 #[derive(Default)]
@@ -54,7 +55,7 @@ enum Attempt<T> {
     WaitLoad(watch::Receiver<Transition>),
     /// The room is unloading. Whatever the outcome, the next attempt finds it live or absent.
     WaitUnload(watch::Receiver<Transition>),
-    /// Another room is unloading to make space.
+    /// Another room is unloading to make space. Whatever its outcome, try again.
     WaitEviction(watch::Receiver<Transition>),
     /// Another room is loading, and rooms load one at a time. Whatever its outcome, try again.
     WaitTurn(watch::Receiver<Transition>),
@@ -189,7 +190,7 @@ impl<S: DocStore> DocRegistry<S> {
     /// Hands `action` a private copy of a document, with no client needed. A loaded room gives its
     /// edits, flushed or not, and only for as long as it takes to encode them, so a slow `action`
     /// holds up no room. Otherwise the copy comes from the store: no room is made, nothing is
-    /// written, and `CADOCS_MAX_ROOMS` does not apply. A read waits its turn past `doc_reads`.
+    /// written, and the room budget does not apply. A read waits its turn past `doc_reads`.
     pub async fn read<T>(
         &self,
         doc_id: &str,
@@ -236,7 +237,7 @@ impl<S: DocStore> DocRegistry<S> {
                 }
                 match rooms.slots.get(doc_id) {
                     Some(Slot::Live(room)) => Ok(room.clone()),
-                    Some(Slot::Unloading(transition)) => Err(Some(transition.clone())),
+                    Some(Slot::Unloading(transition, _)) => Err(Some(transition.clone())),
                     Some(Slot::Loading(_)) | None => Err(None),
                 }
             };
@@ -263,14 +264,15 @@ impl<S: DocStore> DocRegistry<S> {
             match self.inner.attempt(doc_id, &mut action)? {
                 Attempt::Entered(result) => return Ok(result),
                 Attempt::WaitLoad(transition) => outcome(transition).await?,
-                Attempt::WaitUnload(transition) | Attempt::WaitTurn(transition) => {
+                // An eviction whose flush failed leaves its room live and failing, which the next
+                // attempt skips: it evicts another room or answers `AtCapacity`.
+                Attempt::WaitUnload(transition)
+                | Attempt::WaitTurn(transition)
+                | Attempt::WaitEviction(transition) => {
                     if let Err(CollabError::ShuttingDown) = outcome(transition).await {
                         return Err(CollabError::ShuttingDown);
                     }
                 }
-                Attempt::WaitEviction(transition) => outcome(transition)
-                    .await
-                    .map_err(|_| CollabError::AtCapacity)?,
             }
         }
     }
@@ -374,7 +376,7 @@ impl<S: DocStore> DocRegistry<S> {
                     .values()
                     .filter_map(|slot| match slot {
                         Slot::Loading(rx) => Some((rx.clone(), false)),
-                        Slot::Unloading(rx) => Some((rx.clone(), true)),
+                        Slot::Unloading(rx, _) => Some((rx.clone(), true)),
                         Slot::Live(_) => None,
                     })
                     .collect()
@@ -406,9 +408,11 @@ fn begin_unload(rooms: &mut Rooms, room: &Arc<Room>) -> watch::Receiver<Transiti
     let (done, transition) = watch::channel(None);
     room.state().unload = Some(done);
     room.wake.notify_one();
-    rooms
-        .slots
-        .insert(room.doc_id.clone(), Slot::Unloading(transition.clone()));
+    let estimate = room.estimate.load(Ordering::Relaxed);
+    rooms.slots.insert(
+        room.doc_id.clone(),
+        Slot::Unloading(transition.clone(), estimate),
+    );
     transition
 }
 
@@ -429,24 +433,24 @@ impl<S: DocStore> Inner<S> {
                 return Ok(Attempt::Entered(action(room)));
             }
             Some(Slot::Loading(transition)) => return Ok(Attempt::WaitLoad(transition.clone())),
-            Some(Slot::Unloading(transition)) => {
+            Some(Slot::Unloading(transition, _)) => {
                 return Ok(Attempt::WaitUnload(transition.clone()));
             }
             None => {}
         }
 
-        if rooms.slots.len() >= self.config.max_rooms
-            || estimated_bytes(&rooms) >= self.config.room_memory
-        {
-            if let Some(victim) = oldest_idle(&rooms) {
-                return Ok(Attempt::WaitEviction(begin_unload(&mut rooms, &victim)));
-            }
+        if estimated_bytes(&rooms) >= self.config.room_memory {
+            // A room on its way out frees memory soon: waiting for it first keeps a burst of
+            // callers from evicting one room each when the first eviction may be enough.
             let unloading = rooms.slots.values().find_map(|slot| match slot {
-                Slot::Unloading(transition) => Some(transition.clone()),
+                Slot::Unloading(transition, _) => Some(transition.clone()),
                 _ => None,
             });
-            return match unloading {
-                Some(transition) => Ok(Attempt::WaitEviction(transition)),
+            if let Some(transition) = unloading {
+                return Ok(Attempt::WaitEviction(transition));
+            }
+            return match oldest_idle(&rooms) {
+                Some(victim) => Ok(Attempt::WaitEviction(begin_unload(&mut rooms, &victim))),
                 None => Err(CollabError::AtCapacity),
             };
         }
@@ -520,15 +524,18 @@ impl<S: DocStore> Inner<S> {
     }
 }
 
-/// What the live rooms are counted as together. A room loading or unloading counts for nothing,
-/// so a load can start while the room it evicted is still on its way out: one more transient room.
+/// What the rooms in memory are counted as together. A room on its way out counts until it is
+/// gone, so no load takes its place before then: with no cap on the number of rooms (ADR 0022),
+/// nothing else bounds rooms evicted while their unload lags. A loading room counts for nothing,
+/// since its size is unknown: rooms load one at a time for that.
 fn estimated_bytes(rooms: &Rooms) -> usize {
     rooms
         .slots
         .values()
-        .filter_map(|slot| match slot {
-            Slot::Live(room) => Some(room.estimate.load(Ordering::Relaxed)),
-            _ => None,
+        .map(|slot| match slot {
+            Slot::Live(room) => room.estimate.load(Ordering::Relaxed),
+            Slot::Unloading(_, estimate) => *estimate,
+            Slot::Loading(_) => 0,
         })
         .sum()
 }
@@ -543,7 +550,9 @@ fn oldest_idle(rooms: &Rooms) -> Option<Arc<Room>> {
         .filter_map(|slot| {
             let Slot::Live(room) = slot else { return None };
             let state = room.state();
-            let since = state.idle_since.filter(|_| !state.failing && state.joined)?;
+            let since = state
+                .idle_since
+                .filter(|_| !state.failing && state.joined)?;
             Some((since, room.clone()))
         })
         .min_by_key(|(since, _)| *since)

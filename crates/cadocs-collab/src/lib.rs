@@ -54,10 +54,10 @@ pub struct CollabConfig {
     pub room_idle: Duration,
     /// Unflushed bytes a room may hold.
     pub room_queue_bytes: usize,
-    pub max_rooms: usize,
     /// What loaded rooms may take together, as estimated from their encoded size. Past it, idle
-    /// rooms unload first, then connections are refused, as at `max_rooms`. Rooms load one at a
-    /// time, so the budget is crossed by one room at most, plus an evicted one on its way out.
+    /// rooms unload first, then connections are refused. It is the only bound on the number of
+    /// rooms (ADR 0022). Rooms load one at a time, and a room on its way out counts until it is
+    /// gone, so the budget is crossed by one room at most.
     pub room_memory: usize,
     pub max_sockets: usize,
     pub max_frame_bytes: usize,
@@ -74,7 +74,6 @@ impl Default for CollabConfig {
             compact_updates: 500,
             room_idle: Duration::from_secs(60),
             room_queue_bytes: 4 * 1024 * 1024,
-            max_rooms: 256,
             // 100 MB of RSS, the MVP target, less about 15 MB idle and 12 MB for 200 sockets. The
             // 100-document benchmark needs about 66 MiB (docs/notes/benchmark.md).
             room_memory: 72 * 1024 * 1024,
@@ -92,7 +91,7 @@ pub enum CollabError {
     Store(Arc<StoreError>),
     #[error("stored document {doc_id} cannot be decoded")]
     CorruptDocument { doc_id: String },
-    /// Every room is live at `max_rooms` or `room_memory`, or `max_sockets` is reached.
+    /// Every room is live at `room_memory`, or `max_sockets` is reached.
     #[error("no room or socket available")]
     AtCapacity,
     #[error("the server is shutting down")]

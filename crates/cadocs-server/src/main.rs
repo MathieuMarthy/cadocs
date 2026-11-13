@@ -77,6 +77,9 @@ fn run_server(config: Config) -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_new(&config.log).context("invalid CADOCS_LOG")?)
         .init();
+    for name in &config.ignored {
+        tracing::warn!("{name} is no longer read and is ignored");
+    }
 
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(WORKER_THREADS)

@@ -31,7 +31,12 @@ pub struct LoginReport {
 }
 
 fn address(user: usize) -> String {
-    format!("10.{}.{}.{}", (user >> 16) & 255, (user >> 8) & 255, user & 255)
+    format!(
+        "10.{}.{}.{}",
+        (user >> 16) & 255,
+        (user >> 8) & 255,
+        user & 255
+    )
 }
 
 async fn login(config: LoginConfig, user: usize) -> anyhow::Result<(u16, Duration)> {

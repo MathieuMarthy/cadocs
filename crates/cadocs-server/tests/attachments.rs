@@ -386,7 +386,9 @@ async fn a_delete_needs_an_editor_of_every_page_that_references_the_file() {
     let editable = wiki.page(&editable_space).await;
     let attachment = wiki.attach(&closed, "a.txt", "text/plain", b"x").await;
     let reference = |page: &str| {
-        format!("INSERT INTO attachment_refs (attachment_id, page_id) VALUES ('{attachment}', '{page}')")
+        format!(
+            "INSERT INTO attachment_refs (attachment_id, page_id) VALUES ('{attachment}', '{page}')"
+        )
     };
 
     assert_eq!(wiki.delete(&wiki.bob, &attachment).await.status, 404);
@@ -411,7 +413,10 @@ async fn a_delete_needs_an_editor_of_every_page_that_references_the_file() {
         ))
         .await;
     let path = format!("/pages/{trashed}");
-    let reply = wiki.api.raw("DELETE", &path, &wiki.ada.headers(), b"").await;
+    let reply = wiki
+        .api
+        .raw("DELETE", &path, &wiki.ada.headers(), b"")
+        .await;
     assert_eq!(reply.status, 204, "{reply:?}");
     let reply = wiki.delete(&wiki.bob, &mine).await;
     assert_eq!(reply.status, 204, "{reply:?}");

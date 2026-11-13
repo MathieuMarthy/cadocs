@@ -220,9 +220,15 @@ async fn the_seed_indexes_pages_for_search() {
     let search = |q: &str| format!("/api/v1/workspaces/{WORKSPACE}/search?q={q}");
 
     // Titles are `Bench page <seed + index>`, and the seed starts at 1.
-    let found = request(&server.url, "GET", &search("2"), &[("cookie", &cookie)], b"")
-        .await
-        .unwrap();
+    let found = request(
+        &server.url,
+        "GET",
+        &search("2"),
+        &[("cookie", &cookie)],
+        b"",
+    )
+    .await
+    .unwrap();
     assert_eq!(found.status, 200);
     let body = String::from_utf8_lossy(&found.body);
     assert!(body.contains(&doc_id(1)), "{body}");

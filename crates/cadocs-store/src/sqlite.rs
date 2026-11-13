@@ -165,10 +165,11 @@ impl DocStore for SqliteStore {
     async fn load(&self, doc_id: &str) -> Result<StoredDoc, StoreError> {
         let mut tx = self.reader.begin().await?;
 
-        let row = sqlx::query("SELECT state, upto_seq, codec FROM doc_snapshots WHERE page_id = ?1")
-            .bind(doc_id)
-            .fetch_optional(&mut *tx)
-            .await?;
+        let row =
+            sqlx::query("SELECT state, upto_seq, codec FROM doc_snapshots WHERE page_id = ?1")
+                .bind(doc_id)
+                .fetch_optional(&mut *tx)
+                .await?;
         let snapshot = match row {
             None => None,
             Some(row) => {
@@ -437,7 +438,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("cadocs.db");
         let old = SqlitePoolOptions::new()
-            .connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true))
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
             .await
             .unwrap();
         sqlx::raw_sql("CREATE TABLE older (x)")
@@ -500,7 +505,10 @@ mod tests {
                 .unwrap();
         assert_eq!(codec, 1);
         assert!(stored.len() * 5 < state.len(), "{} bytes", stored.len());
-        assert_eq!(store.load("doc").await.unwrap().snapshot.unwrap().state, state);
+        assert_eq!(
+            store.load("doc").await.unwrap().snapshot.unwrap().state,
+            state
+        );
     }
 
     #[tokio::test]

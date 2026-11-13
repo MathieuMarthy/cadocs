@@ -85,7 +85,10 @@ pub async fn search(url: &str, q: &str) -> anyhow::Result<(Duration, usize)> {
 /// Each request kind in turn, `samples` times, one request at a time.
 pub async fn latencies(config: &LatencyConfig) -> anyhow::Result<Vec<Latency>> {
     ensure!(config.samples > 0, "no samples");
-    ensure!(config.samples <= config.pages, "more samples than pages to open");
+    ensure!(
+        config.samples <= config.pages,
+        "more samples than pages to open"
+    );
     ensure!(config.fanout >= 2, "a fanout of at least 2");
     // A page below this has children: its first child, `(page + 1) * fanout`, is seeded.
     let parents = (config.pages - 1) / config.fanout;

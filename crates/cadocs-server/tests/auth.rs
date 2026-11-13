@@ -127,7 +127,9 @@ async fn setup_needs_the_code_of_the_log() {
     assert_eq!(api.number("SELECT count(*) FROM users").await, 0);
 
     let code = api.setup_code.clone();
-    let reply = api.send("POST", "/auth/setup", &[], body(Some(&code))).await;
+    let reply = api
+        .send("POST", "/auth/setup", &[], body(Some(&code)))
+        .await;
     assert_eq!(reply.status, 201, "{reply:?}");
     let reply = api.send("POST", "/auth/setup", &[], body(None)).await;
     assert_eq!(reply.status, 409, "{reply:?}");

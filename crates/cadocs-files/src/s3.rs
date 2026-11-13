@@ -93,7 +93,10 @@ impl S3FileStore {
     /// Call it once the data folder is locked.
     pub fn new(data_dir: &Path, config: S3Config) -> Result<Self, FileError> {
         if !valid_prefix(&config.prefix) {
-            return Err(invalid_input(format!("invalid S3 prefix {:?}", config.prefix)));
+            return Err(invalid_input(format!(
+                "invalid S3 prefix {:?}",
+                config.prefix
+            )));
         }
         let endpoint: url::Url = config.endpoint.parse().map_err(invalid)?;
         // The bucket's URL is the endpoint joined with `<bucket>/`, which drops any path, and
@@ -104,8 +107,8 @@ impl S3FileStore {
                 "the S3 endpoint must have no path, query or credentials".to_owned(),
             ));
         }
-        let bucket = Bucket::new(endpoint, UrlStyle::Path, config.bucket, config.region)
-            .map_err(invalid)?;
+        let bucket =
+            Bucket::new(endpoint, UrlStyle::Path, config.bucket, config.region).map_err(invalid)?;
         let origin = bucket.base_url().origin().ascii_serialization();
         let mut client = Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
@@ -175,16 +178,20 @@ impl Inner {
         let key = self.key(id)?;
         let (temp, stored) = receive_temp(&self.tmp, id, body, max_bytes).await?;
         let file = File::open(&temp.0).await?;
-        let url = PutObject::new(&self.bucket, Some(&self.credentials), &key).sign(REQUEST_LIFETIME);
+        let url =
+            PutObject::new(&self.bucket, Some(&self.credentials), &key).sign(REQUEST_LIFETIME);
         let body = Body::wrap_stream(read_stream(file));
-        let response = self.send(Method::PUT, url, Some((body, stored.size))).await?;
+        let response = self
+            .send(Method::PUT, url, Some((body, stored.size)))
+            .await?;
         expect(&response, &[StatusCode::OK], "PUT")?;
         Ok(stored)
     }
 
     async fn get_file(&self, id: &str) -> Result<FileBody, FileError> {
         let key = self.key(id)?;
-        let url = GetObject::new(&self.bucket, Some(&self.credentials), &key).sign(REQUEST_LIFETIME);
+        let url =
+            GetObject::new(&self.bucket, Some(&self.credentials), &key).sign(REQUEST_LIFETIME);
         let response = self.send(Method::GET, url, None).await?;
         if response.status() == StatusCode::NOT_FOUND {
             return Err(FileError::NotFound);
@@ -203,8 +210,14 @@ impl Inner {
     async fn delete_file(&self, id: &str) -> Result<(), FileError> {
         let key = self.key(id)?;
         let action = DeleteObject::new(&self.bucket, Some(&self.credentials), &key);
-        let response = self.send(Method::DELETE, action.sign(REQUEST_LIFETIME), None).await?;
-        let done = [StatusCode::NO_CONTENT, StatusCode::OK, StatusCode::NOT_FOUND];
+        let response = self
+            .send(Method::DELETE, action.sign(REQUEST_LIFETIME), None)
+            .await?;
+        let done = [
+            StatusCode::NO_CONTENT,
+            StatusCode::OK,
+            StatusCode::NOT_FOUND,
+        ];
         expect(&response, &done, "DELETE")
     }
 
@@ -221,7 +234,9 @@ impl Inner {
         if let Some(token) = token {
             action.with_continuation_token(token);
         }
-        let response = self.send(Method::GET, action.sign(REQUEST_LIFETIME), None).await?;
+        let response = self
+            .send(Method::GET, action.sign(REQUEST_LIFETIME), None)
+            .await?;
         expect(&response, &[StatusCode::OK], "list")?;
         let xml = response.bytes().await.map_err(transport)?;
         let xml = std::str::from_utf8(&xml).map_err(invalid)?;

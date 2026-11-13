@@ -20,7 +20,7 @@ MVP_PAGES=10000
 MVP_FANOUT=20
 MVP_USERS=30
 MVP_IDLE_SECS=45
-MAX_ROOMS=256 # the default of CADOCS_MAX_ROOMS
+ROOMS=256 # the former default of CADOCS_MAX_ROOMS (ADR 0022), kept so results compare
 # Set by the MVP: whether to pin the server to one CPU, and settings added to the defaults.
 PIN=false
 EXTRA_ENV=()
@@ -164,7 +164,7 @@ mvp() {
     EXTRA_ENV=(CADOCS_TRUSTED_PROXIES=127.0.0.1)
     local started=$SECONDS
     seed "$WORK/mvp.db" "$MVP_PAGES" --users "$MVP_USERS" --fanout "$MVP_FANOUT" --index true
-    seed "$WORK/rooms.db" 0 --pages "$MAX_ROOMS"
+    seed "$WORK/rooms.db" 0 --pages "$ROOMS"
     echo "seeded in $((SECONDS - started)) s, $(du -m "$WORK/mvp.db" | cut -f1) MB" | tee "$OUT_DIR/mvp-seed.txt"
     printf '%-24s %8s %8s %8s %8s\n' measure rss pss anon peak | tee "$out"
 
@@ -199,8 +199,8 @@ mvp() {
     start_server glibc "$WORK/rooms.db"
     sleep "$MVP_IDLE_SECS"
     read_measures "$SERVER_PID" idle-empty-pages | tee -a "$out"
-    "$BENCH" load --url "$url" --docs "$MAX_ROOMS" --clients-per-doc 1 --duration-secs 0 \
-        --hold-secs 5 --then "$SCRIPT read $SERVER_PID $MAX_ROOMS-rooms '$out'" 2>>"$out.load"
+    "$BENCH" load --url "$url" --docs "$ROOMS" --clients-per-doc 1 --duration-secs 0 \
+        --hold-secs 5 --then "$SCRIPT read $SERVER_PID $ROOMS-rooms '$out'" 2>>"$out.load"
     stop_server
 }
 

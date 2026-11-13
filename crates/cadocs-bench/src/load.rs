@@ -68,7 +68,10 @@ impl LoadReport {
         let others = config.clients_per_doc as u64 - 1;
         ensure!(self.clients as u64 == clients, "missing clients: {self:?}");
         if config.events {
-            ensure!(self.events == self.clients, "missing events sockets: {self:?}");
+            ensure!(
+                self.events == self.clients,
+                "missing events sockets: {self:?}"
+            );
         }
         ensure!(
             enough(self.updates_sent, config.updates_per_sec),

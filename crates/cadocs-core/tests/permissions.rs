@@ -352,7 +352,10 @@ fn delete_needs_an_editor_of_every_referencing_page() {
 
     assert!(delete_allowed([editable]));
     assert!(delete_allowed([editable, trashed, trashed_space]));
-    assert!(delete_allowed([Scope::live(Some(SpaceRole::Admin)), editable]));
+    assert!(delete_allowed([
+        Scope::live(Some(SpaceRole::Admin)),
+        editable
+    ]));
     assert!(!delete_allowed([editable, readable]));
     assert!(!delete_allowed([editable, hidden]));
     assert!(!delete_allowed([]));
