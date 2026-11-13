@@ -21,7 +21,7 @@ use yrs::{Doc, Options, ReadTxn, Text, Transact, Update, XmlFragment, XmlFragmen
 
 use crate::document::{BODY, client_id};
 use crate::rng::Rng;
-use crate::seed::{SESSION_TOKEN, doc_id};
+use crate::seed::{WORKSPACE, doc_id, session_token};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -34,6 +34,10 @@ pub struct LoadConfig {
     pub url: String,
     pub docs: usize,
     pub clients_per_doc: usize,
+    /// Client `i` uses the session of seeded user `i % users`.
+    pub users: usize,
+    /// Each client also holds an events socket, as the front end does beside its page.
+    pub events: bool,
     pub updates_per_sec: u32,
     pub awareness_per_sec: u32,
     pub duration: Duration,
@@ -47,6 +51,8 @@ pub struct LoadReport {
     pub updates_sent: u64,
     pub awareness_sent: u64,
     pub updates_received: u64,
+    /// Events sockets still open when the load ends.
+    pub events: usize,
 }
 
 impl LoadReport {
@@ -61,6 +67,9 @@ impl LoadReport {
         };
         let others = config.clients_per_doc as u64 - 1;
         ensure!(self.clients as u64 == clients, "missing clients: {self:?}");
+        if config.events {
+            ensure!(self.events == self.clients, "missing events sockets: {self:?}");
+        }
         ensure!(
             enough(self.updates_sent, config.updates_per_sec),
             "too few updates: {self:?}"
@@ -81,15 +90,20 @@ impl LoadReport {
         self.updates_sent += other.updates_sent;
         self.awareness_sent += other.awareness_sent;
         self.updates_received += other.updates_received;
+        self.events += other.events;
     }
 }
 
-/// The upgrade of a client on the session of the seed.
-fn page_request(url: &str, doc: &str) -> anyhow::Result<Request> {
-    let mut request = format!("{url}/ws/pages/{doc}").into_client_request()?;
-    let cookie = format!("session={SESSION_TOKEN}").parse()?;
+/// An upgrade on the session the seed opened for `user`.
+fn upgrade(url: &str, path: &str, user: usize) -> anyhow::Result<Request> {
+    let mut request = format!("{url}{path}").into_client_request()?;
+    let cookie = format!("session={}", session_token(user)).parse()?;
     request.headers_mut().insert(COOKIE, cookie);
     Ok(request)
+}
+
+fn page_request(url: &str, doc: &str, user: usize) -> anyhow::Result<Request> {
+    upgrade(url, &format!("/ws/pages/{doc}"), user)
 }
 
 /// Apart from the seeds of the documents, or a client would continue its author's clock.
@@ -99,9 +113,10 @@ pub fn load_client_id(index: u64) -> yrs::ClientID {
     client_id(&mut Rng::new(CLIENT_SEEDS + index))
 }
 
-struct Client {
+pub(crate) struct Client {
     name: String,
     socket: Socket,
+    events: Option<Socket>,
     doc: Doc,
     body: XmlFragmentRef,
     awareness: Awareness,
@@ -115,9 +130,14 @@ fn sync(message: SyncMessage) -> WsMessage {
 
 impl Client {
     /// Connects and finishes the handshake of `docs/API.md`, so the document is fully loaded.
-    async fn connect(url: &str, doc: usize, index: u64) -> anyhow::Result<Self> {
+    pub(crate) async fn connect(
+        url: &str,
+        doc: usize,
+        index: u64,
+        user: usize,
+    ) -> anyhow::Result<Self> {
         let name = format!("{}#{index}", doc_id(doc));
-        let (socket, _) = connect_async(page_request(url, &doc_id(doc))?)
+        let (socket, _) = connect_async(page_request(url, &doc_id(doc), user)?)
             .await
             .with_context(|| format!("{name} cannot connect"))?;
         let doc = Doc::with_options(Options {
@@ -127,6 +147,7 @@ impl Client {
         let mut client = Self {
             name,
             socket,
+            events: None,
             body: doc.get_or_insert_xml_fragment(BODY),
             awareness: Awareness::new(doc.clone()),
             doc,
@@ -159,6 +180,35 @@ impl Client {
             self.handle(&frame).await?;
         }
         Ok(())
+    }
+
+    /// Opens the events socket of the seeded workspace.
+    async fn listen(&mut self, url: &str, user: usize) -> anyhow::Result<()> {
+        let path = format!("/ws/events?workspace={WORKSPACE}");
+        let (socket, _) = connect_async(upgrade(url, &path, user)?)
+            .await
+            .with_context(|| format!("{}: no events socket", self.name))?;
+        self.events = Some(socket);
+        Ok(())
+    }
+
+    /// Reads the events socket, which also answers its pings. Pending forever without one.
+    async fn next_event(events: &mut Option<Socket>, name: &str) -> anyhow::Result<()> {
+        let Some(socket) = events else {
+            return std::future::pending().await;
+        };
+        match socket.next().await {
+            Some(Ok(WsMessage::Close(close))) => bail!("{name}: events closed: {close:?}"),
+            Some(Ok(_)) => Ok(()),
+            Some(Err(error)) => bail!("{name}: events: {error}"),
+            None => bail!("{name}: the events socket ended"),
+        }
+    }
+
+    /// Closes the page socket. The run has its measure by then, so a failing close changes
+    /// nothing.
+    pub(crate) async fn close(mut self) {
+        let _ = self.socket.close(None).await;
     }
 
     async fn next_frame(&mut self) -> anyhow::Result<Vec<u8>> {
@@ -250,7 +300,11 @@ impl Client {
         let mut presence = interval_at(phase(&mut self.rng, awareness_period), awareness_period);
         let end = sleep(config.duration);
         tokio::pin!(end);
-        let mut active = true;
+        // A zero duration sends nothing, not even a first tick: its pages may be empty.
+        let mut active = !config.duration.is_zero();
+        // Apart from `self`, which the page socket's branch borrows whole.
+        let mut events = self.events.take();
+        let name = self.name.clone();
 
         loop {
             tokio::select! {
@@ -267,10 +321,15 @@ impl Client {
                     self.report.awareness_sent += 1;
                 }
                 frame = self.next_frame() => self.handle(&frame?).await?,
+                event = Self::next_event(&mut events, &name) => event?,
             }
         }
         // Past this point the run has its measure: a failing close changes nothing.
         let _ = self.socket.close(None).await;
+        if let Some(mut events) = events {
+            self.report.events = 1;
+            let _ = events.close(None).await;
+        }
         Ok(self.report)
     }
 }
@@ -295,12 +354,21 @@ pub async fn run<F: Future<Output = anyhow::Result<()>>>(
         config.updates_per_sec > 0 && config.awareness_per_sec > 0,
         "rates must be above 0"
     );
+    ensure!(config.users > 0, "the load needs a user");
     let mut connecting = JoinSet::new();
     for doc in 0..config.docs {
         for slot in 0..config.clients_per_doc {
             let url = config.url.clone();
-            let index = (doc * config.clients_per_doc + slot) as u64;
-            connecting.spawn(async move { Client::connect(&url, doc, index).await });
+            let index = doc * config.clients_per_doc + slot;
+            let user = index % config.users;
+            let events = config.events;
+            connecting.spawn(async move {
+                let mut client = Client::connect(&url, doc, index as u64, user).await?;
+                if events {
+                    client.listen(&url, user).await?;
+                }
+                anyhow::Ok(client)
+            });
         }
     }
 
@@ -336,7 +404,7 @@ pub async fn run<F: Future<Output = anyhow::Result<()>>>(
 
 /// The awareness states a new client of `doc` receives on connecting.
 pub async fn peers(url: &str, doc: &str) -> anyhow::Result<usize> {
-    let (mut socket, _) = connect_async(page_request(url, doc)?).await?;
+    let (mut socket, _) = connect_async(page_request(url, doc, 0)?).await?;
     let count = timeout(HANDSHAKE_TIMEOUT, async {
         while let Some(frame) = socket.next().await {
             if let WsMessage::Binary(frame) = frame?

@@ -68,6 +68,7 @@ These never reach the server binary.
 | Crate | Why |
 | --- | --- |
 | `tokio-tungstenite`, `futures-util` | WebSocket client in `cadocs-bench` and in integration tests. Same version as axum's, so it is not compiled twice |
+| `argon2`, `sha2`, `cadocs-content`, `cadocs-search`, `cadocs-core` in `cadocs-bench` | The MVP seed (step 23): the accounts' password hash and session token hashes, and the search index the reindex job would write. The server's own versions and features, so nothing unifies differently. Its few HTTP requests are written by hand over a `TcpStream` instead of bringing an HTTP client |
 | `tower` (`util`) | Calling the router directly in tests |
 | `tempfile` | Temporary databases and data folders in tests |
 | `bytes` | Building file streams in the attachment tests |

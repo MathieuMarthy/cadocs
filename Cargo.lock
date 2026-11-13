@@ -268,12 +268,17 @@ name = "cadocs-bench"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "argon2",
  "cadocs-collab",
+ "cadocs-content",
+ "cadocs-core",
  "cadocs-files",
+ "cadocs-search",
  "cadocs-server",
  "cadocs-store",
  "futures-util",
  "rust-embed",
+ "sha2 0.11.1",
  "tempfile",
  "tokio",
  "tokio-tungstenite",

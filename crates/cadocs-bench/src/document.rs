@@ -101,7 +101,13 @@ fn append(doc: &Doc, text: &XmlTextRef, rng: &mut Rng) -> (Vec<u8>, usize) {
 fn insert_word(doc: &Doc, text: &XmlTextRef, rng: &mut Rng) -> Vec<u8> {
     let mut txn = doc.transact_mut();
     let current = text.get_string(&txn);
-    let from = rng.below(current.len());
+    // An emptied paragraph takes the word at its start. The check comes first, so the seeds
+    // that never empty one keep their documents.
+    let from = if current.is_empty() {
+        0
+    } else {
+        rng.below(current.len())
+    };
     let at = current[from..]
         .find(' ')
         .map_or(current.len(), |i| from + i);

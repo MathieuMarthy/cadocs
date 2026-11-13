@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use cadocs_bench::document::{EDITS, body_text, generate};
 use cadocs_bench::load::{LoadConfig, LoadReport, peers, run};
-use cadocs_bench::seed::{COMPACT_UPDATES, SESSION_TOKEN, SESSION_TOKEN_HASH, doc_id, seed};
+use cadocs_bench::seed::{SESSION_TOKEN, SESSION_TOKEN_HASH, Seed, doc_id, seed};
 use cadocs_collab::{CollabConfig, DocRegistry, PageAuthorizer};
 use cadocs_files::LocalFileStore;
 use cadocs_server::client_ip::TrustedProxies;
@@ -83,7 +83,7 @@ fn stored_text(stored: &cadocs_store::StoredDoc) -> String {
 async fn seeding_follows_the_compaction_of_a_room() {
     let dir = TempDir::new().unwrap();
     let store = store(&dir).await;
-    seed(&store, 2, 7, Some(COMPACT_UPDATES)).await.unwrap();
+    seed(&store, &Seed { seed: 7, ..Seed::docs(2) }).await.unwrap();
 
     for index in 0..2 {
         let stored = store.load(&doc_id(index)).await.unwrap();
@@ -102,7 +102,16 @@ async fn seeding_follows_the_compaction_of_a_room() {
 async fn seeding_can_keep_the_whole_log() {
     let dir = TempDir::new().unwrap();
     let store = store(&dir).await;
-    seed(&store, 1, 7, None).await.unwrap();
+    seed(
+        &store,
+        &Seed {
+            seed: 7,
+            compact_updates: None,
+            ..Seed::docs(1)
+        },
+    )
+    .await
+    .unwrap();
 
     let stored = store.load(&doc_id(0)).await.unwrap();
     assert!(stored.snapshot.is_none());
@@ -118,7 +127,7 @@ struct Server {
 
 async fn start(dir: &TempDir) -> Server {
     let store = Arc::new(self::store(dir).await);
-    seed(store.as_ref(), 2, 7, Some(COMPACT_UPDATES))
+    seed(store.as_ref(), &Seed { seed: 7, ..Seed::docs(2) })
         .await
         .unwrap();
     let collab = CollabConfig {
@@ -158,6 +167,8 @@ fn config(url: &str) -> LoadConfig {
         url: url.to_owned(),
         docs: 2,
         clients_per_doc: 2,
+        users: 1,
+        events: false,
         updates_per_sec: 20,
         awareness_per_sec: 10,
         duration: Duration::from_secs(1),
@@ -253,6 +264,7 @@ fn a_run_short_of_the_scenario_is_refused() {
         updates_sent: 24_000,
         awareness_sent: 12_000,
         updates_received: 24_000,
+        events: 0,
     };
     full.check(&config).unwrap();
 
@@ -296,4 +308,12 @@ fn clients_do_not_share_an_id_with_an_author() {
     for index in 0..50 {
         assert!(!authors.contains(&cadocs_bench::load::load_client_id(index)));
     }
+}
+
+/// Backspaces empty a paragraph of the document of seed 330, which then gets a word inserted.
+#[test]
+fn a_paragraph_emptied_by_backspaces_still_takes_words() {
+    let bench = generate(330);
+    assert_eq!(bench.updates.len(), EDITS);
+    assert_eq!(body_text(&replay(&bench.updates)), body_text(&bench.doc));
 }

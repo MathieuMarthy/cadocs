@@ -78,8 +78,10 @@ Steps, one session each. Each step adds the migration for the tables it needs, a
 - [x] **Step 20:** Markdown import and export for one page, with or without attachments, and the print stylesheet. Done when an export imports back with its content and attachments.
 - [x] **Step 21:** Delivery: `cadocs backup` and `cadocs restore`, Docker image, `aarch64` and `x86_64` binaries, [OPERATIONS.md](OPERATIONS.md) complete. Done when a backup and restore round trip passes on a running server.
 - [x] **Step 22:** Coverage: the whole permission matrix over REST and WebSocket, and a check of each scope item against its tests. Done when nothing in the scope lacks an automated test.
-- [ ] **Step 23:** MVP benchmark: idle, 30 active users, login peaks, 10,000 pages, and the value of `CADOCS_MAX_ROOMS`. Comes last, after step 24, whose fixes could invalidate the measures. Done when the results are recorded against the exit criteria, as measured.
+- [x] **Step 23:** MVP benchmark: idle, 30 active users, login peaks, 10,000 pages, and the value of `CADOCS_MAX_ROOMS`. Comes last, after step 24, whose fixes could invalidate the measures. Done when the results are recorded against the exit criteria, as measured.
 - [x] **Step 24:** Security review of auth, uploads and rendered HTML. Done when its findings are fixed or recorded.
+- [ ] **Step 23b:** Remove `CADOCS_MAX_ROOMS`: step 23 found that the room budget and `CADOCS_MAX_SOCKETS` already bound what it bounds ([MVP results](ARCHITECTURE.md#mvp-results)). A short ADR, the setting gone from the configuration and `OPERATIONS.md` (a server that still gets it says it is ignored), eviction and `503` driven by the budget alone, and the tests that used the cap moved to the budget. Done when the collab tests pass without the cap and a page opens past 256 rooms of small documents.
+- [ ] **Step 23a:** Give back the memory of password hashes (step 23 found that `malloc_trim` misses it, see [MVP results](ARCHITECTURE.md#mvp-results)). A new ADR chooses between a fixed mmap threshold set with `mallopt` at start, a single arena, or a hash block mapped by cadocs itself, measured on the login peaks. Done when the login peak phase of `bench/rss.sh mvp` ends at idle plus 10 MB or less.
 
 The two weeks of daily use start once steps 23 and 24 are both done.
 
@@ -100,6 +102,7 @@ Steps keep their numbers, but this order wins over them: the next step is the fi
 | 6 | 20 | 16 and 17 |
 | 7 | 22, 24 | Every feature step |
 | 8 | 23 | Everything, alone on a quiet machine |
+| 9 | 23a, 23b | 23. 23a alone on a quiet machine for its measure. Both touch the server's start and configuration |
 
 Step 21 needs nothing left and fits any wave before 7. If it runs before step 17, its round trip test gains attachments afterwards, and `OPERATIONS.md` is finished at the end. Step 16 can start beside 14 and 15 for the AST and renderers, once the node list is fixed, but it only ends after 15.
 
@@ -115,10 +118,10 @@ Exit criteria:
 
 - [x] All of the scope is covered by automated tests, including the permission matrix over REST and WebSocket ([COVERAGE.md](COVERAGE.md)).
 - [x] Revoking a role closes the user's open sockets, and this is tested.
-- [ ] Idle RSS under 30 MB.
-- [ ] RSS under 100 MB with 30 simulated active users on 30 pages, each with one page socket and one events socket.
-- [ ] After login peaks, RSS returns to the idle target plus at most 10 MB.
-- [ ] 10,000 pages load and search with p95 latency under 100 ms on a Raspberry Pi 4 or an equivalent 1 vCPU VPS.
+- [x] Idle RSS under 30 MB.
+- [x] RSS under 100 MB with 30 simulated active users on 30 pages, each with one page socket and one events socket.
+- [ ] After login peaks, RSS returns to the idle target plus at most 10 MB. Missed in step 23, fixed by step 23a.
+- [ ] 10,000 pages load and search with p95 latency under 100 ms on a Raspberry Pi 4 or an equivalent 1 vCPU VPS. Step 23 measured 16 ms on one desktop core: run `bench/rss.sh mvp` on such a machine to check it.
 - [x] A backup and restore round trip is tested, on a running server.
 - [x] A security review of auth, uploads and rendered HTML is done.
 - [ ] One team uses it daily for two weeks with no data loss.

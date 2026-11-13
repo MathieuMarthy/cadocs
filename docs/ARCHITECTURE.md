@@ -173,6 +173,25 @@ Fixed before the first measurement. A change after that needs a new ADR, and old
 
 **Go or no-go.** Go if every target holds with at least one allocator. Go with conditions if a target is missed by under 20% and the cause is identified, with the fix recorded as an MVP task. Otherwise no-go, and a new ADR reworks the architecture before any MVP work.
 
+### MVP scenario
+
+Fixed in step 23, before its first measurement, for the exit criteria of the MVP in [ROADMAP.md](ROADMAP.md#mvp). `bench/rss.sh mvp` runs it. The same rule applies: a change needs a new ADR, and old results are measured again.
+
+- **Build:** as above, glibc only. Every server is pinned with `taskset` to the first CPU the shell may use, for the 1 vCPU machine of the criteria, and sets `CADOCS_TRUSTED_PROXIES=127.0.0.1`, as behind the proxy of [OPERATIONS.md](OPERATIONS.md#deployment). The load tool is not pinned, so the scheduler may also put it on that CPU.
+- **Database:** 10,000 pages in one space, each holding the benchmark document of the seed `1 + i`, in a tree where each page has 20 children, indexed for search as the reindex job would, with no job left queued and no revision. 30 users: the owner and 29 members. A second database holds 256 empty pages.
+- **Idle:** each phase starts a fresh server on a copy of the database, and reads idle 45 seconds after start, once the jobs that run at start are done.
+
+| Phase | Setup | Target |
+| --- | --- | --- |
+| Idle | No client ever connected | RSS under 30 MB |
+| 30 active users | User `i` on page `i`, each with one page socket and one events socket, at the load of the benchmark scenario (2 updates and 1 awareness update per second for 60 seconds). Read 30 seconds after the load, clients still connected | RSS under 100 MB |
+| After unload | All clients gone, `CADOCS_ROOM_IDLE_SECS` plus 10 seconds later | Recorded, no target |
+| Login peaks | 3 peaks 20 seconds apart, each the 30 users logging in at once from 30 addresses. Read 10 seconds after the last, past the trim | RSS at most the measured idle plus 10 MB |
+| Latency | 200 samples of each request, one at a time: a page's REST read, opening a page not loaded yet up to its SyncStep2, the root of the tree, the children of a page, a search matching every page, a search matching one title | p95 under 100 ms for each |
+| `CADOCS_MAX_ROOMS` | Second database, 256 clients on the 256 empty pages, no edits, held 5 seconds | RSS under 100 MB, so that the cap holds the target when the room budget does not bind |
+
+The machine is faster than a Raspberry Pi 4, so a latency close to the target there is not a pass on a Pi.
+
 ## Measured results
 
 **Verdict: go.** Every target holds with glibc, on the server of ADR 0015. The first run was a no-go: without the trim, RSS after unloading 100 documents stayed at 72 MB. The scenario did not change between the two runs.
@@ -204,6 +223,35 @@ Costs, from `bench/rss.sh extras` on glibc, outside the scenario:
 - `load` holding the whole log is not a problem at this size, so `DocStore` stays as it is.
 
 Not measured: documents much larger than 20 KB, peaks on `aarch64`, and variance beyond the three runs of this step. glibc agreed within 0.4 MB on every measure the trim does not touch, while mimalloc moved by up to 8 MB over two runs.
+
+### MVP results
+
+Step 23, on 2026-11-12, with `bench/rss.sh mvp`, one run, on the machine above (Linux 7.3.3), each server on one core. The seed took 190 seconds and its database 1,092 MB. RSS in MB (10^6 bytes).
+
+| Phase | Target | RSS | Anonymous | Verdict |
+| --- | --- | --- | --- | --- |
+| Idle, 10,000 pages | under 30 | 11.0 | 2.0 | holds |
+| 30 active users, 30 page and 30 events sockets | under 100 | 32.3 | 22.1 | holds |
+| After unload of the 30 | none | 19.9 | 9.7 | idle plus 8.9 |
+| After 3 login peaks of 30 | idle plus 10, so 20.9 | 50.7 | 41.7 | **missed** |
+| 256 rooms on empty pages | under 100 | 19.8 | 10.3 | holds |
+| After the latency phase, 200 rooms opened | none | 69.0 | 58.5 | the room budget, as designed |
+
+| Request, 200 samples one at a time | p50 ms | p95 ms | max ms |
+| --- | --- | --- | --- |
+| `GET /pages/{id}` | 0.4 | 1.4 | 7.6 |
+| Opening a page not loaded, up to SyncStep2 | 4.4 | 8.5 | 40.0 |
+| Tree root (20 pages) | 0.2 | 0.3 | 1.1 |
+| Children of a page (20 pages) | 0.2 | 0.7 | 1.4 |
+| Search matching all 10,000 pages | 15.4 | 15.8 | 704.1 |
+| Search matching one title | 1.3 | 1.8 | 25.5 |
+
+A login of the peak takes 0.4 seconds at p50 and 0.8 at p95, since 30 hashes run one at a time. None waited past 10 seconds.
+
+- **Login peaks miss the target by 30 MB.** Each hash runs on a blocking thread, and glibc gives such a thread its own arena. After the first hash the mmap threshold has grown past 19 MB, so the next hashes take their block from those arenas, and `malloc_trim` does not give it back: 41 MB of anonymous memory stay, 40 seconds later and after the threads ended. Measured outside the scenario, on 30 users and no page: `MALLOC_ARENA_MAX=1` returns to idle plus 0.9 MB after the trim, and `GLIBC_TUNABLES=glibc.malloc.mmap_threshold=4194304`, which keeps the threshold fixed, never holds the block at all (idle plus 1.0 MB, at most 1.5 MB during the peaks). ADR 0015's trim covers rooms, not hashes. The fix is step 23a.
+- **Latency holds on one core of this machine, with a margin of 6 at the slowest p95.** A Raspberry Pi 4 core is several times slower, and that was not measured, so the criterion is not checked yet.
+- **`CADOCS_MAX_ROOMS` no longer binds, and step 23b removes it.** 256 small rooms with their sockets take 9 MB over idle, about 36 KiB each, under the 64 KiB the room budget counts at least per room. So the budget alone caps rooms at 1,152, and `CADOCS_MAX_SOCKETS` (512) caps the live ones at 512, about 18 MB over idle for such rooms. Larger documents reach the budget first, at about 110 benchmark documents. Not measured: an idle room with no socket, waiting to unload, which should cost less than one with its socket.
+- **A reindex of every page slows search.** A first run seeded the pages with their 20,000 reindex and revision jobs still queued, which each server then ran on its one core. Meanwhile a search matching every page took 3.6 to 4.5 seconds, against 16 ms once the reindexes were done. A change of the workspace language queues the same reindex of every page.
 
 ## Limits accepted by design
 

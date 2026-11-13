@@ -378,7 +378,7 @@ ORDER BY score
 LIMIT 20;
 ```
 
-The `SqliteStore` query matches first, in a common table expression, then joins the pages and resolves the role as the other lists do (`HAS_ROLE`). The match covers every workspace before the filter, which step 23 measures at 10,000 pages.
+The `SqliteStore` query matches first, in a common table expression, then joins the pages and resolves the role as the other lists do (`HAS_ROLE`). The match covers every workspace before the filter. At 10,000 pages a search matching all of them answers in 16 ms at p95 on one core, and 4 seconds while their reindex jobs run ([MVP results](ARCHITECTURE.md#mvp-results)).
 
 ## Portability
 

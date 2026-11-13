@@ -7,9 +7,14 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
+argon2.workspace = true
+cadocs-content.workspace = true
+cadocs-core.workspace = true
+cadocs-search.workspace = true
 cadocs-store.workspace = true
 futures-util.workspace = true
-tokio = { workspace = true, features = ["macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+sha2.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite.workspace = true
 yrs.workspace = true
 
