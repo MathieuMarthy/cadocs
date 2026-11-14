@@ -9,6 +9,7 @@ pub mod config;
 pub mod data_dir;
 pub mod memory;
 pub mod password;
+pub mod privileges;
 pub mod rate_limit;
 pub mod security;
 pub mod session;

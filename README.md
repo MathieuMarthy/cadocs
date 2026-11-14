@@ -72,7 +72,7 @@ docker compose up -d
 docker compose logs cadocs | grep setup
 ```
 
-Open that link to create the first account. To open the wiki to others, put a TLS proxy in front and set `CADOCS_PUBLIC_URL` to its address, as [docs/OPERATIONS.md](docs/OPERATIONS.md#deployment) shows with Caddy. The same page covers configuration, backups and upgrades.
+Open that link to create the first account. To keep the data in a folder beside `compose.yaml`, replace `cadocs-data:/data` with `./data:/data` and drop the `volumes:` block at the end. To open the wiki to others, put a TLS proxy in front and set `CADOCS_PUBLIC_URL` to its address, as [docs/OPERATIONS.md](docs/OPERATIONS.md#deployment) shows with Caddy. The same page covers configuration, backups and upgrades.
 
 ### From source
 

@@ -13,6 +13,7 @@ use cadocs_jobs::JobConfig;
 use cadocs_store::RevisionTiming;
 
 use crate::client_ip::TrustedProxies;
+use crate::privileges::RunAs;
 
 /// Far above any sensible value, and small enough for timers and semaphores not to overflow.
 const MAX_SECS: u64 = 365 * 24 * 60 * 60;
@@ -38,6 +39,8 @@ const MAX_S3_LINK_SECS: u64 = 7 * 24 * 3600;
 #[derive(Debug, Clone)]
 pub struct Config {
     pub data_dir: PathBuf,
+    /// The user root falls back to at start (ADR 0025).
+    pub run_as: Option<RunAs>,
     pub bind: SocketAddr,
     pub log: String,
     pub http: HttpConfig,
@@ -187,6 +190,7 @@ impl Config {
         let socket = SocketConfig::default();
         let config = Self {
             data_dir: read.value("CADOCS_DATA_DIR", PathBuf::from("./data"))?,
+            run_as: read.run_as()?,
             bind: read.value("CADOCS_BIND", SocketAddr::from(([127, 0, 0, 1], 3000)))?,
             log: read.value("CADOCS_LOG", "info".to_owned())?,
             http: HttpConfig {
@@ -345,6 +349,17 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
             "CADOCS_ROOM_MEMORY_MB must be between 1 and {MAX_MB}"
         );
         usize::try_from(mb * MIB).context("CADOCS_ROOM_MEMORY_MB is too large for this platform")
+    }
+
+    /// Empty counts as unset, so a deployment can turn off what the image sets.
+    fn run_as(&self) -> anyhow::Result<Option<RunAs>> {
+        let name = "CADOCS_RUN_AS";
+        match (self.0)(name).as_deref() {
+            None | Some("") => Ok(None),
+            Some(value) => RunAs::parse(value)
+                .map(Some)
+                .with_context(|| format!("invalid {name}: {value:?}")),
+        }
     }
 
     fn workspace_creation(&self) -> anyhow::Result<WorkspaceCreation> {
@@ -635,6 +650,7 @@ mod tests {
     fn defaults_match_the_operations_guide() {
         let config = config(&[]).unwrap();
         assert_eq!(config.data_dir, PathBuf::from("./data"));
+        assert_eq!(config.run_as, None);
         assert_eq!(config.bind, "127.0.0.1:3000".parse().unwrap());
         assert_eq!(config.log, "info");
         assert_eq!(config.http.trusted_proxies, TrustedProxies::default());
@@ -705,6 +721,20 @@ mod tests {
         );
         assert_eq!(config.socket.ping, Duration::from_secs(6));
         assert_eq!(config.socket.ping_timeout, Duration::from_secs(7));
+    }
+
+    #[test]
+    fn root_falls_back_to_a_user_only_when_one_is_set() {
+        let set = config(&[("CADOCS_RUN_AS", "65532:65532")]).unwrap();
+        let user = RunAs {
+            uid: 65532,
+            gid: 65532,
+        };
+        assert_eq!(set.run_as, Some(user));
+        assert_eq!(config(&[("CADOCS_RUN_AS", "")]).unwrap().run_as, None);
+
+        let error = config(&[("CADOCS_RUN_AS", "0:0")]).unwrap_err();
+        assert!(error.to_string().contains("CADOCS_RUN_AS"), "{error}");
     }
 
     #[test]

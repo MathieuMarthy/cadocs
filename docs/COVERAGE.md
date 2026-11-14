@@ -40,7 +40,7 @@ Comments, public shares, groups and plugins have no route before V1 or V2: their
 | Revisions: list, view, restore, retention | `server/revisions.rs`, `store/revisions.rs` (thinning), `e2e/revisions` |
 | Brut interface, themes, phone | `e2e/screens` (each screen in both themes), `e2e/shell` (theme, phone width), `e2e/navigation` (drawer) |
 | Source code link | `e2e/shell` `every screen links to the source code` |
-| Docker image, binaries | `scripts/check-image.sh`: serve, setup, backup, restore in the image. CI runs it on `amd64` after each push to main, and `release.yml` on each architecture before pushing |
+| Docker image, binaries | `scripts/check-image.sh`: serve, setup, backup, restore in the image, then a folder of root and a folder of the caller, each served without root (ADR 0025), with `server/privileges.rs`. CI runs it on `amd64` after each push to main, and `release.yml` on each architecture before pushing |
 | Backup and restore | `server/backup.rs`, `scripts/check-image.sh` |
 | `OPERATIONS.md` complete | A document, checked by reading in step 21 |
 

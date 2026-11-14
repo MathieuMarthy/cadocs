@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# The cadocs image: one binary on a small glibc base, as a non-root user, with one volume on the
-# data folder (docs/OPERATIONS.md). `--build-arg FEATURES=s3` adds the S3 file store (ADR 0020).
+# The cadocs image: one binary on a small glibc base, with one volume on the data folder
+# (docs/OPERATIONS.md). It starts as root and the binary gives root up at once (ADR 0025). `--build-arg FEATURES=s3` adds the S3 file store (ADR 0020).
 # `--target binary --output <dir>` gives the binary alone, which is how releases get theirs.
 # Images are pinned by digest, and Dependabot moves them.
 
@@ -32,8 +32,12 @@ FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cc66d222f0a7ec996b78a99fe76a96
 COPY --from=build /cadocs /usr/local/bin/cadocs
 # Owned by the image's user, so a new named volume is too.
 COPY --from=build --chown=nonroot:nonroot /data /data
+# Root only until the binary has read its settings: it then runs as the owner of /data, or as
+# `nonroot` once it has taken a /data that root owns, such as a bind mount Docker made.
+USER 0:0
 ENV CADOCS_DATA_DIR=/data \
-    CADOCS_BIND=0.0.0.0:3000
+    CADOCS_BIND=0.0.0.0:3000 \
+    CADOCS_RUN_AS=65532:65532
 VOLUME /data
 EXPOSE 3000
 ENTRYPOINT ["/usr/local/bin/cadocs"]

@@ -11,6 +11,7 @@ Environment variables only, so no config file format has to be parsed or documen
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `CADOCS_DATA_DIR` | `./data` | Data folder, on a local disk |
+| `CADOCS_RUN_AS` | unset | `uid:gid` that a server started as root falls back to. Started as root with this set, every command first becomes the owner of the data folder, or this user once the folder is given to it when root owns the folder (ADR 0025). Unset or empty, and for any other user, nothing changes. The Docker image sets `65532:65532` |
 | `CADOCS_BIND` | `127.0.0.1:3000` | Listen address |
 | `CADOCS_PUBLIC_URL` | none, required | Public URL: a scheme, a host and an optional port, with no path, as cadocs lives at the root of its host. Sets the allowed `Origin`, and the `Secure` cookie flag when it is `https`. `cadocs` refuses to start without it |
 | `CADOCS_TRUSTED_PROXIES` | empty | Proxies allowed to set `X-Forwarded-For`, comma-separated: addresses or blocks such as `172.18.0.0/16`. The rightmost address no listed proxy covers is the client |
@@ -94,7 +95,7 @@ The database frees deleted pages within the hour, through the `maintain_database
 
 - **Platforms:** Linux `x86_64` and `aarch64`, on the `-gnu` targets. The server calls glibc's `malloc_trim` and `mallopt` (ADR 0015, ADR 0023), so a `musl` build does not link. musl's allocator is also too slow for this workload.
 - **Releases:** each `v*` tag publishes, on the GitHub release, `cadocs-<tag>-<target>.tar.gz` for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, each with a `.sha256`, and the same with `-s3` for the build with the S3 file store. They need glibc 2.36 or later (Debian 12, Ubuntu 24.04, RHEL 10). The images are `ghcr.io/mathieumarthy/cadocs:<version>` (also `latest`) and `:<version>-s3` (also `s3`), for both architectures. The default build carries no S3 code (ADR 0020).
-- **Docker:** the image is the binary on a distroless glibc base, run as the `nonroot` user (uid 65532), with `CADOCS_DATA_DIR=/data`, `CADOCS_BIND=0.0.0.0:3000` and one volume on `/data`. A bind-mounted data folder must be writable by uid 65532. The image has no shell, so no `HEALTHCHECK`: an orchestrator checks `GET /health` from outside. Build it from the repository with `docker build .`, and `--build-arg FEATURES=s3` for S3.
+- **Docker:** the image is the binary on a distroless glibc base, with `CADOCS_DATA_DIR=/data`, `CADOCS_BIND=0.0.0.0:3000`, `CADOCS_RUN_AS=65532:65532` and one volume on `/data`. The container starts as root and the binary gives root up before it opens anything (ADR 0025): it runs as the owner of `/data`, so a bind-mounted folder you made stays yours, and as `nonroot` (uid 65532) on a named volume or on a folder root owns, such as a bind mount Docker created, which it first gives to that user. With `user:` set to anything but root it runs as that user and changes no owner, so the folder must already be writable by it. That is the way with `cap_drop: ALL`, as giving up root needs `CHOWN`, `SETUID` and `SETGID`, or where root is not allowed (`runAsNonRoot`): `user: "65532:65532"`. The image has no shell, so no `HEALTHCHECK`: an orchestrator checks `GET /health` from outside. Build it from the repository with `docker build .`, and `--build-arg FEATURES=s3` for S3.
 - **From source:** `npm --prefix web ci && npm --prefix web run build`, then `cargo build --release` (with `--features s3` for S3), as [the Dockerfile](../Dockerfile) does. The binary embeds `web/dist`, so the front end is built first.
 - **Memory:** cadocs is meant for 10 to 30 MB idle and under 100 MB with a few dozen active users. A container limit of 256 MB leaves room for login peaks: a password hash takes 19 MB while it runs, and one runs at a time.
 - **TLS:** handled by a reverse proxy (Caddy, nginx, Traefik). cadocs has no TLS code. Plain HTTP works on `localhost` only, because browsers accept `Secure` cookies there.
@@ -238,7 +239,7 @@ docker compose stop cadocs
 docker compose run --rm -v ./backup:/backup cadocs restore /backup   # into an empty volume
 ```
 
-The container's user (uid 65532) must be able to write to the backup folder, and to read it for a restore.
+Both commands run as the server does, as the owner of the data folder, which must be able to write to the backup folder, and to read it for a restore.
 
 Restoring on a stopped server replaces the data folder. Browsers still open on older content push their newer edits back when they reconnect, which is normal CRDT behaviour.
 

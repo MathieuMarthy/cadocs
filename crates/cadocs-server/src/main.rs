@@ -11,7 +11,7 @@ use cadocs_server::cli::{self, Command};
 use cadocs_server::config::{Config, FileStoreConfig};
 use cadocs_server::memory;
 use cadocs_server::session::{new_password_reset, setup_link};
-use cadocs_server::{AppState, backup, data_dir, serve, start_jobs};
+use cadocs_server::{AppState, backup, data_dir, privileges, serve, start_jobs};
 use cadocs_store::{AccountStore, DocStore, SqliteStore};
 use tokio::net::TcpListener;
 use tokio::task::spawn_blocking;
@@ -30,6 +30,9 @@ fn main() -> anyhow::Result<()> {
     // First, so a mistyped command is not answered with a missing setting.
     let command = cli::parse(env::args_os().skip(1))?;
     let config = Config::from_env()?;
+    // Before any thread or file, and for every command: a backup run as root would leave root's
+    // files beside the server's (ADR 0025).
+    privileges::drop_root(&config.data_dir, config.run_as)?;
     match command {
         Command::Serve => run_server(config),
         Command::ResetPassword { email } => on_one_thread(reset_password(config, &email)),
