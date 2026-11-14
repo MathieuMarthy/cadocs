@@ -8,6 +8,7 @@ use std::time::Duration;
 use anyhow::{Context, bail, ensure};
 use axum::http::{HeaderMap, Uri, header};
 use cadocs_collab::CollabConfig;
+use cadocs_core::permissions::WorkspaceCreation;
 use cadocs_jobs::JobConfig;
 use cadocs_store::RevisionTiming;
 
@@ -47,6 +48,8 @@ pub struct Config {
     pub revisions: RevisionTiming,
     pub attachments: AttachmentLimits,
     pub files: FileStoreConfig,
+    /// Who may create a workspace (ADR 0024).
+    pub workspace_creation: WorkspaceCreation,
     /// Retired settings that are set, which the server names at start and otherwise ignores.
     pub ignored: Vec<&'static str>,
 }
@@ -218,6 +221,7 @@ impl Config {
             revisions: read.revision_timing()?,
             attachments: read.attachment_limits()?,
             files: read.file_store()?,
+            workspace_creation: read.workspace_creation()?,
             ignored: RETIRED
                 .iter()
                 .copied()
@@ -341,6 +345,15 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
             "CADOCS_ROOM_MEMORY_MB must be between 1 and {MAX_MB}"
         );
         usize::try_from(mb * MIB).context("CADOCS_ROOM_MEMORY_MB is too large for this platform")
+    }
+
+    fn workspace_creation(&self) -> anyhow::Result<WorkspaceCreation> {
+        let name = "CADOCS_WORKSPACE_CREATION";
+        match (self.0)(name).as_deref() {
+            None | Some("all") => Ok(WorkspaceCreation::All),
+            Some("admins") => Ok(WorkspaceCreation::Admins),
+            Some(other) => bail!("invalid {name}: {other:?}, expected all or admins"),
+        }
     }
 
     fn file_store(&self) -> anyhow::Result<FileStoreConfig> {
@@ -692,6 +705,21 @@ mod tests {
         );
         assert_eq!(config.socket.ping, Duration::from_secs(6));
         assert_eq!(config.socket.ping_timeout, Duration::from_secs(7));
+    }
+
+    #[test]
+    fn any_user_creates_a_workspace_unless_set_to_admins() {
+        let all = config(&[]).unwrap().workspace_creation;
+        assert_eq!(all, WorkspaceCreation::All);
+        let set = config(&[("CADOCS_WORKSPACE_CREATION", "all")]).unwrap();
+        assert_eq!(set.workspace_creation, WorkspaceCreation::All);
+        let set = config(&[("CADOCS_WORKSPACE_CREATION", "admins")]).unwrap();
+        assert_eq!(set.workspace_creation, WorkspaceCreation::Admins);
+        for refused in ["", "Admins", "none"] {
+            let error = config(&[("CADOCS_WORKSPACE_CREATION", refused)]).unwrap_err();
+            let message = error.to_string();
+            assert!(message.contains("CADOCS_WORKSPACE_CREATION"), "{message}");
+        }
     }
 
     #[test]

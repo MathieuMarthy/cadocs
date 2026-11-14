@@ -17,6 +17,8 @@ export interface Workspace {
 export interface Session {
   user: User;
   workspaces: Workspace[];
+  /** Whether `POST /workspaces` lets this user through (ADR 0024). */
+  can_create_workspace: boolean;
   csrf_token: string;
 }
 

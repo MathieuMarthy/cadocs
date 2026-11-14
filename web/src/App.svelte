@@ -8,6 +8,7 @@
   import ResetPassword from "./routes/ResetPassword.svelte";
   import Search from "./routes/Search.svelte";
   import Setup from "./routes/Setup.svelte";
+  import NewWorkspace from "./components/NewWorkspace.svelte";
   import Notice from "./components/Notice.svelte";
   import Shell from "./components/Shell.svelte";
   import SpaceSettings from "./routes/SpaceSettings.svelte";
@@ -139,7 +140,12 @@
 {:else if view.name === "home"}
   <Shell title="no workspace">
     <h1>no workspace</h1>
-    <p class="notice">ask a workspace admin for an invitation.</p>
+    {#if app.session?.can_create_workspace}
+      <p class="notice">create one, or ask a workspace admin for an invitation.</p>
+      <NewWorkspace />
+    {:else}
+      <p class="notice">ask a workspace admin for an invitation.</p>
+    {/if}
   </Shell>
 {:else if view.name === "not-found"}
   <Message title="not found" />

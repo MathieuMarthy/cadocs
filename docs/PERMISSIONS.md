@@ -13,7 +13,7 @@ Evaluated in this order. The first rule that applies decides.
 5. With no grant, the space's `default_role` applies if it is set.
 6. Otherwise there is no access.
 
-Instance admins have no implicit access to content. Their role covers accounts and workspace creation only.
+Instance admins have no implicit access to content. Their role covers accounts, and workspace creation when the server keeps it to them.
 
 ## Workspace actions
 
@@ -67,11 +67,14 @@ A workspace always keeps at least one owner. Any change that would remove the la
 | Action | User | Instance admin |
 | --- | --- | --- |
 | Read or update one's own account, delete it | yes | yes |
-| Create a workspace | no | yes |
+| Create a workspace, with `CADOCS_WORKSPACE_CREATION=all` (the default) | yes | yes |
+| Create a workspace, with `CADOCS_WORKSPACE_CREATION=admins` | no | yes |
 | List, disable or delete users, grant instance admin | no | yes |
 | Generate a password reset link | no | yes |
 | Enable or disable an installed user plugin for oneself (V2) | yes | yes |
 | List installed plugins (V2) | no | yes |
+
+Whoever creates a workspace owns it (ADR 0024).
 
 Installing plugin code is not an instance action: only the operator does it, on the server (ADR 0016).
 

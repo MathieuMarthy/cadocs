@@ -95,6 +95,16 @@ impl From<DefaultRole> for SpaceRole {
     }
 }
 
+/// Who may create a workspace: `CADOCS_WORKSPACE_CREATION` (ADR 0024).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WorkspaceCreation {
+    /// Any enabled user.
+    #[default]
+    All,
+    /// Instance admins only.
+    Admins,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstanceAction {
     /// Read or update one's own account.
@@ -102,7 +112,7 @@ pub enum InstanceAction {
     DeleteOwnAccount {
         last_owner: bool,
     },
-    CreateWorkspace,
+    CreateWorkspace(WorkspaceCreation),
     /// List or disable users, grant instance admin.
     ManageUsers,
     DeleteUser {
@@ -224,7 +234,10 @@ pub fn instance_allows(role: Option<InstanceRole>, action: InstanceAction) -> bo
     match action {
         ManageOwnAccount => true,
         DeleteOwnAccount { last_owner } => !last_owner,
-        CreateWorkspace | ManageUsers | GenerateResetLink => role == InstanceRole::Admin,
+        CreateWorkspace(WorkspaceCreation::All) => true,
+        CreateWorkspace(WorkspaceCreation::Admins) | ManageUsers | GenerateResetLink => {
+            role == InstanceRole::Admin
+        }
         DeleteUser { last_owner } => role == InstanceRole::Admin && !last_owner,
     }
 }

@@ -3,7 +3,7 @@
 import { expect, type Page } from "@playwright/test";
 
 import { asOwner, logIn, memberPage, test } from "./fixtures.ts";
-import { PASSWORD, type TestServer } from "./server.ts";
+import { type Member, PASSWORD, TestServer } from "./server.ts";
 
 /** Logs out from the user menu of the sidebar footer. */
 async function logOut(page: Page, name = "Ada") {
@@ -318,19 +318,84 @@ test("instance administration lists, disables and promotes users", async ({
   await expect(adminRow(page, "grace@example.org")).toHaveCount(0);
 });
 
-test("an instance admin creates a workspace and switches to it", async ({ page, server }) => {
+test("a plain member creates a workspace from the switcher and switches back", async ({
+  browser,
+  server,
+}) => {
+  const grace = await memberPage(browser, server, await server.addMember("grace@example.org"));
+  await grace.goto(`${server.url}/w/tests`);
+  await grace.getByText("Tests ▾").click();
+  await grace.getByRole("button", { name: "new workspace" }).click();
+  // Escape gives up, and gives the row back.
+  await grace.getByLabel("workspace name").press("Escape");
+  await expect(grace.getByLabel("workspace name")).toHaveCount(0);
+  await grace.getByRole("button", { name: "new workspace" }).click();
+  await grace.getByLabel("workspace name").fill("Second");
+  await grace.getByRole("button", { name: "create workspace" }).click();
+  await expect(grace).toHaveURL(`${server.url}/w/second`);
+  await expect(grace.getByRole("heading", { name: "Second" })).toBeVisible();
+  // Its owner creates spaces in it.
+  await expect(grace.getByRole("button", { name: "new space" }).first()).toBeVisible();
+
+  await grace.getByText("Second ▾").click();
+  await grace.getByRole("link", { name: "Tests", exact: true }).click();
+  await expect(grace).toHaveURL(`${server.url}/w/tests`);
+  await expect(grace.getByRole("heading", { name: "Tests" })).toBeVisible();
+  const spaces = grace.getByRole("navigation", { name: "spaces" });
+  await expect(spaces.getByRole("button", { name: "Pages/", exact: true })).toBeVisible();
+});
+
+/** Takes `member` out of the workspace of the first account. */
+async function removeMember(server: TestServer, member: Member) {
+  const { workspaceId } = await server.session();
+  await server.call("DELETE", `/workspaces/${workspaceId}/members/${member.id}`);
+}
+
+test("a user with no workspace creates one from their screen", async ({ browser, server }) => {
+  const member = await server.addMember("grace@example.org");
+  await removeMember(server, member);
+  const grace = await memberPage(browser, server, member);
+  await grace.goto(server.url);
+  await expect(grace.getByRole("heading", { name: "no workspace" })).toBeVisible();
+  await grace.getByLabel("workspace name").fill("Mine");
+  await grace.getByRole("button", { name: "create workspace" }).click();
+  await expect(grace).toHaveURL(`${server.url}/w/mine`);
+  await expect(grace.getByRole("heading", { name: "Mine" })).toBeVisible();
+});
+
+const adminsOnly = test.extend({
+  server: async ({}, use) => {
+    const server = await TestServer.start({ CADOCS_WORKSPACE_CREATION: "admins" });
+    await use(server);
+    await server.dispose();
+  },
+});
+
+adminsOnly("only instance admins see the new workspace form when the server says so", async ({
+  page,
+  browser,
+  server,
+}) => {
+  const member = await server.addMember("grace@example.org");
+  const grace = await memberPage(browser, server, member);
+  await grace.goto(`${server.url}/w/tests`);
+  await grace.getByText("Tests ▾").click();
+  await expect(grace.getByRole("link", { name: "Tests", exact: true })).toBeVisible();
+  await expect(grace.getByRole("button", { name: "new workspace" })).toHaveCount(0);
+
+  await removeMember(server, member);
+  await grace.goto(server.url);
+  await expect(grace.getByRole("heading", { name: "no workspace" })).toBeVisible();
+  await expect(grace.getByText("ask a workspace admin for an invitation.")).toBeVisible();
+  await expect(grace.getByLabel("workspace name")).toHaveCount(0);
+
   await asOwner(page, server);
-  await page.goto(`${server.url}/admin`);
+  await page.goto(`${server.url}/w/tests`);
+  await page.getByText("Tests ▾").click();
+  await page.getByRole("button", { name: "new workspace" }).click();
   await page.getByLabel("workspace name").fill("Second");
   await page.getByRole("button", { name: "create workspace" }).click();
   await expect(page).toHaveURL(`${server.url}/w/second`);
-
-  await page.getByText("Second ▾").click();
-  await page.getByRole("link", { name: "Tests", exact: true }).click();
-  await expect(page).toHaveURL(`${server.url}/w/tests`);
-  await expect(page.getByRole("heading", { name: "Tests" })).toBeVisible();
-  const spaces = page.getByRole("navigation", { name: "spaces" });
-  await expect(spaces.getByRole("button", { name: "Pages/", exact: true })).toBeVisible();
 });
 
 test("a session that ends while the shell is open leads to login", async ({ page, server }) => {

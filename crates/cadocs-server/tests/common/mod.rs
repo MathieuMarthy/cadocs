@@ -146,7 +146,7 @@ async fn start_custom_in(
         .with_revision_timing(config.revisions);
     let store = Arc::new(store);
     let registry = DocRegistry::new(store.clone(), config.collab);
-    let state = AppState::new(
+    let mut state = AppState::new(
         registry.clone(),
         store.clone(),
         Arc::new(PageAuthorizer::new(store.clone())),
@@ -155,6 +155,7 @@ async fn start_custom_in(
         files.unwrap_or_else(|| Arc::new(LocalFileStore::open(dir.path()).unwrap())),
         config.attachments,
     );
+    state.workspace_creation = config.workspace_creation;
     let queue = start_jobs(&state, config.jobs);
     let setup_code = state.setup_code.to_string();
 
