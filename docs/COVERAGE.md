@@ -16,7 +16,7 @@ Paths are short: `server/auth.rs` is `crates/cadocs-server/tests/auth.rs`, `e2e/
 | Attachment download | `download_needs_one_readable_referencing_page` | `server/attachments.rs` `a_download_needs_one_readable_page_that_references_the_file` |
 | Attachment delete | `delete_needs_an_editor_of_every_referencing_page` | `server/attachments.rs` `a_delete_needs_an_editor_of_every_page_that_references_the_file` |
 | Workspace actions | `workspace_matrix`, `owner_rows_are_needed_to_touch_an_owner`, `a_workspace_keeps_one_owner` | `server/workspaces.rs` (update, delete, members, invitations, last owner), `server/matrix.rs` (reads, search, events socket, space creation) |
-| Instance actions | `instance_matrix`, `an_instance_keeps_one_enabled_admin` | `server/admin.rs`, `server/workspaces.rs` `only_an_instance_admin_creates_a_workspace_and_they_own_it`, `server/auth.rs` (own account) |
+| Instance actions | `instance_matrix`, `an_instance_keeps_one_enabled_admin` | `server/admin.rs`, `server/matrix.rs` `workspace_creation_follows_the_setting_over_rest`, `server/workspaces.rs` `the_creation_rule_is_checked_when_a_workspace_is_written`, `e2e/shell` (from the switcher, from the screen of a user with no workspace, and with `admins`), `server/auth.rs` (own account) |
 | Reacting to changes, page sockets | `recompute_keeps_or_closes_the_socket` and the two after it | `server/socket_closes.rs`, one test per trigger and outcome |
 | Reacting to changes, events sockets | | `server/events.rs` (`access.changed`, `4401`, `4403`, `4404`, trash leaves it open) |
 

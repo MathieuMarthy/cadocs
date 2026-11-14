@@ -40,6 +40,7 @@ Environment variables only, so no config file format has to be parsed or documen
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `CADOCS_SESSION_DAYS` | `30` | Session lifetime, 1 to 3650, extended by use |
+| `CADOCS_WORKSPACE_CREATION` | `all` | Who creates workspaces: `all`, any user, or `admins`, instance admins only (ADR 0024). Each workspace has its own `CADOCS_WORKSPACE_QUOTA_MB`, so with `all` a user's storage grows with the workspaces they create |
 | `CADOCS_MAX_UPLOAD_MB` | `25` | Largest attachment, 1 to 1048576 |
 | `CADOCS_WORKSPACE_QUOTA_MB` | `0` | Attachment storage per workspace, `0` for no limit, at most 1048576 |
 | `CADOCS_MAX_IMPORT_MB` | `100` | Largest import body, a page zipped with its attachments, 1 to 1048576. Written to `data/tmp` as it arrives |

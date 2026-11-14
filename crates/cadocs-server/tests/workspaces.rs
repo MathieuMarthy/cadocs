@@ -2,6 +2,7 @@
 
 mod common;
 
+use cadocs_core::permissions::WorkspaceCreation;
 use cadocs_store::{NewWorkspace, StoreError, WorkspaceStore};
 use common::{Api, Login, ORIGIN, PASSWORD, Reply, logged_in};
 use serde_json::{Value, json};
@@ -131,22 +132,14 @@ async fn the_list_of_workspaces_has_pages() {
 }
 
 #[tokio::test]
-async fn only_an_instance_admin_creates_a_workspace_and_they_own_it() {
+async fn a_new_workspace_gets_a_slug_and_needs_a_name() {
     let (api, admin) = logged_in().await;
-    let user = api.add_and_login(BOB, "bob@example.org").await;
-
     let body = json!({ "name": "Team" });
-    let reply = api
-        .send("POST", "/workspaces", &user.headers(), body.clone())
-        .await;
-    assert_eq!((reply.status, reply.code()), (403, "forbidden"));
-
     let reply = api
         .send("POST", "/workspaces", &admin.headers(), body)
         .await;
     assert_eq!(reply.status, 201, "{reply:?}");
     assert_eq!(reply.body["slug"], "team");
-    assert_eq!(reply.body["role"], "owner");
     assert_eq!(reply.body["language"], "en");
 
     let reply = api
@@ -819,19 +812,44 @@ async fn a_bad_path_is_refused_in_the_error_shape() {
 }
 
 #[tokio::test]
-async fn a_workspace_needs_an_instance_admin_when_it_is_written() {
+async fn the_creation_rule_is_checked_when_a_workspace_is_written() {
     let (api, _) = logged_in().await;
     api.add_user(BOB, "bob@example.org").await;
-    let new = NewWorkspace {
-        id: "new".to_owned(),
+    api.add_user(CARA, "cara@example.org").await;
+    api.sql(&format!(
+        "UPDATE users SET disabled_at = 1 WHERE id = '{CARA}'"
+    ))
+    .await;
+    let new = |owner: &str, creation| NewWorkspace {
+        id: format!("new-{owner}"),
         slug: "new".to_owned(),
         name: "New".to_owned(),
-        owner_id: BOB.to_owned(),
+        owner_id: owner.to_owned(),
+        creation,
         now: 1,
     };
-    let refused = api.store.create_workspace(&new).await;
+
+    // A plain user, when only instance admins may create one.
+    let refused = api
+        .store
+        .create_workspace(&new(BOB, WorkspaceCreation::Admins))
+        .await;
     assert!(
         matches!(refused, Err(StoreError::NotAllowed)),
         "{refused:?}"
     );
+    // A disabled user, whatever the setting.
+    let refused = api
+        .store
+        .create_workspace(&new(CARA, WorkspaceCreation::All))
+        .await;
+    assert!(
+        matches!(refused, Err(StoreError::NotAllowed)),
+        "{refused:?}"
+    );
+    let created = api
+        .store
+        .create_workspace(&new(BOB, WorkspaceCreation::All))
+        .await;
+    assert!(created.is_ok(), "{created:?}");
 }

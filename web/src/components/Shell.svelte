@@ -21,6 +21,7 @@
   import type { IconName } from "./icons";
   import IconButton from "./IconButton.svelte";
   import Menu, { type MenuItem } from "./Menu.svelte";
+  import NewWorkspace from "./NewWorkspace.svelte";
   import Source from "./Source.svelte";
   import Tree from "./Tree.svelte";
 
@@ -53,6 +54,14 @@
   const current = $derived(workspace ?? (guess ? (session.workspaces[0] ?? null) : null));
 
   let nav = $state<Nav | null>(null);
+  /** The new workspace form is open in the selector. */
+  let addingWorkspace = $state(false);
+
+  async function closeAddingWorkspace() {
+    addingWorkspace = false;
+    await tick();
+    sidebar?.querySelector<HTMLElement>(".new-workspace-row")?.focus();
+  }
 
   $effect(() => {
     if (!current) {
@@ -180,7 +189,17 @@
             </a>
           </li>
         {/each}
+        {#if session.can_create_workspace && !addingWorkspace}
+          <li>
+            <button class="row new-workspace-row" type="button" onclick={() => (addingWorkspace = true)}>
+              new workspace
+            </button>
+          </li>
+        {/if}
       </ul>
+      {#if session.can_create_workspace && addingWorkspace}
+        <NewWorkspace onclose={closeAddingWorkspace} />
+      {/if}
     </details>
 
     {#if current}

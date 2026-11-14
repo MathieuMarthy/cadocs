@@ -235,7 +235,7 @@ impl WorkspaceStore for SqliteStore {
         .fetch_optional(&mut *tx)
         .await?;
         let role = is_instance_admin.and_then(|admin| instance_role(true, admin));
-        if !instance_allows(role, InstanceAction::CreateWorkspace) {
+        if !instance_allows(role, InstanceAction::CreateWorkspace(new.creation)) {
             return Err(StoreError::NotAllowed);
         }
 

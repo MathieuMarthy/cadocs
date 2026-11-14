@@ -127,7 +127,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
     let store = Arc::new(store.with_revision_timing(config.revisions));
     let files = open_files(&config).await?;
     let registry = DocRegistry::new(store.clone(), config.collab.clone());
-    let state = AppState::new(
+    let mut state = AppState::new(
         registry.clone(),
         store.clone(),
         Arc::new(PageAuthorizer::new(store)),
@@ -136,6 +136,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
         files,
         config.attachments,
     );
+    state.workspace_creation = config.workspace_creation;
     tokio::spawn(return_freed_memory(registry));
     start_jobs(&state, config.jobs);
 

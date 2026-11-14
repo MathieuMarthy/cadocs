@@ -56,7 +56,7 @@ Bodies and answers:
 - `GET /auth/setup` answers `{ required }`, `true` while no account exists.
 - `POST /auth/setup` takes `{ email, name, password, workspace_name, code }`, and answers `201` with the session body and the cookie. `code` is the one of the link the server logs at each start while setup is pending (ADR 0021): missing or empty is `400` with `code: required`, any other value `400` with `code: wrong`. Once an account exists it answers `409`, whatever the code.
 - `POST /auth/login` takes `{ email, password }`, and answers `200` with the session body and the cookie. An unknown email, a wrong password and a disabled account all answer the same `401`, in the same time.
-- `GET /session` answers `{ user: { id, email, name, is_instance_admin }, workspaces: [{ id, slug, name, role }], csrf_token }`.
+- `GET /session` answers `{ user: { id, email, name, is_instance_admin }, workspaces: [{ id, slug, name, role }], can_create_workspace, csrf_token }`, where `can_create_workspace` says whether `POST /workspaces` would let the user through. The other routes that answer the session body carry it too.
 - `POST /auth/logout` and `DELETE /me` answer `204` and clear the cookie.
 - `PATCH /me` takes `{ name?, email?, password?, current_password? }` and answers the `user` object. A wrong or missing `current_password` is a `400` that names that field, an email in use is a `409` that names `email`, and a `401` means the session or the password changed while the request waited.
 
@@ -85,7 +85,7 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 | Method | Route | Role | Purpose |
 | --- | --- | --- | --- |
 | GET | `/workspaces` | user | List the caller's workspaces |
-| POST | `/workspaces` | instance admin | Create a workspace |
+| POST | `/workspaces` | user, instance admin with `CADOCS_WORKSPACE_CREATION=admins` | Create a workspace (ADR 0024) |
 | GET, PATCH | `/workspaces/{ws}` | member, admin to edit | Read or update |
 | DELETE | `/workspaces/{ws}` | owner | Delete, with the workspace name as confirmation |
 | GET | `/workspaces/{ws}/members` | member | List members |
@@ -100,7 +100,7 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 | GET | `/workspaces/{ws}/recent` | member | Recently updated pages in readable spaces |
 
 - A workspace in a list is `{ id, slug, name, role }`, the caller's role included, as in `GET /session`. `GET /workspaces` is paginated, oldest first. Alone it also has `{ language, created_at, updated_at }`.
-- `POST /workspaces` takes `{ name }` and answers `201` with the workspace, owned by the caller. The slug comes from the name, gets a number if it is taken, and never changes.
+- `POST /workspaces` takes `{ name }` and answers `201` with the workspace, owned by the caller, or `403` when the setting keeps creation to instance admins. The slug comes from the name, gets a number if it is taken, and never changes.
 - `PATCH /workspaces/{ws}` takes `{ name?, language? }` and answers the workspace. `language` is one of `ar`, `da`, `de`, `el`, `en`, `es`, `fi`, `fr`, `hu`, `it`, `nl`, `no`, `pt`, `ro`, `ru`, `sv`, `ta`, `tr` (ADR 0007).
 - `DELETE /workspaces/{ws}` takes `{ name }`, which must match exactly, or it is a `400` with `name: mismatch`. It answers `204`.
 - A member is `{ id, email, name, role, disabled, created_at }`, where `id` is the user's. `GET /workspaces/{ws}/members` is paginated, by account age.

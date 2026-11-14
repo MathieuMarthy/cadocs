@@ -516,12 +516,32 @@ h2 {
   height: var(--row-height);
 }
 
-.new-space {
+.new-space,
+.new-workspace {
   padding: 0 var(--space-2) var(--space-2);
 }
 
-.new-space .field {
+.new-space .field,
+.new-workspace .field {
   margin-bottom: var(--space-2);
+}
+
+/* On the screen of a user with no workspace, the form sits in the column. */
+main .new-workspace {
+  padding: 0;
+}
+
+button.row {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+button.row:hover {
+  color: var(--ink);
 }
 
 .sidebar-group {

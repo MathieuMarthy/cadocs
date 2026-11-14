@@ -172,7 +172,7 @@ The shell uses the buttons, fields, breadcrumb and workspace selector. The other
 
 ### Workspace selector
 
-A 22px `accent` square, the name at 600, and the current workspace in `muted` followed by `▾`. It opens in place, as rows below it: only the command menu floats.
+A 22px `accent` square, the name at 600, and the current workspace in `muted` followed by `▾`. It opens in place, as rows below it: only the command menu floats. A last `new workspace` row, in `muted`, shows to who may create one, and opens the name form in place of itself.
 
 ### Search field
 

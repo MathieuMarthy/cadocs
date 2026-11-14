@@ -6,9 +6,8 @@
   import Menu, { type MenuItem } from "../components/Menu.svelte";
   import Shell from "../components/Shell.svelte";
   import { copy } from "../lib/actions";
-  import { api, type Page, type Workspace } from "../lib/api";
+  import { api, type Page } from "../lib/api";
   import { Form } from "../lib/form.svelte";
-  import { navigate } from "../lib/router.svelte";
   import { app, refreshSession } from "../lib/session.svelte";
 
   interface AdminUser {
@@ -23,10 +22,8 @@
   let cursor = $state<string | null>(null);
   /** The one reset link on screen, which the server shows once. */
   let reset = $state<{ user: string; link: string } | null>(null);
-  let workspaceName = $state("");
   const list = new Form();
   const action = new Form();
-  const creation = new Form();
 
   async function load(after: string | null) {
     await list.run(async () => {
@@ -108,15 +105,6 @@
     await tick();
     document.querySelector<HTMLElement>(`[data-user="${user.id}"] .record-menu`)?.focus();
   }
-
-  async function createWorkspace(event: SubmitEvent) {
-    event.preventDefault();
-    await creation.run(async () => {
-      const workspace = await api<Workspace>("POST", "/workspaces", { name: workspaceName });
-      await refreshSession();
-      navigate(`/w/${workspace.slug}`);
-    });
-  }
 </script>
 
 <Shell title="admin" crumbWorkspace={false}>
@@ -186,16 +174,4 @@
       load more
     </button>
   {/if}
-
-  <h2>new workspace</h2>
-  <form onsubmit={createWorkspace}>
-    <Field
-      label="workspace name"
-      bind:value={workspaceName}
-      required
-      problem={creation.field("name")}
-    />
-    {#if creation.problem}<p class="problem" role="alert">{creation.problem}</p>{/if}
-    <button class="button" disabled={creation.busy}>create workspace</button>
-  </form>
 </Shell>

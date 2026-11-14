@@ -92,19 +92,21 @@ fn instance_row(action: InstanceAction) -> [bool; 2] {
         ManageOwnAccount => [Y, Y],
         DeleteOwnAccount { last_owner: false } => [Y, Y],
         DeleteOwnAccount { last_owner: true } => [N, N],
-        CreateWorkspace | ManageUsers | GenerateResetLink => [N, Y],
+        CreateWorkspace(WorkspaceCreation::All) => [Y, Y],
+        CreateWorkspace(WorkspaceCreation::Admins) | ManageUsers | GenerateResetLink => [N, Y],
         DeleteUser { last_owner: false } => [N, Y],
         DeleteUser { last_owner: true } => [N, N],
     }
 }
 
-const INSTANCE_ACTIONS: [InstanceAction; 8] = {
+const INSTANCE_ACTIONS: [InstanceAction; 9] = {
     use InstanceAction::*;
     [
         ManageOwnAccount,
         DeleteOwnAccount { last_owner: false },
         DeleteOwnAccount { last_owner: true },
-        CreateWorkspace,
+        CreateWorkspace(WorkspaceCreation::All),
+        CreateWorkspace(WorkspaceCreation::Admins),
         ManageUsers,
         DeleteUser { last_owner: false },
         DeleteUser { last_owner: true },

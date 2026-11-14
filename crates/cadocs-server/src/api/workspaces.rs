@@ -99,6 +99,7 @@ async fn create<S: WorkspaceStore, A>(
         slug: slug(&name, "workspace"),
         name,
         owner_id: current.user.id,
+        creation: state.workspace_creation,
         now: now_ms(),
     };
     let workspace = state.store.create_workspace(&new).await?;

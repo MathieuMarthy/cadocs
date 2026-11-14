@@ -5,7 +5,7 @@
 
 use std::future::Future;
 
-use cadocs_core::permissions::WorkspaceRole;
+use cadocs_core::permissions::{WorkspaceCreation, WorkspaceRole};
 
 use crate::{Membership, NewSession, StoreError};
 
@@ -19,6 +19,8 @@ pub struct NewWorkspace {
     pub slug: String,
     pub name: String,
     pub owner_id: String,
+    /// The setting the owner is checked against.
+    pub creation: WorkspaceCreation,
     pub now: i64,
 }
 
@@ -92,8 +94,8 @@ pub struct InvitedUser {
 }
 
 pub trait WorkspaceStore: Send + Sync + 'static {
-    /// Creates a workspace owned by `owner_id`, who must be an enabled instance admin, or it is a
-    /// `NotAllowed`.
+    /// Creates a workspace owned by `owner_id`, who must be an enabled user, and an instance admin
+    /// when `creation` says so, or it is a `NotAllowed`.
     fn create_workspace(
         &self,
         workspace: &NewWorkspace,

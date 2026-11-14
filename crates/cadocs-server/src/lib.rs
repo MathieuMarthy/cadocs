@@ -26,6 +26,7 @@ use axum::http::StatusCode;
 use axum::middleware::{from_fn_with_state, map_response_with_state};
 use axum::routing::{any, get};
 use cadocs_collab::{Authorizer, DocRegistry};
+use cadocs_core::permissions::WorkspaceCreation;
 use cadocs_files::FileStore;
 use cadocs_jobs::{Cleanup, Index, JobConfig, JobQueue, Revisions, ServerJobs, Worker};
 use cadocs_store::{
@@ -59,6 +60,8 @@ pub struct AppState<S, A> {
     pub password_guesses: Arc<RateLimiter>,
     /// What first-run setup needs, new at each start and shown only in the log (ADR 0021).
     pub setup_code: Arc<str>,
+    /// Who may create a workspace (ADR 0024): any user unless set otherwise after `new`.
+    pub workspace_creation: WorkspaceCreation,
     /// Each socket task holds a receiver, so shutdown can wait for them.
     sockets: watch::Sender<()>,
     /// Wakes the recheck of every socket.
@@ -78,6 +81,7 @@ impl<S, A> Clone for AppState<S, A> {
             attachments: self.attachments,
             password_guesses: self.password_guesses.clone(),
             setup_code: self.setup_code.clone(),
+            workspace_creation: self.workspace_creation,
             sockets: self.sockets.clone(),
             access: self.access.clone(),
         }
@@ -111,6 +115,7 @@ impl<S, A> AppState<S, A> {
             setup_code: session::new_token()
                 .expect("the system's random source")
                 .into(),
+            workspace_creation: WorkspaceCreation::default(),
             sockets: watch::Sender::new(()),
             access: Arc::default(),
         }

@@ -529,3 +529,51 @@ async fn workspace_reads_follow_the_matrix_over_rest_and_the_events_socket() {
         }
     }
 }
+
+/// Instance actions of PERMISSIONS.md that depend on `CADOCS_WORKSPACE_CREATION` (ADR 0024): who
+/// creates a workspace, and what `GET /session` tells the front end about it.
+#[tokio::test]
+async fn workspace_creation_follows_the_setting_over_rest() {
+    for (setting, user_creates) in [(None, true), (Some("all"), true), (Some("admins"), false)] {
+        let settings: Vec<(&str, &str)> = setting
+            .map(|value| ("CADOCS_WORKSPACE_CREATION", value))
+            .into_iter()
+            .collect();
+        let api = start_tuned(ORIGIN, "", &settings).await;
+        let reply = api.setup().await;
+        assert_eq!(reply.status, 201, "{reply:?}");
+        let admin = Login::from(&reply);
+        let ws = api.first_workspace().await;
+        let member = api.add_member(&ws, BOB, "bob@example.org", "member").await;
+        let loner = api
+            .add_and_login("22222222-0000-7000-8000-000000000001", "eve@example.org")
+            .await;
+
+        for (who, login, allowed) in [
+            ("instance admin", &admin, true),
+            ("member", &member, user_creates),
+            ("user with no workspace", &loner, user_creates),
+        ] {
+            let session = api.session(login).await;
+            assert_eq!(
+                session.body["can_create_workspace"], allowed,
+                "{setting:?} {who}: {session:?}"
+            );
+
+            let body = json!({ "name": format!("Of the {who}") });
+            let got = api
+                .send("POST", "/workspaces", &login.headers(), body)
+                .await;
+            if allowed {
+                assert_eq!(got.status, 201, "{setting:?} {who}: {got:?}");
+                assert_eq!(got.body["role"], "owner", "{setting:?} {who}");
+            } else {
+                assert_eq!(
+                    (got.status, got.code()),
+                    (403, "forbidden"),
+                    "{setting:?} {who}"
+                );
+            }
+        }
+    }
+}

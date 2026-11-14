@@ -11,6 +11,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{Extension, Json, Router};
 use cadocs_collab::Authorizer;
+use cadocs_core::permissions::{InstanceAction, instance_allows, instance_role};
 use cadocs_store::{
     AccountStore, DocStore, FirstUser, MAX_SLUG_CHARS, Membership, NewSession, UpdateBasis, User,
     UserChanges, now_ms,
@@ -105,11 +106,21 @@ impl From<Membership> for WorkspaceBody {
 struct SessionBody {
     user: UserBody,
     workspaces: Vec<WorkspaceBody>,
+    /// Whether `POST /workspaces` would let this user through (ADR 0024).
+    can_create_workspace: bool,
     csrf_token: String,
 }
 
-pub(super) fn session_body(user: User, workspaces: Vec<Membership>, token: &str) -> Response {
+pub(super) fn session_body<S, A>(
+    state: &AppState<S, A>,
+    user: User,
+    workspaces: Vec<Membership>,
+    token: &str,
+) -> Response {
+    let role = instance_role(true, user.is_instance_admin);
+    let creation = InstanceAction::CreateWorkspace(state.workspace_creation);
     let body = SessionBody {
+        can_create_workspace: instance_allows(role, creation),
         user: user.into(),
         workspaces: workspaces.into_iter().map(Into::into).collect(),
         csrf_token: csrf_token(token),
@@ -125,7 +136,7 @@ pub(super) fn new_account_body<S, A>(
     workspaces: Vec<Membership>,
     token: &str,
 ) -> Response {
-    let mut response = session_body(user, workspaces, token);
+    let mut response = session_body(state, user, workspaces, token);
     *response.status_mut() = StatusCode::CREATED;
     response
         .headers_mut()
@@ -244,7 +255,7 @@ async fn login<S: AccountStore, A>(
     if !state.store.create_session(&session, checked).await? {
         return Err(wrong_credentials());
     }
-    let mut response = session_body(found.user, workspaces, &token);
+    let mut response = session_body(&state, found.user, workspaces, &token);
     response
         .headers_mut()
         .insert(SET_COOKIE, session::cookie(&token, &state.http));
@@ -274,7 +285,12 @@ async fn current_session<S: AccountStore, A>(
     Extension(current): Extension<CurrentSession>,
 ) -> Result<Response, ApiError> {
     let workspaces = state.store.memberships(&current.user.id).await?;
-    Ok(session_body(current.user, workspaces, &current.token))
+    Ok(session_body(
+        &state,
+        current.user,
+        workspaces,
+        &current.token,
+    ))
 }
 
 #[derive(Deserialize)]
