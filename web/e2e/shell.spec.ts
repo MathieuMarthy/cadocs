@@ -560,3 +560,30 @@ test.describe("an open page reacts to its socket closing", () => {
     await expect(page.getByRole("heading", { name: "page not found" })).toBeVisible();
   });
 });
+
+test("the logo is the name with its caret, and the tab icon", async ({ page, server }) => {
+  await page.goto(`${server.url}/login`);
+  // The caret is drawn, so the name stays the only text.
+  await expect(page.locator(".solo-brand")).toHaveText("cadocs");
+  await expect(page.locator(".solo-brand .logo")).toBeVisible();
+
+  const href = await page.locator('link[rel="icon"]').getAttribute("href");
+  expect(href).toBe("/favicon.svg");
+  const icon = await page.request.get(`${server.url}${href}`);
+  expect(icon.status()).toBe(200);
+  expect(icon.headers()["content-type"]).toBe("image/svg+xml");
+});
+
+test("the caret stays beside the name when the workspace name is cut", async ({ page, server }) => {
+  const { workspaceId } = await server.session();
+  await server.call("PATCH", `/workspaces/${workspaceId}`, { name: "A workspace with a very long name indeed" });
+  await asOwner(page, server);
+  await page.goto(server.url);
+  const name = page.locator(".selector-name");
+  await expect(name).toHaveText("cadocs");
+  const box = await name.boundingBox();
+  const caret = await name.locator(".logo").boundingBox();
+  // One line: the caret sits within the height of the name, to its right.
+  expect(caret!.y + caret!.height).toBeLessThanOrEqual(box!.y + box!.height);
+  expect(box!.height).toBeLessThan(28);
+});

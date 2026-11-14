@@ -63,6 +63,15 @@ Those subsets have no box-drawing characters, so the tree prefixes of the MVP ne
 
 **Markdown source.** Under the caret of a writer, a heading shows its `##` in `muted`, in place of its number, and a quote paragraph its `>`. Edited as text, the source is set in the block's own type (ADR 0018). A code block shows its language at the top right, in `meta` `muted`, or `auto` when it is guessed.
 
+## Logo
+
+The name followed by the editor's caret: `cadocs` in mono 600, then a flat `accent` block. The logo is the word being typed, so it has no separate symbol.
+
+- **In the interface:** the `.logo` caret of [`web/src/base.css`](../web/src/base.css) after the name, sized in `em` (0.55 wide, 1.2 high), so it follows the text size.
+- **As an icon:** [`web/public/favicon.svg`](../web/public/favicon.svg), a block `c` in `ink` and the caret in `accent` on a 32 grid, with its own dark values.
+- **Colors:** the name is `ink` and the caret `accent`, never the reverse: `accent` does not carry text.
+- **README image:** `docs/assets/promo-light.png` and `promo-dark.png`, 1280 by 640 at 2x, made from a capture of the running application.
+
 ## Iconography
 
 One set: **Lucide** 0.460.0 (ISC license, compatible with AGPL-3.0), redrawn with sharp corners.

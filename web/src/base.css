@@ -33,11 +33,14 @@ body {
   line-height: 1.4;
 }
 
+/* The caret that follows the name: the logo is the word being typed. */
 .logo {
-  flex: none;
-  width: 22px;
-  height: 22px;
+  display: inline-block;
+  width: 0.55em;
+  height: 1.2em;
+  margin-left: 0.18em;
   background: var(--accent);
+  vertical-align: -0.25em;
 }
 
 .breadcrumb {
@@ -289,7 +292,6 @@ h2 {
 .solo-brand {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
   margin-bottom: var(--space-10);
   color: var(--ink);
   font-family: var(--font-mono);
@@ -394,6 +396,8 @@ h2 {
 }
 
 .selector-name {
+  /* The caret never wraps under the name when the workspace name is cut. */
+  flex: none;
   font-weight: 600;
 }
 

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <style>
+    .ink { fill: #141414; }
+    .caret { fill: #ff5a1f; }
+    @media (prefers-color-scheme: dark) {
+      .ink { fill: #e6e6e4; }
+      .caret { fill: #ff6b30; }
+    }
+  </style>
+  <path class="ink" d="M3 8H17V13H8V19H17V24H3Z"/>
+  <rect class="caret" x="20" y="4" width="8" height="24"/>
+</svg>

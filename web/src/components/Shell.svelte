@@ -171,8 +171,7 @@
     <IconButton class="drawer-close" icon="x" verb="close the sidebar" onclick={() => closeDrawer(true)} />
     <details class="selector">
       <summary>
-        <span class="logo" aria-hidden="true"></span>
-        <span class="selector-name">cadocs</span>
+        <span class="selector-name">cadocs<span class="logo" aria-hidden="true"></span></span>
         <span class="selector-current">
           {current?.name ?? (guess ? "no workspace" : "…")} ▾
         </span>

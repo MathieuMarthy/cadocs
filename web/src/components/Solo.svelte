@@ -9,7 +9,7 @@
 <svelte:head><title>{title} · cadocs</title></svelte:head>
 
 <div class="solo">
-  <a class="solo-brand" href="/"><span class="logo" aria-hidden="true"></span>cadocs</a>
+  <a class="solo-brand" href="/">cadocs<span class="logo" aria-hidden="true"></span></a>
   <main>
     <h1>{title}</h1>
     {@render children()}
