@@ -23,6 +23,7 @@
   import IconButton from "./IconButton.svelte";
   import Menu, { type MenuItem } from "./Menu.svelte";
   import Self from "./TreeLevel.svelte";
+  import { unfold } from "../lib/motion";
   import { canEdit, type Level, type Nav, type Place } from "../lib/nav.svelte";
   import { copy, pageLink } from "../lib/actions";
   import { shownPage } from "../lib/router.svelte";
@@ -50,6 +51,12 @@
 
   /** The row of the page on screen scrolls into the tree when it appears. */
   const reveal = (row: HTMLElement) => row.scrollIntoView({ block: "nearest" });
+
+  /** A row that appeared in an unfolding level was scrolled to while short of its place. */
+  const unfolded = (event: Event) => {
+    const row = (event.currentTarget as HTMLElement).querySelector<HTMLElement>(".tree-row.selected");
+    if (row) reveal(row);
+  };
 
   /** The page the address shows, which its row marks. */
   const shown = $derived(shownPage());
@@ -125,7 +132,8 @@
   }
 </script>
 
-<ul class="rows">
+<!-- Local: only the level that opens or closes moves, not the ones it holds. -->
+<ul class="rows" transition:unfold onintroend={unfolded}>
   {#each level.items as page, index (page.id)}
     {@const last = index === level.items.length - 1 && !level.more}
     {@const open = page.has_children && nav.open.has(page.id)}
@@ -175,7 +183,8 @@
           <Menu label="more actions for {name(page)}" items={actions(page)} />
         </span>
       </div>
-      {#if open && children}
+      <!-- Once loaded, so the level unfolds to the height of its rows. -->
+      {#if open && children?.loaded}
         <Self
           {nav}
           level={children}

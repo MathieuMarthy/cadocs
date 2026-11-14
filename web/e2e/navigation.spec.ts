@@ -525,6 +525,8 @@ test("the sidebar stays on screen and its tree scrolls alone", async ({ page, se
   await page.goto(`${server.url}/w/tests`);
   await spaceButton(page, "Pages/").click();
   await expect(pageLink(page, "Page 29")).toBeAttached();
+  // Scrolling while the level unfolds would stop short of the rows still to come.
+  await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
 
   const user = page.getByRole("complementary").getByRole("button", { name: "Ada", exact: true });
   await expect(user).toBeInViewport();
@@ -539,4 +541,19 @@ test("the sidebar stays on screen and its tree scrolls alone", async ({ page, se
   await expect(pageLink(page, "Page 29")).toBeInViewport();
   const scrolled = await page.locator(".sidebar-scroll").evaluate((element) => element.scrollTop);
   expect(scrolled).toBeGreaterThan(0);
+});
+
+test("a page opened by its address shows its row, once its levels have unfolded", async ({
+  page,
+  server,
+}) => {
+  const parent = await newPage(server, "Parent");
+  let last = "";
+  for (let index = 0; index < 30; index += 1) last = await newPage(server, `Child ${index}`, parent);
+  await page.setViewportSize({ width: 1200, height: 500 });
+  await asOwner(page, server);
+  await page.goto(`${server.url}/?page=${last}`);
+  await expect(page.getByLabel("page title")).toHaveValue("Child 29");
+  await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
+  await expect(pageLink(page, "Child 29")).toBeInViewport();
 });

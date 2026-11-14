@@ -18,6 +18,7 @@
 <script lang="ts">
   import { tick } from "svelte";
 
+  import { appear } from "../lib/motion";
   import Icon from "./Icon.svelte";
   import IconButton from "./IconButton.svelte";
 
@@ -50,7 +51,8 @@
     open = true;
     await tick();
     if (!menu || !button) return;
-    menu.showPopover();
+    // Opened again while it was fading out, it is still the same open popover.
+    if (!menu.matches(":popover-open")) menu.showPopover();
     const box = button.getBoundingClientRect();
     const left = Math.max(0, box.right - menu.offsetWidth);
     const below = box.bottom + menu.offsetHeight <= window.innerHeight;
@@ -180,6 +182,7 @@
     tabindex="-1"
     aria-label={label}
     popover="manual"
+    transition:appear
     onkeydown={key}
     onfocusout={(event) => {
       const next = event.relatedTarget as Node | null;

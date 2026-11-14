@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { appear } from "../lib/motion";
   import type { IconName } from "./icons";
   import IconButton from "./IconButton.svelte";
 
@@ -24,12 +25,14 @@
   let asking = $state(false);
 </script>
 
+<!-- Each branch fades in and the one it replaces goes at once, so both never show side by side. -->
 {#if asking}
   <button
     class="button"
     class:danger
     type="button"
     {disabled}
+    in:appear
     onclick={() => {
       asking = false;
       onconfirm();
@@ -37,9 +40,9 @@
   >
     {confirm}
   </button>
-  <button class="button secondary" type="button" onclick={() => (asking = false)}>cancel</button>
+  <button class="button secondary" type="button" in:appear onclick={() => (asking = false)}>cancel</button>
 {:else if icon}
-  <IconButton {icon} verb={label} {danger} {disabled} onclick={() => (asking = true)} />
+  <IconButton {icon} verb={label} {danger} {disabled} appear onclick={() => (asking = true)} />
 {:else}
   <button
     class="button"
@@ -47,6 +50,7 @@
     class:danger
     type="button"
     {disabled}
+    in:appear
     onclick={() => (asking = true)}
   >
     {label}

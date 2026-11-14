@@ -45,6 +45,16 @@
   --row-height: 30px;
   --control-height: 34px;
   --icon-size: 16px;
+
+  /* Short and linear. `lib/motion.ts` reads it for the Svelte transitions. */
+  --motion-duration: 120ms;
+}
+
+/* Nothing moves for a reader who asks for less motion: a zero duration skips the transition. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration: 0ms;
+  }
 }
 
 /* A choice in the interface overrides the system. See `web/src/lib/theme.svelte.ts`. */
