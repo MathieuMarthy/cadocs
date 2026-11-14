@@ -146,8 +146,9 @@
             <Menu label="more actions for {label(space)}" items={spaceItems(space)} />
           </span>
         </div>
-        {#if open && root}
-          {#if root.loaded && root.items.length === 0 && !root.problem}
+        <!-- Once loaded, so the level unfolds to the height of its rows. -->
+        {#if open && root?.loaded}
+          {#if root.items.length === 0 && !root.problem}
             <p class="tree-row meta"><span class="tree-prefix">└─ </span>no pages</p>
           {/if}
           <TreeLevel

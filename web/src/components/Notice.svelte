@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { appear } from "../lib/motion";
   import { hold, notices, release, undo } from "../lib/notice.svelte";
 
   let button = $state<HTMLButtonElement>();
@@ -19,6 +20,7 @@
   <div
     class="notice-region"
     role="status"
+    transition:appear
     onpointerenter={hold}
     onpointerleave={release}
     onfocusin={hold}

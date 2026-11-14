@@ -117,6 +117,25 @@ One set: **Lucide** 0.460.0 (ISC license, compatible with AGPL-3.0), redrawn wit
 | `control-height` | 34px | Buttons and menu items |
 | `icon-size` | 16px | Every icon |
 
+## Motion
+
+Motion says where something went, and nothing more. It is short, linear and plain.
+
+- One token, `motion-duration` (120ms). No other duration, no delay.
+- Linear only: no ease, no spring, no bounce, no overshoot. Opacity and height only: nothing slides in from the side, scales or turns.
+- Under `prefers-reduced-motion: reduce`, `motion-duration` is 0 and nothing moves: things show and go at once.
+- What moves, and how:
+
+| What | In | Out |
+| --- | --- | --- |
+| A tree level (a page's children, a space's root) | Height, from 0 | Height, to 0 |
+| An action menu | Opacity | Opacity |
+| The notice | Opacity | Opacity |
+| The confirm buttons | Opacity, each branch | None: the branch it replaces goes at once, so both never show side by side |
+
+- Only a level that opens or closes moves, once its rows are there, so it unfolds to their height. The ancestors of the page on screen unfold too when it opens them. A level already loaded when the tree shows, and the levels inside one being closed, do not move.
+- Everything else stays still: pages, rows, hover, selection and focus change at once.
+
 ## Components
 
 The shell uses the buttons, fields, breadcrumb and workspace selector. The others are the reference for the next steps. The icons, the action menu, the drawer and the lowercase labels came with ADR 0017. Step 12a brought the icons, the icon button, the action menu, the notice and the tree in line; step 12b brought the sticky sidebar, the drawer, the user menu and the linked breadcrumb; step 12c brought the screens in line.
@@ -219,6 +238,7 @@ Lowercase in the interface (`share`, `history`, `new page`), short phrases, plai
 
 ## Do not
 
+- Animate anything outside [Motion](#motion), or ease, delay or bounce what is in it.
 - Round a corner, or add a blurred shadow or a gradient.
 - Use `accent` for text on a light background.
 - Tint the grays towards yellow or cream.
