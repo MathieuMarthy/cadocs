@@ -6,7 +6,7 @@
 
 # The front end, which the binary embeds. Its build checks the editor schema against fixtures of
 # cadocs-content.
-FROM node:24-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS web
+FROM node:26-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS web
 WORKDIR /src
 COPY web/package.json web/package-lock.json web/
 RUN npm --prefix web ci
