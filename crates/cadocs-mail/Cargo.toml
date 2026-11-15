@@ -7,13 +7,14 @@ publish.workspace = true
 
 [features]
 # A relay for tests, which keeps what it is sent. Never in the server binary.
-fake = ["tokio/io-util", "tokio/net", "tokio/rt", "tokio/sync"]
+fake = ["tokio/io-util", "tokio/net"]
 
 [dependencies]
 getrandom.workspace = true
 lettre.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tracing.workspace = true
 
 [dev-dependencies]
 cadocs-mail = { path = ".", features = ["fake"] }

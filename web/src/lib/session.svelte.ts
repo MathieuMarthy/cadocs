@@ -52,6 +52,18 @@ export async function refreshSession() {
   signIn(await api<Session>("GET", "/session"));
 }
 
+/**
+ * Whether the instance sends mail (ADR 0026), read when a screen needs it: a person who logs out
+ * reaches login with no new boot. A failed read counts as no mail.
+ */
+export async function sendsMail() {
+  try {
+    return (await api<{ mail?: boolean }>("GET", "/auth/setup")).mail === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function boot() {
   app.phase = "loading";
   try {

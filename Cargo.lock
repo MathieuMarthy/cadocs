@@ -361,6 +361,7 @@ dependencies = [
  "lettre",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

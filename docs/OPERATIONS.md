@@ -72,6 +72,8 @@ Attachments go to `data/files/` unless `CADOCS_FILE_STORE` is `s3` (ADR 0020). S
 
 Mail is off unless `CADOCS_SMTP_HOST` is set (ADR 0026). Off, accounts come from first-run setup and invitations, and an instance admin makes reset links. On, cadocs hands each message to this relay, one connection per message, and keeps none: a message the relay cannot take is logged and lost. The server tries the relay at start and logs whether it answers. A relay that is down does not stop the start. `cadocs test-mail <email>` sends one message and prints what the relay answered.
 
+With mail on, the login screen links to a form that mails a reset link to the address of an account. Messages wait in memory, 64 at most, for one of 4 connections to the relay. One that waited two minutes, or arrives when 64 already wait, is logged and dropped. Nothing waits on disk, so a restart loses what was not sent: the person asks again.
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `CADOCS_SMTP_HOST` | unset | The relay: a host name or an address, with no scheme or port. Unset or empty turns mail off, whatever the others say. An empty value of any setting below counts as unset |

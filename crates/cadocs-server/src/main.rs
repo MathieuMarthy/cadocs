@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::Context;
 use cadocs_collab::{DocRegistry, PageAuthorizer};
 use cadocs_files::{FileStore, LocalFileStore};
-use cadocs_mail::{Mail, Mailer, SmtpMailer};
+use cadocs_mail::{Mail, Mailer, Outbox, SmtpMailer};
 use cadocs_server::api::auth::normalize_email;
 use cadocs_server::assets::WebAssets;
 use cadocs_server::cli::{self, Command};
@@ -179,7 +179,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
     if let Some(smtp) = config.mail {
         let relay = format!("{}:{}", smtp.host, smtp.port);
         let mailer = Arc::new(SmtpMailer::new(smtp)?);
-        state.mail = Some(mailer.clone());
+        state.mail = Some(Outbox::start(mailer.clone()));
         tokio::spawn(check_relay(mailer, relay));
     }
     tokio::spawn(return_freed_memory(registry));

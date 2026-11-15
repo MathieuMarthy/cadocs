@@ -30,7 +30,7 @@ use cadocs_collab::{Authorizer, DocRegistry};
 use cadocs_core::permissions::WorkspaceCreation;
 use cadocs_files::FileStore;
 use cadocs_jobs::{Cleanup, Index, JobConfig, JobQueue, Revisions, ServerJobs, Worker};
-use cadocs_mail::Mailer;
+use cadocs_mail::Outbox;
 use cadocs_store::{
     AccountStore, AttachmentStore, DocStore, JobStore, PageStore, RevisionStore, SearchStore,
     SpaceStore, WorkspaceStore,
@@ -42,7 +42,7 @@ use tokio::time::{MissedTickBehavior, interval, timeout};
 
 use crate::config::{AttachmentLimits, HttpConfig, SocketConfig};
 use crate::password::Passwords;
-use crate::rate_limit::RateLimiter;
+use crate::rate_limit::{AddressLimiter, RateLimiter};
 
 /// How long shutdown waits for HTTP requests in progress.
 const HTTP_GRACE: Duration = Duration::from_secs(2);
@@ -64,9 +64,13 @@ pub struct AppState<S, A> {
     pub setup_code: Arc<str>,
     /// Who may create a workspace (ADR 0024): any user unless set otherwise after `new`.
     pub workspace_creation: WorkspaceCreation,
-    /// Where mail goes, set after `new`. `None` on an instance that sends none: every flow that
-    /// needs mail is then closed (ADR 0026).
-    pub mail: Option<Arc<dyn Mailer>>,
+    /// Where mail goes, set after `new` and before the router is built. `None` on an instance
+    /// that sends none: the routes that need mail are then not even registered (ADR 0026).
+    pub mail: Option<Outbox>,
+    /// Shared by the routes that send mail: what one client may ask for.
+    pub mail_requests: Arc<RateLimiter>,
+    /// Shared by the routes that send mail: what one address may get, whoever asks.
+    pub mail_addresses: Arc<AddressLimiter>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
     sockets: watch::Sender<()>,
     /// Wakes the recheck of every socket.
@@ -88,6 +92,8 @@ impl<S, A> Clone for AppState<S, A> {
             setup_code: self.setup_code.clone(),
             workspace_creation: self.workspace_creation,
             mail: self.mail.clone(),
+            mail_requests: self.mail_requests.clone(),
+            mail_addresses: self.mail_addresses.clone(),
             sockets: self.sockets.clone(),
             access: self.access.clone(),
         }
@@ -123,6 +129,14 @@ impl<S, A> AppState<S, A> {
                 .into(),
             workspace_creation: WorkspaceCreation::default(),
             mail: None,
+            mail_requests: Arc::new(RateLimiter::new(
+                api::auth::MAIL_BURST,
+                api::auth::MAIL_REFILL,
+            )),
+            mail_addresses: Arc::new(AddressLimiter::new(
+                api::auth::ADDRESS_BURST,
+                api::auth::ADDRESS_REFILL,
+            )),
             sockets: watch::Sender::new(()),
             access: Arc::default(),
         }

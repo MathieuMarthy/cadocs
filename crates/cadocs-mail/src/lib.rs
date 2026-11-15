@@ -15,6 +15,9 @@ use lettre::{Address, AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executo
 
 #[cfg(feature = "fake")]
 pub mod fake;
+mod outbox;
+
+pub use outbox::{Outbox, Place};
 
 /// What lettre gets as its timeout, for a single step with the relay.
 const IO_TIMEOUT: Duration = Duration::from_secs(15);

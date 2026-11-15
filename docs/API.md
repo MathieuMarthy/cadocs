@@ -38,12 +38,12 @@ Minimum role per route: `member` is a workspace role. Space roles are `viewer` <
 
 | Method | Route | Role | Purpose |
 | --- | --- | --- | --- |
-| GET | `/auth/setup` | none | Whether first-run setup is pending |
+| GET | `/auth/setup` | none | Whether first-run setup is pending, and whether the instance sends mail |
 | POST | `/auth/setup` | none, first run only | Create the first user and workspace |
 | POST | `/auth/login` | none, rate limited | Email and password login |
 | POST | `/auth/logout` | user | End the session, close its sockets |
 | POST | `/auth/password-reset/{token}` | none, rate limited | Set a new password from a reset link, revoke all sessions (ADR 0013) |
-| POST | `/auth/forgot-password` | none, rate limited | Send a reset link by email, only with SMTP (V1) |
+| POST | `/auth/forgot-password` | none, rate limited | Mail the reset link of ADR 0013 to an address. Only with a mail relay (ADR 0026) |
 | GET | `/auth/oidc/{provider}` | none | Start an OIDC login (V1) |
 | GET | `/auth/oidc/{provider}/callback` | none | Finish an OIDC login (V1) |
 | GET | `/session` | user | Current user, workspaces, CSRF token |
@@ -53,7 +53,7 @@ Minimum role per route: `member` is a workspace role. Space roles are `viewer` <
 
 Bodies and answers:
 
-- `GET /auth/setup` answers `{ required }`, `true` while no account exists.
+- `GET /auth/setup` answers `{ required }`, `true` while no account exists. An instance with a mail relay adds `mail: true`, which tells the login screen to offer what needs mail. Without a relay the field is left out.
 - `POST /auth/setup` takes `{ email, name, password, workspace_name, code }`, and answers `201` with the session body and the cookie. `code` is the one of the link the server logs at each start while setup is pending (ADR 0021): missing or empty is `400` with `code: required`, any other value `400` with `code: wrong`. Once an account exists it answers `409`, whatever the code.
 - `POST /auth/login` takes `{ email, password }`, and answers `200` with the session body and the cookie. An unknown email, a wrong password and a disabled account all answer the same `401`, in the same time.
 - `GET /session` answers `{ user: { id, email, name, is_instance_admin }, workspaces: [{ id, slug, name, role }], can_create_workspace, csrf_token }`, where `can_create_workspace` says whether `POST /workspaces` would let the user through. The other routes that answer the session body carry it too.
@@ -62,6 +62,7 @@ Bodies and answers:
 
 An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a password 8 to 1024 characters. These routes refuse bodies over 16 KiB.
 
+- `POST /auth/forgot-password` takes `{ email }` and answers `204` with no body, for every address: one with an account, one with none, one whose account is disabled. The lookup, the link and the message come after the answer, so its time tells nothing either. The account gets a message with a reset link valid one hour, which replaces any link it had. An address that is not one is a `400` that names `email`. Each client can ask 5 times at once, then once a minute, a budget every route that sends mail shares: past it the answer is `429`. Each address gets 3 messages at once, then one per 10 minutes, whoever asks: past it the answer is still `204`, and nothing is sent. Without a relay the route does not exist: a `404`, whatever the method or the body.
 - `POST /auth/password-reset/{token}` takes `{ password }` and answers `204`, without opening a session. An unknown, used, replaced or expired token is a `404`. A refused password leaves the link usable.
 
 `/auth/setup`, `/auth/login`, `/auth/password-reset/{token}`, `/invitations/{token}/accept` and a `PATCH /me` that checks the current password share one limit per client: a burst of 10, then one every 15 seconds. A hash that waits over 10 seconds for its turn answers `503`.

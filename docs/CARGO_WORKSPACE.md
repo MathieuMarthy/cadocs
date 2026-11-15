@@ -13,7 +13,7 @@ cadocs/
 │   ├── cadocs-search/        stemming and indexing (MVP)
 │   ├── cadocs-files/         FileStore trait, local disk, S3 feature (MVP)
 │   ├── cadocs-jobs/          worker and job handlers (MVP)
-│   ├── cadocs-mail/          Mailer trait and the SMTP client (ADR 0026)
+│   ├── cadocs-mail/          Mailer trait, the SMTP client and the outbox (ADR 0026)
 │   ├── cadocs-server/        the binary: config, HTTP, WebSocket, embedded assets
 │   └── cadocs-bench/         y-sync load client, dev tool only
 ├── web/                      Vite, Svelte and TipTap front end

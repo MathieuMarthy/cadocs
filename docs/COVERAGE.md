@@ -27,6 +27,7 @@ Comments, public shares, groups and plugins have no route before V1 or V2: their
 | Item | Tests |
 | --- | --- |
 | Accounts, sessions, invitation and reset links | `server/auth.rs` (with the setup code of ADR 0021), `server/admin.rs` (reset links), `server/workspaces.rs` (invitations), `server/cli.rs` (`reset-password`), `session.rs` unit tests (the `__Host-` cookie), `e2e/shell` (setup with and without the link, login, invitation, reset) |
+| Forgot password by mail (Mail stage, step 29) | `mail/outbox.rs` (no wait, bounded, stale messages, reserved places), `server/mail.rs` (the link arrives and works, same answer for an unknown or disabled account, both limits, a full outbox keeps earlier links, `404` with mail off), `rate_limit.rs` unit tests, `e2e/mail` (from the login link to a login with the new password, and neither link nor screen without a relay) |
 | Instance administration | `server/admin.rs`, `e2e/shell` `instance administration lists, disables and promotes users`, `e2e/screens` |
 | Workspaces, spaces, tree, trash, recent pages | `server/workspaces.rs`, `server/spaces.rs`, `server/pages.rs`, `server/jobs.rs` (trash purge), `e2e/navigation`, `e2e/settings` |
 | Per-space roles | Permission matrix above, `e2e/settings` (grants and roles while a page is open), `e2e/editor` (read-only viewer) |

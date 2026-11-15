@@ -1,4 +1,5 @@
-//! Accounts and sessions: first run, login, logout, `/session` and `/me`.
+//! Accounts and sessions: first run, login, logout, `/session` and `/me`, and the reset link by
+//! mail of an instance with a relay (ADR 0026).
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -12,21 +13,33 @@ use axum::routing::{get, patch, post};
 use axum::{Extension, Json, Router};
 use cadocs_collab::Authorizer;
 use cadocs_core::permissions::{InstanceAction, instance_allows, instance_role};
+use cadocs_mail::{Mail, Outbox};
 use cadocs_store::{
-    AccountStore, DocStore, FirstUser, MAX_SLUG_CHARS, Membership, NewSession, UpdateBasis, User,
-    UserChanges, now_ms,
+    AccountStore, DocStore, FirstUser, MAX_SLUG_CHARS, Membership, NewSession, StoreError,
+    UpdateBasis, User, UserChanges, now_ms,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{ApiError, ErrorCode, JsonBody, PathParam, count_request, rate_limit};
 use crate::AppState;
-use crate::session::{self, CurrentSession, check_setup_code, csrf_token, new_token, token_hash};
+use crate::config::HttpConfig;
+use crate::session::{
+    self, CurrentSession, check_setup_code, csrf_token, new_password_reset, new_token, token_hash,
+};
 
 /// Each client can guess this many passwords at once, then one per `GUESS_REFILL`. Setup, login,
 /// using a reset link and a `PATCH /me` that checks the current password share this budget.
 pub const GUESS_BURST: u32 = 10;
 pub const GUESS_REFILL: Duration = Duration::from_secs(15);
+
+/// Each client can ask for this many messages at once, then one per `MAIL_REFILL`. Every route
+/// that sends mail shares this budget (ADR 0026).
+pub const MAIL_BURST: u32 = 5;
+pub const MAIL_REFILL: Duration = Duration::from_secs(60);
+/// Each address gets this many messages at once, then one per `ADDRESS_REFILL`, whoever asks.
+pub const ADDRESS_BURST: u32 = 3;
+pub const ADDRESS_REFILL: Duration = Duration::from_secs(10 * 60);
 
 /// Far above any of these bodies. Routes before a session must not buffer the default 2 MB.
 pub(super) const MAX_BODY_BYTES: usize = 16 * 1024;
@@ -44,7 +57,7 @@ where
         (state.password_guesses.clone(), state.http.clone()),
         rate_limit,
     );
-    let public = Router::new()
+    let mut public = Router::new()
         .route(
             "/auth/setup",
             post(setup).route_layer(limit.clone()).get(setup_state),
@@ -54,6 +67,17 @@ where
             "/auth/password-reset/{token}",
             post(use_password_reset).route_layer(limit),
         );
+    // Not registered with mail off: the route then answers as any path that never was.
+    if state.mail.is_some() {
+        let limit = from_fn_with_state(
+            (state.mail_requests.clone(), state.http.clone()),
+            rate_limit,
+        );
+        public = public.route(
+            "/auth/forgot-password",
+            post(forgot_password).route_layer(limit),
+        );
+    }
     let authenticated = Router::new()
         .route("/auth/logout", post(logout))
         .route("/session", get(current_session))
@@ -162,6 +186,10 @@ pub(super) fn new_session<S, A>(
 #[derive(Serialize)]
 struct SetupState {
     required: bool,
+    /// Whether the instance sends mail, so the login screen can offer what needs it. Left out
+    /// when it does not: an instance with no relay answers as it did before ADR 0026.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    mail: bool,
 }
 
 /// Tells the front end to show first-run setup, since `GET /session` is a `401` either way.
@@ -170,7 +198,8 @@ async fn setup_state<S: AccountStore, A>(
 ) -> Result<Response, ApiError> {
     let required = !state.store.has_users().await?;
     let no_store = [(CACHE_CONTROL, HeaderValue::from_static("no-store"))];
-    Ok((no_store, Json(SetupState { required })).into_response())
+    let mail = state.mail.is_some();
+    Ok((no_store, Json(SetupState { required, mail })).into_response())
 }
 
 #[derive(Deserialize)]
@@ -399,6 +428,79 @@ async fn use_password_reset<S: AccountStore, A>(
     }
     state.access_changed();
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct ForgotRequest {
+    email: String,
+}
+
+/// Mails a reset link to the account of an address, if there is one to mail. The answer is the
+/// same for every address, and so is its time: the lookup, the link and the message all happen
+/// after it, in a task of their own.
+async fn forgot_password<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    JsonBody(body): JsonBody<ForgotRequest>,
+) -> Result<StatusCode, ApiError> {
+    let Some(outbox) = state.mail.clone() else {
+        return Err(ApiError::new(ErrorCode::NotFound));
+    };
+    let mut fields = Fields::default();
+    let email = fields.check("email", clean_email(&body.email));
+    fields.finish()?;
+
+    // Past the limit of an address the answer stays the same, or it would tell that someone
+    // asked for it. Counted for every address, with or without an account.
+    if state.mail_addresses.check(&email) {
+        let (store, http) = (state.store.clone(), state.http.clone());
+        tokio::spawn(async move {
+            if let Err(error) = mail_reset(store.as_ref(), &http, &outbox, &email).await {
+                tracing::warn!("a reset link could not be mailed, {error}");
+            }
+        });
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn mail_reset<S: AccountStore>(
+    store: &S,
+    http: &HttpConfig,
+    outbox: &Outbox,
+    email: &str,
+) -> anyhow::Result<()> {
+    let Some(found) = store
+        .credentials(email)
+        .await?
+        .filter(|found| !found.disabled)
+    else {
+        return Ok(());
+    };
+    // Before the new link replaces the one before: with no room for its message, the account
+    // would be left with no link that works.
+    let Some(place) = outbox.reserve() else {
+        return Ok(());
+    };
+    let (link, reset) = new_password_reset(&http.public_url, &found.user.id, None)?;
+    match store.create_password_reset(&reset).await {
+        Ok(()) => {}
+        // Deleted or disabled since the lookup.
+        Err(StoreError::UserNotFound | StoreError::UserDisabled) => return Ok(()),
+        Err(error) => return Err(error.into()),
+    }
+    let origin = http.public_url.origin();
+    place.send(Mail {
+        to: found.user.email,
+        subject: "Reset your cadocs password".to_owned(),
+        text: format!(
+            "Someone asked to reset the password of your account on\n\
+             {origin}\n\n\
+             To choose a new password, open this link within one hour:\n\n\
+             {link}\n\n\
+             If you did not ask for this, ignore this message: your password\n\
+             has not changed.\n"
+        ),
+    });
+    Ok(())
 }
 
 async fn delete_me<S: AccountStore, A>(
