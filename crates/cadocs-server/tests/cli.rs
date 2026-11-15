@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 
+use cadocs_mail::fake::{Behavior, FakeRelay};
 use cadocs_store::{AccountStore, FirstUser, NewSession, SqliteStore};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
@@ -199,4 +200,122 @@ fn reset_password_does_not_make_a_database() {
     assert!(!output.status.success());
     assert!(stderr(&output).contains("cadocs.db"), "{}", stderr(&output));
     assert!(!dir.path().join("cadocs.db").exists());
+}
+
+/// A relay on its own runtime, which lives as long as what this returns.
+fn fake_relay(behavior: Behavior) -> (tokio::runtime::Runtime, FakeRelay) {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let relay = runtime.block_on(FakeRelay::start(behavior));
+    (runtime, relay)
+}
+
+fn with_relay(command: &mut Command, relay: &FakeRelay) {
+    command
+        .env("CADOCS_SMTP_HOST", "127.0.0.1")
+        .env("CADOCS_SMTP_PORT", relay.port().to_string())
+        .env("CADOCS_SMTP_TLS", "none")
+        .env("CADOCS_SMTP_FROM", "Team wiki <wiki@example.org>");
+}
+
+#[test]
+fn test_mail_sends_one_message_through_the_relay() {
+    let dir = TempDir::new().unwrap();
+    let (_runtime, relay) = fake_relay(Behavior::default());
+    let mut command = cadocs(dir.path());
+    with_relay(&mut command, &relay);
+
+    let output = command
+        .args(["test-mail", "ada@example.net"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ada@example.net"), "{stdout}");
+    let messages = relay.messages();
+    assert_eq!(messages.len(), 1);
+    assert!(messages[0].to.starts_with("<ada@example.net>"));
+    // It names the instance, so whoever receives it knows where it comes from.
+    assert!(messages[0].data.contains("http://127.0.0.1:3000"));
+    // It needs no database, so it runs before the first start.
+    assert!(!dir.path().join("cadocs.db").exists());
+}
+
+#[test]
+fn test_mail_reports_what_the_relay_answered() {
+    let dir = TempDir::new().unwrap();
+    let (_runtime, relay) = fake_relay(Behavior {
+        refuse_recipients: true,
+        ..Behavior::default()
+    });
+    let mut command = cadocs(dir.path());
+    with_relay(&mut command, &relay);
+
+    let output = command
+        .args(["test-mail", "ada@example.net"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("no such user"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn test_mail_says_when_mail_is_off() {
+    let dir = TempDir::new().unwrap();
+    let output = cadocs(dir.path())
+        .args(["test-mail", "ada@example.net"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("CADOCS_SMTP_HOST"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+/// Reads the log until a line about the relay, which the server writes once it has tried it.
+fn relay_line(mut command: Command) -> String {
+    let mut server = Server(command.stdout(Stdio::piped()).spawn().unwrap());
+    let stdout = server.0.stdout.take().unwrap();
+    BufReader::new(stdout)
+        .lines()
+        .map(|line| line.unwrap())
+        .find(|line| line.contains("mail relay"))
+        .expect("a line about the mail relay")
+}
+
+#[test]
+fn the_server_says_whether_its_relay_answers_and_starts_either_way() {
+    let dir = TempDir::new().unwrap();
+    let (_runtime, relay) = fake_relay(Behavior::default());
+    let mut command = cadocs(dir.path());
+    with_relay(&mut command, &relay);
+    let line = relay_line(command);
+    assert!(line.contains("INFO") && line.contains("answers"), "{line}");
+
+    // Nothing listens on port 1. Mail is down, the wiki is not.
+    let dir = TempDir::new().unwrap();
+    let mut command = cadocs(dir.path());
+    with_relay(&mut command, &relay);
+    command.env("CADOCS_SMTP_PORT", "1");
+    let line = relay_line(command);
+    assert!(
+        line.contains("WARN") && line.contains("127.0.0.1:1"),
+        "{line}"
+    );
+    let mut command = cadocs(dir.path());
+    command.env("CADOCS_DATA_DIR", TempDir::new().unwrap().path());
+    with_relay(&mut command, &relay);
+    command.env("CADOCS_SMTP_PORT", "1");
+    start(command);
 }

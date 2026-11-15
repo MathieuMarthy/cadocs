@@ -13,6 +13,7 @@ cadocs/
 │   ├── cadocs-search/        stemming and indexing (MVP)
 │   ├── cadocs-files/         FileStore trait, local disk, S3 feature (MVP)
 │   ├── cadocs-jobs/          worker and job handlers (MVP)
+│   ├── cadocs-mail/          Mailer trait and the SMTP client (ADR 0026)
 │   ├── cadocs-server/        the binary: config, HTTP, WebSocket, embedded assets
 │   └── cadocs-bench/         y-sync load client, dev tool only
 ├── web/                      Vite, Svelte and TipTap front end
@@ -26,7 +27,7 @@ cadocs/
 
 `cadocs-bench` is outside `default-members`, so a plain `cargo build --release` does not build it. Built together, its dependency features would unify into the server's and change the shipped binary. Use `--workspace` for tests and clippy, and `-p` to build it.
 
-The prototype contains `core`, `store`, `collab`, `server` and `bench`, step 10 of the MVP added `jobs`, step 16 `content`, step 17 `files` and step 18 `search`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
+The prototype contains `core`, `store`, `collab`, `server` and `bench`, step 10 of the MVP added `jobs`, step 16 `content`, step 17 `files`, step 18 `search` and step 28 `mail`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
 
 ## Selected crates
 
@@ -59,6 +60,7 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `serde_json` in `cadocs-store` | Revision authors stored and read as JSON arrays. Already in the tree | None | None |
 | `rusty-s3` 0.11 (`full`, `rustcrypto`), BSD-2-Clause, with `jiff` and `url` at its own versions. 0.11 parses with `instant-xml`, which replaced the `quick-xml` of 0.8 and its two advisories | S3 signatures and listing parsing, with no I/O of its own (ADR 0020). Only with the `s3` feature | None at rest | With the next row, 2.7 MB in a release binary, and nothing in a default build |
 | `reqwest` (`rustls-tls-native-roots`, `stream`, no default features), MIT or Apache-2.0 | Sends the S3 requests, with rustls and `ring`, the system roots and streamed bodies. Only with the `s3` feature | 1.4 MB of idle RSS once linked, 2.7 MB with S3 in use: the system roots and a pool of at most 2 idle connections (see step 20b in [benchmark notes](notes/benchmark.md)) | See `rusty-s3` |
+| `lettre` 0.11 (`builder`, `smtp-transport`, `tokio1-rustls`, `ring`, `rustls-native-certs`, no default features: no pool, no `hostname`, no `native-tls`), MIT | The SMTP client of `cadocs-mail` (ADR 0026), in every build. Brings rustls with `ring` and the system roots, as `reqwest` does in the S3 build, and `url` with `idna`, `nom`, `email_address`, `email-encoding`, `quoted_printable` (0BSD), `mime`, `httpdate`, `async-trait` | 0.5 MB of idle RSS with mail off, 1.3 MB with a relay set: the system roots are read for each TLS connection, and nothing stays connected (step 28 in [benchmark notes](notes/benchmark.md)) | 1.7 MB |
 | `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
 
 ### Dev tools only
@@ -73,6 +75,7 @@ These never reach the server binary.
 | `tempfile` | Temporary databases and data folders in tests |
 | `bytes` | Building file streams in the attachment tests |
 | `axum` (`query`) in `cadocs-files` | The in-memory S3 of the S3 store tests |
+| `cadocs-mail` with its `fake` feature | `FakeRelay`, a plain text SMTP server that keeps what it is sent, for the tests of `cadocs-mail` and of the binary |
 
 `web/` has two npm dev dependencies for the same purpose: `@playwright/test` (Apache-2.0) for the browser tests, and `@types/node` to type-check them. Neither reaches `web/dist`. `svelte` (MIT) is a runtime dependency of the shell, and `@sveltejs/vite-plugin-svelte` (MIT) a build dependency. The shell is about 73 KB of JavaScript, 26 KB compressed, and TipTap stays in a chunk that only a page loads.
 
@@ -88,7 +91,6 @@ Step 16 adds a `plugin` node of our own (`blocks.ts`, ADR 0016) and `web/scripts
 | --- | --- | --- | --- |
 | `tower-http` | MVP | Timeouts, compression, tracing, limited features | Low |
 | `jiff` | MVP | Dates, as in uptime-monitoring | Low without the bundled tz database |
-| `lettre` | V1 | SMTP, optional feature | Only in builds that enable it |
 | `totp-lite` | V1 | TOTP codes | Very low |
 | `openidconnect` or a smaller client | V1 | OIDC, optional feature. To evaluate against a hand-written flow | Pulls an HTTP client |
 

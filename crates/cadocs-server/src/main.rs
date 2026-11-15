@@ -5,6 +5,7 @@ use std::time::Duration;
 use anyhow::Context;
 use cadocs_collab::{DocRegistry, PageAuthorizer};
 use cadocs_files::{FileStore, LocalFileStore};
+use cadocs_mail::{Mail, Mailer, SmtpMailer};
 use cadocs_server::api::auth::normalize_email;
 use cadocs_server::assets::WebAssets;
 use cadocs_server::cli::{self, Command};
@@ -36,6 +37,7 @@ fn main() -> anyhow::Result<()> {
     match command {
         Command::Serve => run_server(config),
         Command::ResetPassword { email } => on_one_thread(reset_password(config, &email)),
+        Command::TestMail { to } => on_one_thread(test_mail(config, to)),
         Command::Backup { to } => on_one_thread(async move {
             let copied = backup::backup(&config.data_dir, &to, local_files(&config)).await?;
             println!(
@@ -102,6 +104,40 @@ async fn reset_password(config: Config, email: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Sends one message through the relay, so an operator sees a wrong setting in the relay's own
+/// words. It opens no database.
+async fn test_mail(config: Config, to: String) -> anyhow::Result<()> {
+    let smtp = config
+        .mail
+        .context("mail is off: set CADOCS_SMTP_HOST and CADOCS_SMTP_FROM")?;
+    let relay = format!("{}:{}", smtp.host, smtp.port);
+    let origin = config.http.public_url.origin();
+    let mail = Mail {
+        to,
+        subject: "cadocs test message".to_owned(),
+        // Short lines, so the message goes out as it is written, with no encoding.
+        text: format!(
+            "This is a test message from the cadocs instance at\n{origin}\n\n\
+             If you can read it, the instance can send mail.\n"
+        ),
+    };
+    SmtpMailer::new(smtp)?
+        .send(&mail)
+        .await
+        .with_context(|| format!("no message sent through {relay}"))?;
+    println!("{relay} took a message for {}", mail.to);
+    Ok(())
+}
+
+/// Says in the log whether the relay answers. A relay that is down stops no start: the wiki
+/// works without it, and mail comes back with the relay.
+async fn check_relay(mailer: Arc<SmtpMailer>, relay: String) {
+    match mailer.check().await {
+        Ok(()) => tracing::info!("the mail relay {relay} answers"),
+        Err(error) => tracing::warn!("the mail relay {relay} cannot be used for now, {error}"),
+    }
+}
+
 /// The store `CADOCS_FILE_STORE` names (ADR 0020). S3 is checked here, so a wrong setting stops
 /// the start instead of failing the first upload.
 async fn open_files(config: &Config) -> anyhow::Result<Arc<dyn FileStore>> {
@@ -140,6 +176,12 @@ async fn run(config: Config) -> anyhow::Result<()> {
         config.attachments,
     );
     state.workspace_creation = config.workspace_creation;
+    if let Some(smtp) = config.mail {
+        let relay = format!("{}:{}", smtp.host, smtp.port);
+        let mailer = Arc::new(SmtpMailer::new(smtp)?);
+        state.mail = Some(mailer.clone());
+        tokio::spawn(check_relay(mailer, relay));
+    }
     tokio::spawn(return_freed_memory(registry));
     start_jobs(&state, config.jobs);
 

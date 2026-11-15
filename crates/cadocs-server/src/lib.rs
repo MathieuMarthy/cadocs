@@ -30,6 +30,7 @@ use cadocs_collab::{Authorizer, DocRegistry};
 use cadocs_core::permissions::WorkspaceCreation;
 use cadocs_files::FileStore;
 use cadocs_jobs::{Cleanup, Index, JobConfig, JobQueue, Revisions, ServerJobs, Worker};
+use cadocs_mail::Mailer;
 use cadocs_store::{
     AccountStore, AttachmentStore, DocStore, JobStore, PageStore, RevisionStore, SearchStore,
     SpaceStore, WorkspaceStore,
@@ -63,6 +64,9 @@ pub struct AppState<S, A> {
     pub setup_code: Arc<str>,
     /// Who may create a workspace (ADR 0024): any user unless set otherwise after `new`.
     pub workspace_creation: WorkspaceCreation,
+    /// Where mail goes, set after `new`. `None` on an instance that sends none: every flow that
+    /// needs mail is then closed (ADR 0026).
+    pub mail: Option<Arc<dyn Mailer>>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
     sockets: watch::Sender<()>,
     /// Wakes the recheck of every socket.
@@ -83,6 +87,7 @@ impl<S, A> Clone for AppState<S, A> {
             password_guesses: self.password_guesses.clone(),
             setup_code: self.setup_code.clone(),
             workspace_creation: self.workspace_creation,
+            mail: self.mail.clone(),
             sockets: self.sockets.clone(),
             access: self.access.clone(),
         }
@@ -117,6 +122,7 @@ impl<S, A> AppState<S, A> {
                 .expect("the system's random source")
                 .into(),
             workspace_creation: WorkspaceCreation::default(),
+            mail: None,
             sockets: watch::Sender::new(()),
             access: Arc::default(),
         }

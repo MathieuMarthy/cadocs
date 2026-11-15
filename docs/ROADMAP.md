@@ -131,6 +131,24 @@ Exit criteria:
 - [x] A security review of auth, uploads and rendered HTML is done.
 - [ ] One team uses it daily for two weeks with no data loss.
 
+## Mail
+
+Purpose: an instance with a mail relay lets people register, recover a password and add a second factor by themselves, and an instance without one works as before (ADR 0026).
+
+Steps, one session each, in this order. The rules of the MVP steps apply.
+
+- [x] **Step 28:** Mail relay: `cadocs-mail` (`Mailer`, `SmtpMailer` on `lettre`), `CADOCS_SMTP_*`, `AppState::mail`, the relay check at start, `cadocs test-mail`. Done when a message reaches a relay in a test, TLS that was asked for is never skipped, and the binary size and idle RSS are reported.
+- [ ] **Step 29:** Forgot password: the outbox that sends without holding a handler, `mail` in `GET /auth/setup`, `POST /auth/forgot-password` with the same answer and time for every address, its limits per client and per address, the link on the login screen and its form. Done when a reset link arrives by mail in a test, an unknown address is told nothing, and the route is a `404` with mail off.
+- [ ] **Step 30:** Registration: `email_codes`, `users.email_verified_at`, `CADOCS_REGISTRATION`, `POST /auth/register` and its confirmation, the screens. Done when Playwright registers with a code read from a fake relay, 5 wrong codes kill a code, and a closed or mail-free instance refuses.
+- [ ] **Step 31:** Second factor by mail: `users.email_2fa`, the login challenge, the switch in the account screen, the notice at start when mail is off. Done when a login with the factor on needs the code over REST and in Playwright, and the session only exists after it.
+- [ ] **Step 32:** Proof of a new address: `PATCH /me` with an email sends a code to the new address and changes it once confirmed, with mail on. Done when the address only changes after the code, and an instance without mail changes it as before.
+
+Exit criteria:
+
+- [ ] With `CADOCS_SMTP_HOST` unset, no route or screen of this stage answers, and the MVP tests pass unchanged.
+- [ ] No route tells whether an address has an account.
+- [ ] Idle RSS and active-user thresholds of the MVP still hold.
+
 ## V1
 
 Purpose: a credible replacement for Docmost.
@@ -140,12 +158,12 @@ Scope:
 - Comments, threads, resolution, mentions of users and pages, in-app notifications
 - Public sharing with server-rendered pages, and optional indexing by search engines
 - Groups and group grants
-- OIDC login, TOTP multi-factor authentication
+- OIDC login, TOTP multi-factor authentication (a code by mail came first, ADR 0026)
 - Bulk Markdown import and export, space export, Docmost and Notion import through their Markdown exports (what these exports lose is checked when this stage starts)
 - Backlinks, page duplication and copy to another space
 - Math (KaTeX) and Mermaid blocks, loaded on demand in the browser
 - Diff between revisions
-- Email notifications through optional SMTP
+- Email notifications through the relay of ADR 0026
 - Internationalized interface
 - Page templates
 

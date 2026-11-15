@@ -1,0 +1,20 @@
+[package]
+name = "cadocs-mail"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# A relay for tests, which keeps what it is sent. Never in the server binary.
+fake = ["tokio/io-util", "tokio/net", "tokio/rt", "tokio/sync"]
+
+[dependencies]
+getrandom.workspace = true
+lettre.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+cadocs-mail = { path = ".", features = ["fake"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }

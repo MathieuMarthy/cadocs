@@ -10,6 +10,7 @@ use axum::http::{HeaderMap, Uri, header};
 use cadocs_collab::CollabConfig;
 use cadocs_core::permissions::WorkspaceCreation;
 use cadocs_jobs::JobConfig;
+use cadocs_mail::{MailError, Security, SmtpConfig, SmtpMailer};
 use cadocs_store::RevisionTiming;
 
 use crate::client_ip::TrustedProxies;
@@ -53,6 +54,8 @@ pub struct Config {
     pub files: FileStoreConfig,
     /// Who may create a workspace (ADR 0024).
     pub workspace_creation: WorkspaceCreation,
+    /// The relay mail goes through, or `None` for an instance that sends none (ADR 0026).
+    pub mail: Option<SmtpConfig>,
     /// Retired settings that are set, which the server names at start and otherwise ignores.
     pub ignored: Vec<&'static str>,
 }
@@ -226,6 +229,7 @@ impl Config {
             attachments: read.attachment_limits()?,
             files: read.file_store()?,
             workspace_creation: read.workspace_creation()?,
+            mail: read.mail()?,
             ignored: RETIRED
                 .iter()
                 .copied()
@@ -432,23 +436,91 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
         }))
     }
 
-    /// From the variable, or from the file `_FILE` names, as container secrets are given.
     #[cfg(feature = "s3")]
     fn s3_secret(&self) -> anyhow::Result<String> {
         let name = "CADOCS_S3_SECRET_ACCESS_KEY";
         let file = "CADOCS_S3_SECRET_ACCESS_KEY_FILE";
-        match ((self.0)(name), (self.0)(file)) {
+        self.secret(name, file)?
+            .with_context(|| format!("{name} or {file} is required when CADOCS_FILE_STORE is s3"))
+    }
+
+    /// From the variable, or from the file `_FILE` names, as container secrets are given.
+    fn secret(&self, name: &str, file: &str) -> anyhow::Result<Option<String>> {
+        // An empty value is an unset one: a compose file passes that for what it does not define.
+        let set = |name: &str| (self.0)(name).filter(|value| !value.is_empty());
+        match (set(name), set(file)) {
             (Some(_), Some(_)) => bail!("set {name} or {file}, not both"),
-            (Some(secret), None) if !secret.is_empty() => Ok(secret),
+            (Some(secret), None) => Ok(Some(secret)),
             (None, Some(path)) => {
                 let secret = std::fs::read_to_string(&path)
                     .with_context(|| format!("cannot read {file}: {path:?}"))?;
                 let secret = secret.trim_end().to_owned();
                 ensure!(!secret.is_empty(), "{file} names an empty file: {path:?}");
-                Ok(secret)
+                Ok(Some(secret))
             }
-            _ => bail!("{name} or {file} is required when CADOCS_FILE_STORE is s3"),
+            _ => Ok(None),
         }
+    }
+
+    /// Mail is off unless `CADOCS_SMTP_HOST` names a relay (ADR 0026).
+    fn mail(&self) -> anyhow::Result<Option<SmtpConfig>> {
+        let set = |name: &str| (self.0)(name).filter(|value| !value.is_empty());
+        let Some(host) = set("CADOCS_SMTP_HOST") else {
+            return Ok(None);
+        };
+        // A colon is a port or a scheme, unless the whole is an IPv6 address.
+        let stray_colon = host.contains(':') && host.parse::<std::net::Ipv6Addr>().is_err();
+        ensure!(
+            !stray_colon && !host.contains(|c: char| c.is_whitespace() || c == '/' || c == '@'),
+            "invalid CADOCS_SMTP_HOST: {host:?}, expected a host name or an address, with no \
+             scheme or port"
+        );
+        let (security, port) = match set("CADOCS_SMTP_TLS").as_deref() {
+            None | Some("starttls") => (Security::StartTls, 587),
+            Some("tls") => (Security::Tls, 465),
+            Some("none") => (Security::None, 25),
+            Some(other) => {
+                bail!("invalid CADOCS_SMTP_TLS: {other:?}, expected starttls, tls or none")
+            }
+        };
+        let port = match set("CADOCS_SMTP_PORT") {
+            None => port,
+            Some(value) => match value.parse::<u16>() {
+                Ok(port) if port != 0 => port,
+                _ => bail!("invalid CADOCS_SMTP_PORT: {value:?}, expected 1 to 65535"),
+            },
+        };
+        let user = set("CADOCS_SMTP_USERNAME");
+        let password = self.secret("CADOCS_SMTP_PASSWORD", "CADOCS_SMTP_PASSWORD_FILE")?;
+        let credentials = match (user, password) {
+            (Some(user), Some(password)) => Some((user, password)),
+            (None, None) => None,
+            (Some(_), None) => bail!(
+                "CADOCS_SMTP_USERNAME needs CADOCS_SMTP_PASSWORD or CADOCS_SMTP_PASSWORD_FILE"
+            ),
+            (None, Some(_)) => bail!("CADOCS_SMTP_PASSWORD needs CADOCS_SMTP_USERNAME"),
+        };
+        ensure!(
+            credentials.is_none() || security != Security::None,
+            "CADOCS_SMTP_TLS=none would send CADOCS_SMTP_PASSWORD in clear: use starttls or \
+             tls, or a relay that asks for no password"
+        );
+        let from = set("CADOCS_SMTP_FROM")
+            .context("CADOCS_SMTP_FROM is required when CADOCS_SMTP_HOST is set")?;
+        let config = SmtpConfig {
+            host,
+            port,
+            security,
+            credentials,
+            from,
+        };
+        if let Err(MailError::Address(from)) = SmtpMailer::new(config.clone()) {
+            bail!(
+                "invalid CADOCS_SMTP_FROM: {from:?}, expected wiki@example.org or \
+                 Team wiki <wiki@example.org>"
+            );
+        }
+        Ok(Some(config))
     }
 
     fn session_lifetime(&self) -> anyhow::Result<Duration> {
@@ -721,6 +793,164 @@ mod tests {
         );
         assert_eq!(config.socket.ping, Duration::from_secs(6));
         assert_eq!(config.socket.ping_timeout, Duration::from_secs(7));
+    }
+
+    #[test]
+    fn no_mail_is_sent_unless_a_relay_is_named() {
+        assert_eq!(config(&[]).unwrap().mail, None);
+        // The other settings alone turn nothing on, so unsetting the host is the switch.
+        let off = config(&[
+            ("CADOCS_SMTP_HOST", ""),
+            ("CADOCS_SMTP_FROM", "wiki@example.org"),
+            ("CADOCS_SMTP_TLS", "none"),
+        ]);
+        assert_eq!(off.unwrap().mail, None);
+    }
+
+    #[test]
+    fn a_relay_defaults_to_starttls_and_its_port() {
+        let relay = |tls: Option<&str>| {
+            let mut vars = vec![
+                ("CADOCS_SMTP_HOST", "mail.example.org"),
+                ("CADOCS_SMTP_FROM", "Team wiki <wiki@example.org>"),
+            ];
+            vars.extend(tls.map(|tls| ("CADOCS_SMTP_TLS", tls)));
+            config(&vars).unwrap().mail.unwrap()
+        };
+        let default = relay(None);
+        assert_eq!(default.host, "mail.example.org");
+        assert_eq!(default.from, "Team wiki <wiki@example.org>");
+        assert_eq!(default.credentials, None);
+        assert_eq!((default.security, default.port), (Security::StartTls, 587));
+        let starttls = relay(Some("starttls"));
+        assert_eq!(
+            (starttls.security, starttls.port),
+            (Security::StartTls, 587)
+        );
+        let tls = relay(Some("tls"));
+        assert_eq!((tls.security, tls.port), (Security::Tls, 465));
+        let none = relay(Some("none"));
+        assert_eq!((none.security, none.port), (Security::None, 25));
+    }
+
+    #[test]
+    fn an_empty_mail_setting_is_an_unset_one() {
+        // What a compose file passes for a variable it does not define.
+        let mail = config(&[
+            ("CADOCS_SMTP_HOST", "mail.example.org"),
+            ("CADOCS_SMTP_FROM", "wiki@example.org"),
+            ("CADOCS_SMTP_TLS", ""),
+            ("CADOCS_SMTP_PORT", ""),
+            ("CADOCS_SMTP_USERNAME", ""),
+            ("CADOCS_SMTP_PASSWORD", ""),
+            ("CADOCS_SMTP_PASSWORD_FILE", ""),
+        ])
+        .unwrap()
+        .mail
+        .unwrap();
+        assert_eq!((mail.security, mail.port), (Security::StartTls, 587));
+        assert_eq!(mail.credentials, None);
+    }
+
+    #[test]
+    fn every_mail_setting_is_read() {
+        let mail = config(&[
+            ("CADOCS_SMTP_HOST", "10.0.0.5"),
+            ("CADOCS_SMTP_PORT", "2525"),
+            ("CADOCS_SMTP_TLS", "tls"),
+            ("CADOCS_SMTP_USERNAME", "cadocs"),
+            ("CADOCS_SMTP_PASSWORD", "s3cret"),
+            ("CADOCS_SMTP_FROM", "wiki@example.org"),
+        ])
+        .unwrap()
+        .mail
+        .unwrap();
+        assert_eq!(mail.host, "10.0.0.5");
+        assert_eq!(mail.port, 2525);
+        assert_eq!(mail.security, Security::Tls);
+        assert_eq!(
+            mail.credentials,
+            Some(("cadocs".to_owned(), "s3cret".to_owned()))
+        );
+    }
+
+    #[test]
+    fn the_mail_password_can_come_from_a_file() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "s3cret\n").unwrap();
+        let path = file.path().to_str().unwrap();
+        let relay = [
+            ("CADOCS_SMTP_HOST", "mail.example.org"),
+            ("CADOCS_SMTP_FROM", "wiki@example.org"),
+            ("CADOCS_SMTP_USERNAME", "cadocs"),
+        ];
+        let mut vars = relay.to_vec();
+        vars.push(("CADOCS_SMTP_PASSWORD_FILE", path));
+        let mail = config(&vars).unwrap().mail.unwrap();
+        assert_eq!(mail.credentials.unwrap().1, "s3cret");
+
+        vars.push(("CADOCS_SMTP_PASSWORD", "other"));
+        let error = config(&vars).unwrap_err().to_string();
+        assert!(error.contains("not both"), "{error}");
+    }
+
+    #[test]
+    fn a_mail_setting_that_cannot_work_is_refused_and_named() {
+        let host = ("CADOCS_SMTP_HOST", "mail.example.org");
+        let from = ("CADOCS_SMTP_FROM", "wiki@example.org");
+        for (vars, named) in [
+            (vec![host], "CADOCS_SMTP_FROM is required"),
+            (
+                vec![host, ("CADOCS_SMTP_FROM", "the wiki")],
+                "CADOCS_SMTP_FROM",
+            ),
+            (
+                vec![("CADOCS_SMTP_HOST", "smtp://mail.example.org"), from],
+                "CADOCS_SMTP_HOST",
+            ),
+            (
+                vec![("CADOCS_SMTP_HOST", "mail.example.org:587"), from],
+                "CADOCS_SMTP_HOST",
+            ),
+            (
+                vec![host, from, ("CADOCS_SMTP_TLS", "ssl")],
+                "CADOCS_SMTP_TLS",
+            ),
+            (
+                vec![host, from, ("CADOCS_SMTP_PORT", "smtp")],
+                "CADOCS_SMTP_PORT",
+            ),
+            (
+                vec![host, from, ("CADOCS_SMTP_PORT", "0")],
+                "CADOCS_SMTP_PORT",
+            ),
+            (
+                vec![host, from, ("CADOCS_SMTP_USERNAME", "cadocs")],
+                "CADOCS_SMTP_PASSWORD",
+            ),
+            (
+                vec![host, from, ("CADOCS_SMTP_PASSWORD", "s3cret")],
+                "CADOCS_SMTP_USERNAME",
+            ),
+        ] {
+            let error = config(&vars).unwrap_err().to_string();
+            assert!(error.contains(named), "{vars:?}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_mail_password_never_goes_out_in_clear() {
+        let error = config(&[
+            ("CADOCS_SMTP_HOST", "mail.example.org"),
+            ("CADOCS_SMTP_FROM", "wiki@example.org"),
+            ("CADOCS_SMTP_TLS", "none"),
+            ("CADOCS_SMTP_USERNAME", "cadocs"),
+            ("CADOCS_SMTP_PASSWORD", "s3cret"),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("in clear"), "{error}");
+        assert!(!error.contains("s3cret"), "{error}");
     }
 
     #[test]

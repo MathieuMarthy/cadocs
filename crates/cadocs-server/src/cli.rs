@@ -1,4 +1,4 @@
-//! The command line. A hand-written match over the four commands of `docs/OPERATIONS.md`.
+//! The command line. A hand-written match over the commands of `docs/OPERATIONS.md`.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -6,12 +6,13 @@ use std::path::PathBuf;
 use anyhow::bail;
 
 const USAGE: &str = "usage: cadocs [serve] | cadocs reset-password <email> \
-                     | cadocs backup <dir> | cadocs restore <dir>";
+                     | cadocs test-mail <email> | cadocs backup <dir> | cadocs restore <dir>";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Serve,
     ResetPassword { email: String },
+    TestMail { to: String },
     Backup { to: PathBuf },
     Restore { from: PathBuf },
 }
@@ -26,6 +27,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> anyhow::Result<Command
         [Some("reset-password"), Some(email)] => Ok(Command::ResetPassword {
             email: email.to_owned(),
         }),
+        [Some("test-mail"), Some(to)] => Ok(Command::TestMail { to: to.to_owned() }),
         [Some("backup"), _] if !args[1].is_empty() => Ok(Command::Backup { to: folder() }),
         [Some("restore"), _] if !args[1].is_empty() => Ok(Command::Restore { from: folder() }),
         _ => bail!(USAGE),
@@ -57,6 +59,16 @@ mod tests {
     }
 
     #[test]
+    fn test_mail_takes_an_address() {
+        assert_eq!(
+            parsed(&["test-mail", "ada@example.org"]).unwrap(),
+            Command::TestMail {
+                to: "ada@example.org".to_owned()
+            }
+        );
+    }
+
+    #[test]
     fn backup_and_restore_take_a_folder() {
         assert_eq!(
             parsed(&["backup", "/srv/backups/today"]).unwrap(),
@@ -80,6 +92,8 @@ mod tests {
             &["--port"],
             &["reset-password"],
             &["reset-password", "a@b.c", "extra"],
+            &["test-mail"],
+            &["test-mail", "a@b.c", "extra"],
             &["backup"],
             &["backup", ""],
             &["backup", "a", "b"],

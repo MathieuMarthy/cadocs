@@ -68,12 +68,29 @@ Attachments go to `data/files/` unless `CADOCS_FILE_STORE` is `s3` (ADR 0020). S
 | `CADOCS_S3_LINK_SECS` | `3600` | Lifetime of a presigned link, 2 to 604800. A link is the same for half of it, so browsers keep files in cache, and a leaked link works at most this long |
 | `CADOCS_S3_CA_FILE` | | A PEM bundle trusted besides the system roots, for an internal certificate authority |
 
+### Mail
+
+Mail is off unless `CADOCS_SMTP_HOST` is set (ADR 0026). Off, accounts come from first-run setup and invitations, and an instance admin makes reset links. On, cadocs hands each message to this relay, one connection per message, and keeps none: a message the relay cannot take is logged and lost. The server tries the relay at start and logs whether it answers. A relay that is down does not stop the start. `cadocs test-mail <email>` sends one message and prints what the relay answered.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CADOCS_SMTP_HOST` | unset | The relay: a host name or an address, with no scheme or port. Unset or empty turns mail off, whatever the others say. An empty value of any setting below counts as unset |
+| `CADOCS_SMTP_FROM` | | Required with a host. The sender, as `wiki@example.org` or `Team wiki <wiki@example.org>`. Its domain, in ASCII, is also the name cadocs greets the relay with |
+| `CADOCS_SMTP_TLS` | `starttls` | `starttls`: plain, then `STARTTLS`, and no message if the relay does not offer it. `tls`: TLS from the first byte. `none`: plain text, for a relay on the same host or a private network. The certificate is checked against the system roots |
+| `CADOCS_SMTP_PORT` | `587`, `465` or `25` | By default the port of the chosen `CADOCS_SMTP_TLS`, in that order |
+| `CADOCS_SMTP_USERNAME` | | For a relay that asks for a login. Needs a password, and is refused with `CADOCS_SMTP_TLS=none` |
+| `CADOCS_SMTP_PASSWORD` | | The password, unless the next one is set. Never both |
+| `CADOCS_SMTP_PASSWORD_FILE` | | A file holding the password, for container secrets. A final newline is ignored |
+
+A Postfix on the same Docker network that relays for it needs only `CADOCS_SMTP_HOST=postfix`, `CADOCS_SMTP_TLS=none` and `CADOCS_SMTP_FROM`.
+
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
 | `cadocs` or `cadocs serve` | Run the server |
 | `cadocs reset-password <email>` | Print a one-time reset link (ADR 0013) |
+| `cadocs test-mail <email>` | Send one message through the mail relay and print what it answered. Opens no database |
 | `cadocs backup <dir>` | Write a consistent backup, on a running or stopped server |
 | `cadocs restore <dir>` | Restore a backup into an empty data folder, on a stopped server |
 
