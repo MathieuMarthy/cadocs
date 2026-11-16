@@ -13,6 +13,7 @@
   import { tick, type Snippet } from "svelte";
 
   import { api, type Workspace } from "../lib/api";
+  import { t } from "../lib/i18n";
   import { Form } from "../lib/form.svelte";
   import { acquireNav, type Nav } from "../lib/nav.svelte";
   import { navigate, route } from "../lib/router.svelte";
@@ -82,9 +83,13 @@
   const themeIcon: Record<string, IconName> = { light: "sun", dark: "moon", auto: "sun-moon" };
 
   const userItems = $derived<MenuItem[]>([
-    { icon: "user", label: "account", href: "/account" },
-    { icon: themeIcon[theme.current]!, label: `theme: ${theme.current}`, select: nextTheme },
-    { icon: "log-out", label: "log out", select: () => void logOut() },
+    { icon: "user", label: t("shell.account"), href: "/account" },
+    {
+      icon: themeIcon[theme.current]!,
+      label: t("theme.button", { theme: t(`theme.${theme.current}`) }),
+      select: nextTheme,
+    },
+    { icon: "log-out", label: t("shell.logOut"), select: () => void logOut() },
   ]);
 
   // The drawer of a narrow window: closed by default, and after every move to another address.
@@ -163,17 +168,17 @@
   }
 </script>
 
-<svelte:head><title>{title} · cadocs</title></svelte:head>
+<svelte:head><title>{t("document.title", { title })}</title></svelte:head>
 
 <div class="shell" class:drawer-open={drawer}>
   <aside bind:this={sidebar} id={drawerId} class="sidebar">
     <!-- The drawer covers the menu button of the top bar, so it closes from here. -->
-    <IconButton class="drawer-close" icon="x" verb="close the sidebar" onclick={() => closeDrawer(true)} />
+    <IconButton class="drawer-close" icon="x" verb={t("shell.closeSidebar")} onclick={() => closeDrawer(true)} />
     <details class="selector">
       <summary>
         <span class="selector-name">cadocs<span class="logo" aria-hidden="true"></span></span>
         <span class="selector-current">
-          {current?.name ?? (guess ? "no workspace" : "…")} ▾
+          {current?.name ?? (guess ? t("workspace.none") : "…")} ▾
         </span>
       </summary>
       <ul class="rows">
@@ -191,7 +196,7 @@
         {#if session.can_create_workspace && !addingWorkspace}
           <li>
             <button class="row new-workspace-row" type="button" onclick={() => (addingWorkspace = true)}>
-              new workspace
+              {t("workspace.new")}
             </button>
           </li>
         {/if}
@@ -205,10 +210,10 @@
       <a
         class="search-field"
         href="/w/{current.slug}/search"
-        aria-label="search"
+        aria-label={t("search.title")}
         aria-keyshortcuts="Control+K"
       >
-        <span>search…</span><kbd>Ctrl K</kbd>
+        <span>{t("search.field")}</span><kbd>{t("search.shortcut")}</kbd>
       </a>
       <ul class="rows">
         <li>
@@ -217,7 +222,7 @@
             href="/w/{current.slug}"
             aria-current={route.path === `/w/${current.slug}` ? "page" : undefined}
           >
-            home
+            {t("shell.home")}
           </a>
         </li>
       </ul>
@@ -228,8 +233,8 @@
     </div>
 
     {#if current || session.user.is_instance_admin}
-      <nav class="sidebar-group" aria-label="settings">
-        <div class="label">settings</div>
+      <nav class="sidebar-group" aria-label={t("shell.settings")}>
+        <div class="label">{t("shell.settings")}</div>
         <ul class="rows">
           {#if current}
             <li>
@@ -238,7 +243,7 @@
                 href="/w/{current.slug}/settings"
                 aria-current={route.path === `/w/${current.slug}/settings` ? "page" : undefined}
               >
-                workspace
+                {t("shell.workspace")}
               </a>
             </li>
           {/if}
@@ -248,7 +253,7 @@
               href="/admin"
               aria-current={route.path === "/admin" ? "page" : undefined}
             >
-              admin
+              {t("shell.admin")}
             </a>
           </li>{/if}
         </ul>
@@ -257,7 +262,7 @@
 
     <div class="sidebar-end">
       {#if leaving.problem}<p class="problem" role="alert">{leaving.problem}</p>{/if}
-      <Menu label="user menu" text={session.user.name} items={userItems} class="row user-button" />
+      <Menu label={t("shell.userMenu")} text={session.user.name} items={userItems} class="row user-button" />
       <Source withTheme={false} />
     </div>
   </aside>
@@ -268,12 +273,12 @@
         bind:element={opener}
         class="drawer-button"
         icon="menu"
-        verb="open the sidebar"
+        verb={t("shell.openSidebar")}
         aria-expanded={drawer}
         aria-controls={drawerId}
         onclick={() => (drawer ? closeDrawer(false) : void openDrawer())}
       />
-      <nav class="breadcrumb" aria-label="location">
+      <nav class="breadcrumb" aria-label={t("shell.location")}>
         {#if current && crumbWorkspace}
           <a href="/w/{current.slug}">{current.name}</a><span class="sep">/</span>
         {/if}

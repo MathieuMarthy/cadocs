@@ -5,6 +5,7 @@ import { type Editor, mergeAttributes, Node } from "@tiptap/core";
 import { Details } from "@tiptap/extension-details";
 
 import { headingNumbers } from "./source";
+import { t } from "../lib/i18n";
 
 export const CALLOUT_KINDS = ["note", "warning", "danger"] as const;
 export type CalloutKind = (typeof CALLOUT_KINDS)[number];
@@ -34,7 +35,7 @@ export const Callout = Node.create({
   addAttributes() {
     return {
       kind: {
-        default: "note",
+        default: "note", // i18n-ignore
         parseHTML: (element) => (isKind(element.dataset.kind) ? element.dataset.kind : "note"),
         renderHTML: (attributes) => ({ "data-kind": attributes.kind }),
       },
@@ -60,8 +61,8 @@ export const Callout = Node.create({
       head.className = "callout-head";
       head.contentEditable = "false";
       const select = document.createElement("select");
-      select.setAttribute("aria-label", "callout kind");
-      for (const kind of CALLOUT_KINDS) select.add(new Option(kind, kind));
+      select.setAttribute("aria-label", t("editor.calloutKind"));
+      for (const kind of CALLOUT_KINDS) select.add(new Option(t(`callout.${kind}`), kind));
       select.value = current.attrs.kind;
       head.append(select);
 
@@ -112,9 +113,10 @@ export const Toggle = Details.configure({
   renderToggleButton: ({ element, isOpen }) => {
     element.textContent = isOpen ? "▾" : "▸";
     element.className = "toggle-button";
-    element.setAttribute("aria-label", isOpen ? "close" : "open");
+    const label = t(isOpen ? "editor.toggleClose" : "editor.toggleOpen");
+    element.setAttribute("aria-label", label);
     element.setAttribute("aria-expanded", String(isOpen));
-    element.title = isOpen ? "close" : "open";
+    element.title = label;
   },
 });
 
@@ -142,10 +144,10 @@ export const TableOfContents = Node.create({
       dom.dataset.type = "tableOfContents";
       dom.contentEditable = "false";
       const nav = document.createElement("nav");
-      nav.setAttribute("aria-label", "table of contents");
+      nav.setAttribute("aria-label", t("slash.contents"));
       const label = document.createElement("div");
       label.className = "toc-label";
-      label.textContent = "contents";
+      label.textContent = t("editor.contents");
       const list = document.createElement("ol");
       nav.append(label, list);
       dom.append(nav);
@@ -164,7 +166,7 @@ export const TableOfContents = Node.create({
         if (headings.length === 0) {
           const empty = document.createElement("li");
           empty.className = "toc-empty";
-          empty.textContent = "no headings yet";
+          empty.textContent = t("editor.noHeadings");
           list.replaceChildren(empty);
           return;
         }
@@ -177,7 +179,7 @@ export const TableOfContents = Node.create({
             const number = document.createElement("span");
             number.className = "toc-number";
             number.textContent = label;
-            link.append(number, " ", text || "untitled");
+            link.append(number, " ", text || t("page.untitled"));
             link.addEventListener("click", (event) => {
               // Not an address: the router must not follow it.
               event.preventDefault();
@@ -257,7 +259,7 @@ export const PluginBlock = Node.create({
       dom.dataset.kind = String(node.attrs.kind);
       dom.className = "plugin-fallback";
       dom.contentEditable = "false";
-      dom.textContent = String(node.attrs.text || node.attrs.kind || "plugin block");
+      dom.textContent = String(node.attrs.text || node.attrs.kind || t("editor.plugin"));
       return { dom, ignoreMutation: () => true };
     };
   },

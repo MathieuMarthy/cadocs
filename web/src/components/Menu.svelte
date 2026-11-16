@@ -18,6 +18,7 @@
 <script lang="ts">
   import { tick } from "svelte";
 
+  import { t } from "../lib/i18n";
   import { appear } from "../lib/motion";
   import Icon from "./Icon.svelte";
   import IconButton from "./IconButton.svelte";
@@ -165,7 +166,7 @@
     bind:element={button}
     class={extra}
     icon="ellipsis"
-    verb="more actions"
+    verb={t("menu.more")}
     {label}
     aria-haspopup="menu"
     aria-expanded={open}

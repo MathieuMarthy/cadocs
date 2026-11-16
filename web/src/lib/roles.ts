@@ -1,5 +1,7 @@
 // The roles and languages the settings screens offer, worded for people.
 
+import { currentLanguage, type Key, t } from "./i18n";
+
 /** A choice of a `select`. */
 export interface Option {
   value: string;
@@ -11,35 +13,30 @@ export const managesWorkspace = (role: string) => role === "owner" || role === "
 
 export const SPACE_ROLES = ["viewer", "commenter", "editor", "admin"];
 
-/** What `default_role` may be, `""` standing for `null`. */
-export const DEFAULT_ROLES: Option[] = [
-  { value: "", label: "none: grants only" },
-  { value: "viewer", label: "viewer" },
-  { value: "commenter", label: "commenter" },
-  { value: "editor", label: "editor" },
+/** A role as people read it. */
+export const roleName = (role: string) => t(`role.${role}` as Key);
+
+/** What `default_role` may be, `""` standing for `null`. A function, so it reads the language. */
+export const defaultRoles = (): Option[] => [
+  { value: "", label: t("role.none") },
+  ...["viewer", "commenter", "editor"].map((value) => ({ value, label: roleName(value) })),
 ];
 
 /** The languages of `PATCH /workspaces/{ws}` (ADR 0007), which stemming uses. */
-export const LANGUAGES: Option[] = [
-  ["ar", "arabic"],
-  ["da", "danish"],
-  ["de", "german"],
-  ["el", "greek"],
-  ["en", "english"],
-  ["es", "spanish"],
-  ["fi", "finnish"],
-  ["fr", "french"],
-  ["hu", "hungarian"],
-  ["it", "italian"],
-  ["nl", "dutch"],
-  ["no", "norwegian"],
-  ["pt", "portuguese"],
-  ["ro", "romanian"],
-  ["ru", "russian"],
-  ["sv", "swedish"],
-  ["ta", "tamil"],
-  ["tr", "turkish"],
-].map(([value, label]) => ({ value: value!, label: label! }));
+const STEMMING = [
+  ...["ar", "da", "de", "el", "en", "es", "fi", "fr", "hu"],
+  ...["it", "nl", "no", "pt", "ro", "ru", "sv", "ta", "tr"],
+];
+
+/** A language's name in the interface's language, lowercase as the interface writes words. */
+export function languageName(code: string) {
+  const names = new Intl.DisplayNames(currentLanguage(), { type: "language" });
+  return (names.of(code) ?? code).toLocaleLowerCase(currentLanguage());
+}
+
+/** The choices of the workspace's language. */
+export const stemmingLanguages = (): Option[] =>
+  STEMMING.map((value) => ({ value, label: languageName(value) }));
 
 /** A user of the workspace, as `GET /workspaces/{ws}/members` answers. */
 export interface Member {

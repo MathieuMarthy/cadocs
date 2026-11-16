@@ -7,6 +7,7 @@ import Suggestion, { type SuggestionProps } from "@tiptap/suggestion";
 
 import { api, ApiError, type Page } from "../lib/api";
 import { CommandMenu, type MenuItem } from "./menu";
+import { t } from "../lib/i18n";
 
 /** The title a link shows, `null` for a page this reader cannot open. Kept while a page is open. */
 const titles = new Map<string, Promise<string | null>>();
@@ -20,7 +21,7 @@ function titleOf(id: string) {
   let title = titles.get(id);
   if (!title) {
     title = api<{ title: string }>("GET", `/pages/${encodeURIComponent(id)}`).then(
-      (page) => page.title || "untitled",
+      (page) => page.title || t("page.untitled"),
       (error) => {
         // Unreadable and missing look the same, as they do over REST: nothing is told of it.
         if (error instanceof ApiError && (error.status === 404 || error.status === 403)) return null;
@@ -76,11 +77,11 @@ export const PageLink = Node.create({
       titleOf(id).then(
         (title) => {
           if (!live) return;
-          link.textContent = title ?? "page not found";
+          link.textContent = title ?? t("editor.linkMissing");
           link.classList.toggle("page-link-missing", title === null);
         },
         () => {
-          if (live) link.textContent = "page";
+          if (live) link.textContent = t("editor.linkUnread");
         },
       );
       return {
@@ -153,10 +154,11 @@ export const PagePicker = Extension.create<{ workspace: () => string | null }>({
           if (!workspace) return [];
           const wanted = query.trim().toLowerCase();
           const rows = await candidates(workspace);
+          const untitled = t("page.untitled");
           return rows
-            .filter((row) => (row.title || "untitled").toLowerCase().includes(wanted))
+            .filter((row) => (row.title || untitled).toLowerCase().includes(wanted))
             .slice(0, SHOWN)
-            .map((row) => ({ id: row.id, label: row.title || "untitled" }));
+            .map((row) => ({ id: row.id, label: row.title || untitled }));
         },
         command: ({ editor, range, props }: { editor: SuggestionProps<Candidate>["editor"]; range: Range; props: Candidate }) => {
           editor
@@ -173,7 +175,7 @@ export const PagePicker = Extension.create<{ workspace: () => string | null }>({
           let unmount: (() => void) | null = null;
           return {
             onStart(props) {
-              menu = new CommandMenu(props, "pages");
+              menu = new CommandMenu(props, t("editor.pages"));
               unmount = props.mount(menu.element);
             },
             onUpdate(props) {

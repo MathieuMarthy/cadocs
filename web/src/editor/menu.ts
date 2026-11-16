@@ -2,6 +2,7 @@
 // the slash menu and the page picker show their suggestions in it.
 
 import type { SuggestionProps } from "@tiptap/suggestion";
+import { t } from "../lib/i18n";
 
 /** What a menu row shows: a label, and a hint on the right. */
 export interface MenuItem {
@@ -69,7 +70,7 @@ export class CommandMenu<T extends MenuItem> {
     if (items.length === 0) {
       const empty = document.createElement("div");
       empty.className = "command-menu-empty";
-      empty.textContent = "no match";
+      empty.textContent = t("editor.noMatch");
       this.list.replaceChildren(empty);
       return;
     }

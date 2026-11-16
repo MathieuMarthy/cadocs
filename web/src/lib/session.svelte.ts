@@ -9,6 +9,7 @@ import {
   type User,
 } from "./api";
 import { navigate } from "./router.svelte";
+import { t, useLanguage } from "./i18n";
 
 export const app = $state<{
   phase: "loading" | "failed" | "ready";
@@ -23,6 +24,7 @@ export function signIn(session: Session) {
   app.session = session;
   app.setupRequired = false;
   app.notice = null;
+  void useLanguage(session.user.language);
 }
 
 /** The session ended on its own: the router sends the person to login, and back here after. */
@@ -30,7 +32,7 @@ export function sessionEnded() {
   if (!app.session) return;
   setCsrfToken(null);
   app.session = null;
-  app.notice = "session ended, log in again";
+  app.notice = t("session.ended");
 }
 
 setUnauthenticatedHandler(sessionEnded);
@@ -45,6 +47,7 @@ export function signOut(notice: string | null = null, to = "/login") {
 
 export function updateUser(user: User) {
   if (app.session) app.session.user = user;
+  void useLanguage(user.language);
 }
 
 /** Reads the session again, after a change that may have altered it. */
@@ -83,6 +86,8 @@ export async function boot() {
       const { required } = await api<{ required: boolean }>("GET", "/auth/setup");
       app.setupRequired = required;
     }
+    // The person's language, or the browser's, before anything shows.
+    await useLanguage(app.session?.user.language ?? null);
     app.phase = "ready";
   } catch {
     app.phase = "failed";

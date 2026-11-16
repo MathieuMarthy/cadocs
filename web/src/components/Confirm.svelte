@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../lib/i18n";
   import { appear } from "../lib/motion";
   import type { IconName } from "./icons";
   import IconButton from "./IconButton.svelte";
@@ -40,7 +41,7 @@
   >
     {confirm}
   </button>
-  <button class="button secondary" type="button" in:appear onclick={() => (asking = false)}>cancel</button>
+  <button class="button secondary" type="button" in:appear onclick={() => (asking = false)}>{t("common.cancel")}</button>
 {:else if icon}
   <IconButton {icon} verb={label} {danger} {disabled} appear onclick={() => (asking = true)} />
 {:else}

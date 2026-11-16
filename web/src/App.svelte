@@ -20,6 +20,7 @@
   import type { Workspace as WorkspaceRow } from "./lib/api";
   import { navigate, reopened, route, safeNext } from "./lib/router.svelte";
   import { app, boot } from "./lib/session.svelte";
+  import { t } from "./lib/i18n";
 
   type View =
     | { name: "redirect"; to: string }
@@ -101,10 +102,10 @@
 </script>
 
 {#if app.phase === "loading"}
-  <p class="meta" role="status" style="padding: var(--space-4)">loading…</p>
+  <p class="meta" role="status" style="padding: var(--space-4)">{t("common.loading")}</p>
 {:else if app.phase === "failed"}
-  <Message title="server unreachable">
-    <button class="button" type="button" onclick={boot}>retry</button>
+  <Message title={t("app.unreachable")}>
+    <button class="button" type="button" onclick={boot}>{t("app.retry")}</button>
   </Message>
 {:else if view.name === "setup"}
   <Setup code={view.code} />
@@ -140,24 +141,24 @@
   {#await import("./routes/Page.svelte") then { default: Page }}
     {#key `${view.id}/${reopened.count}`}<Page id={view.id} />{/key}
   {:catch}
-    <Message title="page failed to load">
-      <button class="button" type="button" onclick={() => location.reload()}>reload</button>
+    <Message title={t("app.failed")}>
+      <button class="button" type="button" onclick={() => location.reload()}>{t("app.reload")}</button>
     </Message>
   {/await}
 {:else if view.name === "history"}
   {#key view.id}<History id={view.id} selected={view.revision} />{/key}
 {:else if view.name === "home"}
-  <Shell title="no workspace">
-    <h1>no workspace</h1>
+  <Shell title={t("workspace.none")}>
+    <h1>{t("workspace.none")}</h1>
     {#if app.session?.can_create_workspace}
-      <p class="notice">create one, or ask a workspace admin for an invitation.</p>
+      <p class="notice">{t("workspace.noneCreate")}</p>
       <NewWorkspace />
     {:else}
-      <p class="notice">ask a workspace admin for an invitation.</p>
+      <p class="notice">{t("workspace.noneAsk")}</p>
     {/if}
   </Shell>
 {:else if view.name === "not-found"}
-  <Message title="not found" />
+  <Message title={t("app.notFound")} />
 {/if}
 
 <!-- Outside every screen, so a screen that changes under it keeps the notice. -->

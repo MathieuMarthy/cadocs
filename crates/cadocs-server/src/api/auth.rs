@@ -122,6 +122,7 @@ pub(super) struct UserBody {
     name: String,
     is_instance_admin: bool,
     email_2fa: bool,
+    language: Option<String>,
 }
 
 impl From<User> for UserBody {
@@ -132,6 +133,7 @@ impl From<User> for UserBody {
             name: user.name,
             is_instance_admin: user.is_instance_admin,
             email_2fa: user.email_2fa,
+            language: user.language,
         }
     }
 }
@@ -276,6 +278,7 @@ async fn setup<S: AccountStore, A>(
         name,
         is_instance_admin: true,
         email_2fa: false,
+        language: None,
     };
     let first = FirstUser {
         id: user.id.clone(),
@@ -465,6 +468,18 @@ struct UpdateMeRequest {
     email: Option<String>,
     password: Option<String>,
     current_password: Option<String>,
+    #[serde(default, deserialize_with = "super::spaces::present")]
+    language: Option<Option<String>>,
+}
+
+/// The languages the interface comes in (step 34). `None` follows the browser's.
+const LANGUAGES: [&str; 2] = ["en", "fr"];
+
+fn interface_language(language: &str) -> Result<String, &'static str> {
+    LANGUAGES
+        .contains(&language)
+        .then(|| language.to_owned())
+        .ok_or("invalid")
 }
 
 /// With a relay, a new email is not changed here: a code goes to it, and `confirm_email` changes
@@ -486,6 +501,9 @@ async fn update_me<S: AccountStore, A>(
     if let Some(password) = &body.password {
         fields.check("password", check_password(password));
     }
+    let language = body.language.map(|language| {
+        language.map(|language| fields.check("language", interface_language(&language)))
+    });
     let needs_password = email.is_some() || body.password.is_some();
     if needs_password && body.current_password.is_none() {
         fields.check::<()>("current_password", Err("required"));
@@ -518,6 +536,7 @@ async fn update_me<S: AccountStore, A>(
         email,
         password_hash,
         email_2fa_off: false,
+        language,
     };
     let keep = current.token_hash();
     let basis = UpdateBasis {
@@ -554,6 +573,7 @@ async fn update_me<S: AccountStore, A>(
         id: user.id,
         is_instance_admin: user.is_instance_admin,
         email_2fa: user.email_2fa && !unproven,
+        language: changes.language.unwrap_or(user.language),
     }))
 }
 
@@ -750,6 +770,7 @@ async fn disable_email_2fa<S: AccountStore, A>(
     let checked_hash = check_current_password(&state, &current, (peer, &headers), password).await?;
     let changes = UserChanges {
         email_2fa_off: true,
+        language: None,
         ..UserChanges::default()
     };
     let keep = current.token_hash();
@@ -993,6 +1014,7 @@ async fn confirm_registration<S: AccountStore, A>(
         name,
         is_instance_admin: false,
         email_2fa: false,
+        language: None,
     };
     let new = NewUser {
         id: user.id.clone(),

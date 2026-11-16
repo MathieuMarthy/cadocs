@@ -4,6 +4,7 @@
   import { api, ApiError, type Session } from "../lib/api";
   import { describe, Form } from "../lib/form.svelte";
   import { app, mailFeatures, signIn, type MailFeatures } from "../lib/session.svelte";
+  import { t } from "../lib/i18n";
 
   let email = $state("");
   let password = $state("");
@@ -28,7 +29,7 @@
       async () => signIn(await api<Session>("POST", "/auth/login", body)),
       (error) =>
         error instanceof ApiError && error.status === 401
-          ? "wrong email or password"
+          ? t("login.wrong")
           : describe(error),
     );
     if (form.fields.code === "required") {
@@ -47,13 +48,13 @@
   }
 </script>
 
-<Solo title="log in">
+<Solo title={t("login.title")}>
   {#if app.notice}<p class="notice" role="status">{app.notice}</p>{/if}
   {#if codeAsked}
-    <p class="notice" role="status">a code is on its way to {email}. it works for 10 minutes.</p>
+    <p class="notice" role="status">{t("login.codeSent", { email })}</p>
     <form onsubmit={submit}>
       <Field
-        label="code"
+        label={t("form.code")}
         bind:value={code}
         inputmode="numeric"
         autocomplete="one-time-code"
@@ -62,21 +63,21 @@
         problem={form.field("code")}
       />
       {#if form.problem}<p class="problem" role="alert">{form.problem}</p>{/if}
-      <button class="button" disabled={form.busy}>log in</button>
+      <button class="button" disabled={form.busy}>{t("login.submit")}</button>
     </form>
     <p class="meta" style="margin-top: var(--space-6)">
-      no code?
+      {t("login.noCode")}
       <button class="button secondary" type="button" disabled={form.busy} onclick={() => logIn("")}>
-        send a new code
+        {t("login.resend")}
       </button>
     </p>
     <p class="meta">
-      <button class="button secondary" type="button" onclick={startOver}>use another account</button>
+      <button class="button secondary" type="button" onclick={startOver}>{t("login.startOver")}</button>
     </p>
   {:else}
     <form onsubmit={submit}>
       <Field
-        label="email"
+        label={t("form.email")}
         type="email"
         bind:value={email}
         autocomplete="email"
@@ -84,7 +85,7 @@
         problem={form.field("email")}
       />
       <Field
-        label="password"
+        label={t("form.password")}
         type="password"
         bind:value={password}
         autocomplete="current-password"
@@ -92,19 +93,19 @@
         problem={form.field("password")}
       />
       {#if form.problem}<p class="problem" role="alert">{form.problem}</p>{/if}
-      <button class="button" disabled={form.busy}>log in</button>
+      <button class="button" disabled={form.busy}>{t("login.submit")}</button>
     </form>
     {#if features?.mail}
       <p class="meta" style="margin-top: var(--space-6)">
-        <a href="/forgot-password">forgot your password?</a>
+        <a href="/forgot-password">{t("login.forgot")}</a>
       </p>
     {:else if features}
       <p class="meta" style="margin-top: var(--space-6)">
-        forgot your password? ask an administrator for a reset link.
+        {t("login.forgotNoMail")}
       </p>
     {/if}
     {#if features?.registration}
-      <p class="meta">no account? <a href="/register">create an account</a></p>
+      <p class="meta">{t("login.noAccount")} <a href="/register">{t("login.register")}</a></p>
     {/if}
   {/if}
 </Solo>

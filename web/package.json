@@ -6,8 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && node scripts/schema.ts --check",
+    "build": "tsc --noEmit && node scripts/strings.ts && npm run test:unit && vite build && node scripts/schema.ts --check",
     "schema": "node scripts/schema.ts",
+    "test:unit": "node --test 'scripts/*.test.ts'",
     "test:compat": "node --test e2e/compat.test.ts",
     "test:browsers": "playwright test",
     "test:e2e": "tsc --noEmit -p e2e && npm run test:compat && npm run test:browsers"

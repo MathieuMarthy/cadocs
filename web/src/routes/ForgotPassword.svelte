@@ -5,6 +5,7 @@
   import { Form } from "../lib/form.svelte";
   import { mailFeatures } from "../lib/session.svelte";
   import Message from "./Message.svelte";
+  import { t } from "../lib/i18n";
 
   let email = $state("");
   let sent = $state(false);
@@ -22,18 +23,18 @@
 </script>
 
 {#if mail === false}
-  <Message title="not found" />
+  <Message title={t("app.notFound")} />
 {:else if mail}
-<Solo title="forgot password">
+<Solo title={t("forgot.title")}>
   {#if sent}
     <p class="notice" role="status">
-      if an account uses this address, a reset link is on its way. it works for one hour.
+      {t("forgot.sent")}
     </p>
-    <a class="button" href="/login">back to log in</a>
+    <a class="button" href="/login">{t("forgot.back")}</a>
   {:else}
     <form onsubmit={submit}>
       <Field
-        label="email"
+        label={t("form.email")}
         type="email"
         bind:value={email}
         autocomplete="email"
@@ -41,9 +42,9 @@
         problem={form.field("email")}
       />
       {#if form.problem}<p class="problem" role="alert">{form.problem}</p>{/if}
-      <button class="button" disabled={form.busy}>send reset link</button>
+      <button class="button" disabled={form.busy}>{t("forgot.send")}</button>
     </form>
-    <p class="meta" style="margin-top: var(--space-6)"><a href="/login">back to log in</a></p>
+    <p class="meta" style="margin-top: var(--space-6)"><a href="/login">{t("forgot.back")}</a></p>
   {/if}
 </Solo>
 {/if}

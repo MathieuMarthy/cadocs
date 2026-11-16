@@ -16,6 +16,15 @@ What a change to the front end or its tests must know.
 - Logo: `.logo` caret is `aria-hidden`, so a test reads `cadocs`. `public/favicon.svg` carries its own colors. The README images in `docs/assets/` are captures of the real binary at 1280 by 640, 2x, both themes, seeded through `e2e/server.ts`: retake them when the shell changes visibly.
 - Type checks: `tsc` skips `.svelte` files, and `svelte-check` needs TypeScript 5 or 6. Run it by hand after changing a component, from `web/`: `npx -y -p typescript@6 -p svelte-check@4.7.8 -p svelte@5.57.3 svelte-check --workspace . --tsconfig ./tsconfig.json`.
 
+## Words
+
+- Every string a person reads is `t(key, params)` from `lib/i18n` (step 34). `lib/i18n/en.ts` is the source, keys grouped by screen, `{name}` a parameter; an entry `{ one, other }` picks its form by `count` through `Intl.PluralRules` (none needs it yet). One key per sentence, never fragments glued together. Plain TypeScript, so the registry still loads under Node.
+- `scripts/strings.ts`, run by `npm run build`, fails on words outside the catalogue: template text, attributes other than its list of code attributes, the strings an `{expression}` can show, and in code the strings given to `label`, `title`, `textContent` and the like, to `notify` or `setAttribute`, returned, or any two-word string elsewhere. `// i18n-ignore` on the line or the one before keeps one. It does not see a single word passed to a helper of our own (as `new CommandMenu(props, "pages")` was): review those.
+- Text built when a module loads keeps the language of that moment: the registry's slash labels are getters, `defaultRoles()` and `stemmingLanguages()` are functions. Roles show through `roleName`, workspace languages through `Intl.DisplayNames`. Dates in words follow `currentLanguage()`; numeric dates follow `formatLocale()`, the browser's first locale as before this step (step 54 decides whether a chosen language moves them). A key built from a value (`role.${role}`) that the catalogue lacks shows as itself.
+- `useLanguage(user.language)` runs at boot, before the first screen, and on `signIn` and `updateUser`: the person's choice, else the first browser language the interface has, else English, and it sets `<html lang>`. Only `en` exists. Step 54 adds `fr` to `CATALOGUES` as a dynamic import, and must make a change after the first paint redraw the screens, which nothing does yet; `signIn` and `updateUser` do not wait for the catalogue, and two quick calls can finish out of order. A logout keeps the language until the next boot.
+- Still English from the server: refusal messages (`describe` shows `error.message`), mails, slash command keywords. Field codes go through `field.<code>`, with the code itself as fallback.
+- Playwright pins `locale: "en-US"`, since the interface follows the browser.
+
 ## Navigation
 
 - `lib/nav.svelte.ts` holds a workspace's spaces, tree levels and events socket. `acquireNav` shares one `Nav` between screens and keeps the socket 2 seconds after the last leaves; a screen that calls it is keyed by workspace in `App.svelte`.

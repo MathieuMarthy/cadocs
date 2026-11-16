@@ -11,11 +11,13 @@
   import { notify } from "../lib/notice.svelte";
   import { app, sessionEnded } from "../lib/session.svelte";
   import Message from "./Message.svelte";
+  import { type Key, t } from "../lib/i18n";
 
   let { id }: { id: string } = $props();
 
   /** Why this page cannot show. A failed session goes to login instead. */
-  let gone = $state<string | null>(null);
+  /** Why the page went, as a key of the catalogue. */
+  let gone = $state<Key | null>(null);
 
   let editor = $state<HTMLElement>()!;
   let title = $state<HTMLTextAreaElement>()!;
@@ -52,7 +54,7 @@
   const crumbs = $derived([
     ...(spaceName ? [{ label: spaceName }] : []),
     ...(row?.ancestors ?? []).map((crumb) => ({
-      label: crumb.title || "untitled",
+      label: crumb.title || t("page.untitled"),
       href: `/?page=${crumb.id}`,
     })),
   ]);
@@ -67,7 +69,7 @@
     for (const crumb of row.ancestors) nav.expand(crumb.id, space);
   });
 
-  const shownTitle = $derived(name || row?.title || "untitled");
+  const shownTitle = $derived(name || row?.title || t("page.untitled"));
 
   // A trash from the tree must know whether it takes this page away, through an ancestor too.
   const path = $derived([...(row?.ancestors ?? []).map((crumb) => crumb.id), id]);
@@ -76,26 +78,26 @@
   /** Where to go from a page that went: its parent, or its workspace for a page at the root. */
   const wayOut = $derived.by(() => {
     if (!row) return null;
-    if (row.parent_id) return { href: `/?page=${row.parent_id}`, label: "open the parent page" };
+    if (row.parent_id) return { href: `/?page=${row.parent_id}`, label: t("page.openParent") };
     const home = known(row.workspace_id);
-    return home ? { href: `/w/${home.slug}`, label: "open the workspace" } : null;
+    return home ? { href: `/w/${home.slug}`, label: t("page.openWorkspace") } : null;
   });
 
   /** The top bar's menu: copy link, history, export and print for anyone, move to trash for those who may write. */
   const actions = $derived.by<MenuItem[]>(() => {
     const items: MenuItem[] = [
-      { icon: "link", label: "copy link", select: () => void copy(pageLink(id)) },
-      { icon: "history", label: "history", href: `/?page=${id}&history` },
-      { icon: "download", label: "export as markdown", href: exportUrl(id, false) },
-      { icon: "download", label: "export with attachments", href: exportUrl(id, true) },
-      { icon: "printer", label: "print", select: () => print() },
+      { icon: "link", label: t("page.copyLink"), select: () => void copy(pageLink(id)) },
+      { icon: "history", label: t("history.title"), href: `/?page=${id}&history` },
+      { icon: "download", label: t("page.export"), href: exportUrl(id, false) },
+      { icon: "download", label: t("page.exportAll"), href: exportUrl(id, true) },
+      { icon: "printer", label: t("page.print"), select: () => print() },
     ];
     const page = row;
     const held = nav;
     if (page && held && canEdit(page.role)) {
       items.push({
         icon: "trash-2",
-        label: "move to trash",
+        label: t("page.trash"),
         destructive: true,
         select: () => trashPage(held, page).catch((error) => notify(describe(error))),
       });
@@ -142,7 +144,7 @@
         if (gone) return false;
         // An editor stopped on content it cannot show has no socket left to tell.
         if (socketTells && page && !stale) return true;
-        gone = "page not found";
+        gone = "page.notFound";
         return false;
       }
       // Anything else is the network or a passing failure, which the socket reports and outlives.
@@ -202,7 +204,7 @@
           page?.destroy();
           page = null;
           if (code === 4401) sessionEnded();
-          else gone = code === 4403 ? "access revoked" : "page deleted";
+          else gone = code === 4403 ? "page.revoked" : "page.deleted";
         },
         onRepeatedFailure() {
           void check().then((readable) => {
@@ -222,35 +224,35 @@
 </script>
 
 {#if gone}
-  {#if wayOut && gone !== "access revoked"}
-    <Message title={gone}><a class="button" href={wayOut.href}>{wayOut.label}</a></Message>
+  {#if wayOut && gone !== "page.revoked"}
+    <Message title={t(gone)}><a class="button" href={wayOut.href}>{wayOut.label}</a></Message>
   {:else}
-    <Message title={gone} />
+    <Message title={t(gone)} />
   {/if}
 {:else if !showing}
-  <Shell title="loading…" {workspace} guess={false} crumbWorkspace={false}>
-    <p class="meta" role="status">loading…</p>
+  <Shell title={t("common.loading")} {workspace} guess={false} crumbWorkspace={false}>
+    <p class="meta" role="status">{t("common.loading")}</p>
   </Shell>
 {:else}
   <Shell title={shownTitle} {workspace} guess={false} {crumbs} bare>
     {#snippet end()}
       <span bind:this={status} class="status" role="status"></span>
       <div bind:this={presence} class="presence"></div>
-      <Menu label="more actions for {shownTitle}" items={actions} />
+      <Menu label={t("menu.moreFor", { name: shownTitle })} items={actions} />
     {/snippet}
     <main class="page">
       {#if stale}
         <div class="banner" role="alert">
-          <span>this page holds content this version cannot show. reload to edit it.</span>
-          <button type="button" class="button" onclick={() => location.reload()}>reload</button>
+          <span>{t("page.stale")}</span>
+          <button type="button" class="button" onclick={() => location.reload()}>{t("app.reload")}</button>
         </div>
       {/if}
       <textarea
         bind:this={title}
         class="title"
         rows="1"
-        placeholder="untitled"
-        aria-label="page title"
+        placeholder={t("page.untitled")}
+        aria-label={t("page.titleField")}
         autocomplete="off"
         spellcheck="false"
       ></textarea>

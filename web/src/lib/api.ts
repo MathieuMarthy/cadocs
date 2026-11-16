@@ -1,5 +1,7 @@
 /** REST calls under `/api/v1`, and what `docs/API.md` says about their errors. */
 
+import { t } from "./i18n";
+
 export interface User {
   id: string;
   email: string;
@@ -7,6 +9,8 @@ export interface User {
   is_instance_admin: boolean;
   /** A login needs a code by mail after the password (ADR 0026). */
   email_2fa: boolean;
+  /** The language of the interface, `null` to follow the browser's. */
+  language: string | null;
 }
 
 export interface Workspace {
@@ -61,7 +65,7 @@ async function refusal(response: Response) {
   return new ApiError(
     response.status,
     error.code ?? "internal",
-    error.message ?? `The server answered ${response.status}`,
+    error.message ?? t("error.status", { status: response.status }),
     error.fields ?? {},
     retryAfter,
   );
@@ -74,7 +78,7 @@ async function call(method: string, path: string, headers: Record<string, string
   try {
     response = await fetch(`/api/v1${path}`, { method, headers, body });
   } catch {
-    throw new ApiError(0, "unreachable", "Server unreachable");
+    throw new ApiError(0, "unreachable", t("error.unreachable"));
   }
   if (!response.ok) {
     const error = await refusal(response);

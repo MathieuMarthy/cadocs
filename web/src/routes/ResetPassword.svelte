@@ -4,6 +4,7 @@
   import { api, ApiError } from "../lib/api";
   import { describe, Form } from "../lib/form.svelte";
   import { app, refreshSession, signOut } from "../lib/session.svelte";
+  import { t } from "../lib/i18n";
 
   let { token }: { token: string } = $props();
 
@@ -25,21 +26,21 @@
     // The reset ended the sessions of the link's account, which may not be this browser's.
     await refreshSession().catch(() => {});
     if (app.session) changed = true;
-    else signOut("password changed, log in");
+    else signOut(t("reset.loggedOut"));
   }
 </script>
 
-<Solo title="new password">
+<Solo title={t("reset.title")}>
   {#if changed}
-    <p class="notice" role="status">password changed</p>
-    <a class="button" href="/">go to cadocs</a>
+    <p class="notice" role="status">{t("reset.done")}</p>
+    <a class="button" href="/">{t("app.home")}</a>
   {:else if expired}
-    <p class="notice">this link is no longer valid.</p>
-    <a class="button" href="/">go to cadocs</a>
+    <p class="notice">{t("reset.expired")}</p>
+    <a class="button" href="/">{t("app.home")}</a>
   {:else}
     <form onsubmit={submit}>
       <Field
-        label="new password"
+        label={t("form.newPassword")}
         type="password"
         bind:value={password}
         autocomplete="new-password"
@@ -47,7 +48,7 @@
         problem={form.field("password")}
       />
       {#if form.problem}<p class="problem" role="alert">{form.problem}</p>{/if}
-      <button class="button" disabled={form.busy}>set password</button>
+      <button class="button" disabled={form.busy}>{t("reset.submit")}</button>
     </form>
   {/if}
 </Solo>

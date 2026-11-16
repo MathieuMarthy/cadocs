@@ -9,6 +9,7 @@
   import { api, type Page } from "../lib/api";
   import { Form } from "../lib/form.svelte";
   import { app, refreshSession } from "../lib/session.svelte";
+  import { t } from "../lib/i18n";
 
   interface AdminUser {
     id: string;
@@ -72,23 +73,27 @@
 
   /** No one demotes, disables or deletes themselves from here: another admin does. */
   function actions(user: AdminUser): MenuItem[] {
-    const reset: MenuItem = { icon: "link", label: "new reset link", select: () => void resetLink(user) };
+    const reset: MenuItem = {
+      icon: "link",
+      label: t("admin.resetLink"),
+      select: () => void resetLink(user),
+    };
     if (isSelf(user)) return [reset];
     return [
       {
         icon: "settings",
-        label: user.is_instance_admin ? "remove admin" : "make admin",
+        label: t(user.is_instance_admin ? "admin.demote" : "admin.promote"),
         select: () => void change(user, { is_instance_admin: !user.is_instance_admin }),
       },
       {
         icon: user.disabled_at ? "rotate-ccw" : "log-out",
-        label: user.disabled_at ? "enable" : "disable",
+        label: t(user.disabled_at ? "admin.enable" : "admin.disable"),
         select: () => void change(user, { disabled: !user.disabled_at }),
       },
       reset,
       {
         icon: "trash-2",
-        label: "delete",
+        label: t("admin.delete"),
         destructive: true,
         danger: true,
         select: () => (deleting = user.id),
@@ -107,24 +112,24 @@
   }
 </script>
 
-<Shell title="admin" crumbWorkspace={false}>
-  <h1>admin</h1>
+<Shell title={t("shell.admin")} crumbWorkspace={false}>
+  <h1>{t("shell.admin")}</h1>
 
-  <h2>users</h2>
+  <h2>{t("admin.users")}</h2>
   {#if list.problem}<p class="problem" role="alert">{list.problem}</p>{/if}
   {#if action.problem}<p class="problem" role="alert">{action.problem}</p>{/if}
   <ul class="records">
     {#each users as user (user.id)}
       <li class="record" data-user={user.id}>
         <div class="record-who">
-          {user.name}{#if isSelf(user)}&nbsp;<span class="you">(you)</span>{/if}
+          {user.name}{#if isSelf(user)}&nbsp;<span class="you">{t("admin.you")}</span>{/if}
           <span>{user.email}</span>
         </div>
         <span class="badges">
-          {#if user.is_instance_admin}<span class="badge">admin</span>{/if}
-          {#if user.disabled_at}<span class="badge">disabled</span>{/if}
+          {#if user.is_instance_admin}<span class="badge">{t("admin.badge")}</span>{/if}
+          {#if user.disabled_at}<span class="badge">{t("admin.disabled")}</span>{/if}
         </span>
-        <Menu label="more actions for {user.name}" items={actions(user)} class="record-menu" />
+        <Menu label={t("menu.moreFor", { name: user.name })} items={actions(user)} class="record-menu" />
         {#if deleting === user.id}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
@@ -135,7 +140,7 @@
               void stopDeleting(user, true);
             }}
           >
-            <span class="meta">delete {user.name} for good?</span>
+            <span class="meta">{t("admin.deleteConfirm", { name: user.name })}</span>
             <button
               class="button danger"
               type="button"
@@ -144,24 +149,24 @@
                 void stopDeleting(user, false);
                 void remove(user);
               }}
-              {@attach focus}>delete</button
+              {@attach focus}>{t("admin.delete")}</button
             >
             <button
               class="button secondary"
               type="button"
               onclick={() => void stopDeleting(user, true)}
             >
-              cancel
+              {t("common.cancel")}
             </button>
           </div>
         {/if}
         {#if reset?.user === user.id}
           <div class="record-link reset-link">
-            <Field label="one-time link" value={reset.link} readonly />
+            <Field label={t("admin.oneTimeLink")} value={reset.link} readonly />
             <IconButton
               icon="copy"
-              verb="copy"
-              label="copy the reset link"
+              verb={t("admin.copy")}
+              label={t("admin.copyReset")}
               onclick={() => reset && void copy(reset.link)}
             />
           </div>
@@ -171,7 +176,7 @@
   </ul>
   {#if cursor}
     <button class="button" type="button" disabled={list.busy} onclick={() => load(cursor)}>
-      load more
+      {t("common.loadMore")}
     </button>
   {/if}
 </Shell>

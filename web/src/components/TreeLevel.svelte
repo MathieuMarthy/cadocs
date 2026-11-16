@@ -27,6 +27,7 @@
   import { canEdit, type Level, type Nav, type Place } from "../lib/nav.svelte";
   import { copy, pageLink } from "../lib/actions";
   import { shownPage } from "../lib/router.svelte";
+  import { t } from "../lib/i18n";
 
   let {
     nav,
@@ -47,7 +48,7 @@
     ontrash: (page: PageRow) => void;
   } = $props();
 
-  const name = (page: PageRow) => page.title || "untitled";
+  const name = (page: PageRow) => page.title || t("page.untitled");
 
   /** The row of the page on screen scrolls into the tree when it appears. */
   const reveal = (row: HTMLElement) => row.scrollIntoView({ block: "nearest" });
@@ -62,11 +63,13 @@
   const shown = $derived(shownPage());
 
   function actions(page: PageRow): MenuItem[] {
-    const items: MenuItem[] = [{ icon: "link", label: "copy link", select: () => void copy(pageLink(page.id)) }];
+    const items: MenuItem[] = [
+      { icon: "link", label: t("page.copyLink"), select: () => void copy(pageLink(page.id)) },
+    ];
     if (canEdit(page.role)) {
       items.push({
         icon: "trash-2",
-        label: "move to trash",
+        label: t("page.trash"),
         destructive: true,
         select: () => ontrash(page),
       });
@@ -77,7 +80,7 @@
   function zoneOf(event: DragEvent): Zone {
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
     const ratio = (event.clientY - box.top) / box.height;
-    return ratio < 0.25 ? "before" : ratio > 0.75 ? "after" : "inside";
+    return ratio < 0.25 ? "before" : ratio > 0.75 ? "after" : "inside"; // i18n-ignore
   }
 
   /** Where the dragged page goes when dropped on `target` in `zone`, or null if nowhere. */
@@ -158,7 +161,7 @@
             class="tree-toggle"
             type="button"
             aria-expanded={open}
-            aria-label="{open ? 'collapse' : 'expand'} {name(page)}"
+            aria-label={t(open ? "tree.collapse" : "tree.expand", { name: name(page) })}
             onclick={() => nav.toggle(page.id, page.space_id)}>{open ? "▾" : "▸"}</button
           >
         {/if}
@@ -175,12 +178,12 @@
             <IconButton
               class="tree-plus"
               icon="plus"
-              verb="new page"
-              label="new page in {name(page)}"
+              verb={t("page.new")}
+              label={t("page.newIn", { parent: name(page) })}
               onclick={() => oncreate(page.space_id, page.id)}
             />
           {/if}
-          <Menu label="more actions for {name(page)}" items={actions(page)} />
+          <Menu label={t("menu.moreFor", { name: name(page) })} items={actions(page)} />
         </span>
       </div>
       <!-- Once loaded, so the level unfolds to the height of its rows. -->
@@ -201,7 +204,7 @@
     <li class="tree-row">
       <span class="tree-prefix">{lines}└─ </span>
       <button class="tree-more" type="button" onclick={() => nav.loadLevel(level, true)}>
-        more…
+        {t("tree.more")}
       </button>
     </li>
   {/if}

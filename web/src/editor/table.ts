@@ -19,6 +19,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { TableView } from "@tiptap/extension-table";
 
 import { type IconName, iconMarkup } from "../components/icons";
+import { type Key, t } from "../lib/i18n";
 
 type Command = (state: EditorState, dispatch?: (tr: Transaction) => void) => boolean;
 
@@ -63,13 +64,13 @@ export class TableWithControls extends TableView {
       return element;
     };
     const lastRow = () => body.lastElementChild;
-    const addRow = button("add row", "table-edge-row", () => {
+    const addRow = button(t("table.addRow"), "table-edge-row", () => {
       const last = cellsOf(lastRow()).at(0);
       if (!last) return;
       runIn(view, last, addRowAfter);
       caretIn(view, cellsOf(lastRow()).at(0));
     });
-    const addColumn = button("add column", "table-edge-column", () => {
+    const addColumn = button(t("table.addColumn"), "table-edge-column", () => {
       const last = cellsOf(body.firstElementChild).at(-1);
       if (!last) return;
       runIn(view, last, addColumnAfter);
@@ -98,7 +99,7 @@ export class TableWithControls extends TableView {
 }
 
 interface Action {
-  label: string;
+  key: Key;
   icon: IconName;
   command: Command;
   /** Below a rule. */
@@ -107,13 +108,13 @@ interface Action {
 }
 
 const ACTIONS: Action[] = [
-  { label: "add row above", icon: "plus", command: addRowBefore },
-  { label: "add row below", icon: "plus", command: addRowAfter },
-  { label: "add column left", icon: "plus", command: addColumnBefore },
-  { label: "add column right", icon: "plus", command: addColumnAfter },
-  { label: "delete row", icon: "x", command: deleteRow, rule: true },
-  { label: "delete column", icon: "x", command: deleteColumn },
-  { label: "delete table", icon: "x", command: deleteTable, danger: true },
+  { key: "table.addRowAbove", icon: "plus", command: addRowBefore },
+  { key: "table.addRowBelow", icon: "plus", command: addRowAfter },
+  { key: "table.addColumnLeft", icon: "plus", command: addColumnBefore },
+  { key: "table.addColumnRight", icon: "plus", command: addColumnAfter },
+  { key: "table.deleteRow", icon: "x", command: deleteRow, rule: true },
+  { key: "table.deleteColumn", icon: "x", command: deleteColumn },
+  { key: "table.deleteTable", icon: "x", command: deleteTable, danger: true },
 ];
 
 /**
@@ -133,7 +134,7 @@ class TableMenu {
     const menu = this.element;
     menu.className = "menu";
     menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-label", "table");
+    menu.setAttribute("aria-label", t("table.menu"));
     menu.tabIndex = -1;
     menu.popover = "manual";
     this.items = ACTIONS.map((action) => {
@@ -145,11 +146,11 @@ class TableMenu {
       }
       const item = document.createElement("button");
       item.type = "button";
-      item.className = action.danger ? "menu-item danger" : "menu-item";
+      item.className = action.danger ? "menu-item danger" : "menu-item"; // i18n-ignore
       item.setAttribute("role", "menuitem");
       item.tabIndex = -1;
       item.innerHTML = iconMarkup(action.icon);
-      item.append(action.label);
+      item.append(t(action.key));
       item.addEventListener("click", () => this.choose(action));
       item.addEventListener("pointermove", () => item.focus());
       menu.append(item);
