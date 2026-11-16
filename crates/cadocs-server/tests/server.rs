@@ -670,6 +670,14 @@ impl AccountStore for FlakyStore {
         self.inner.enable_email_2fa(user_id, attempt).await
     }
 
+    async fn change_email(
+        &self,
+        user_id: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<(), StoreError> {
+        self.inner.change_email(user_id, attempt).await
+    }
+
     async fn email_2fa_users(&self) -> Result<u64, StoreError> {
         self.inner.email_2fa_users().await
     }

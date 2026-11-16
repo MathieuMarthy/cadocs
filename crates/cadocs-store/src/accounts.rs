@@ -128,7 +128,8 @@ pub enum CodePurpose {
     Register,
     /// The second factor of a login.
     Login,
-    /// That the account's holder reads an address: to turn the second factor on.
+    /// That the account's holder reads an address: its own, to turn the second factor on, or a
+    /// new one, to move to it.
     Email,
 }
 
@@ -242,8 +243,9 @@ pub trait AccountStore: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Vec<Membership>, StoreError>> + Send;
 
     /// Applies `changes` in one transaction. A new password also voids the user's reset link and
-    /// ends every session of the user but `basis.session`. An email another account uses is an `EmailTaken`, and a `basis` that no
-    /// longer holds is a `StaleCredentials`.
+    /// ends every session of the user but `basis.session`. A new email is one nobody proved: it
+    /// clears `email_verified_at`, turns the second factor off and voids the reset link. An email another account uses
+    /// is an `EmailTaken`, and a `basis` that no longer holds is a `StaleCredentials`.
     fn update_user(
         &self,
         user_id: &str,
@@ -334,6 +336,16 @@ pub trait AccountStore: Send + Sync + 'static {
     /// address verified. A code that is missing, expired or other, or for an address the account
     /// no longer has, is a `WrongCode`, counted as for `register_user`.
     fn enable_email_2fa(
+        &self,
+        user_id: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Uses an `email` code that went to `attempt.email` for this account, then makes it the
+    /// account's address, verified, and voids its reset link. A code that is missing, expired, other or of another account
+    /// is a `WrongCode`, counted as for `register_user` when it is this account's. An address
+    /// another account took meanwhile is an `EmailTaken`, and the code stays.
+    fn change_email(
         &self,
         user_id: &str,
         attempt: &CodeAttempt<'_>,

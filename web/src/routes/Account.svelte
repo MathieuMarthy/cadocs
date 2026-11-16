@@ -29,12 +29,16 @@
   let email = $state(user.email);
   let password = $state("");
   let currentPassword = $state("");
-  let loginSaved = $state(false);
+  let loginSaved = $state("");
   const login = new Form();
+  // With a relay, a new email waits for the code mailed to it (ADR 0026).
+  let pending = $state("");
+  let proofCode = $state("");
+  const proof = new Form();
 
   async function saveLogin(event: SubmitEvent) {
     event.preventDefault();
-    loginSaved = false;
+    loginSaved = "";
     const changes: Record<string, string> = {};
     if (email !== app.session!.user.email) changes.email = email;
     if (password) changes.password = password;
@@ -43,11 +47,38 @@
       return;
     }
     if (currentPassword) changes.current_password = currentPassword;
-    loginSaved = await login.run(async () => {
-      updateUser(await api<User>("PATCH", "/me", changes));
+    // Lowercased as the server stores it: a different answer means the new email waits for a code.
+    const asked = changes.email?.trim().toLowerCase();
+    const done = await login.run(async () => {
+      const saved = await api<User>("PATCH", "/me", changes);
+      updateUser(saved);
+      // A save without an email leaves a code that waits.
+      if (asked !== undefined) {
+        pending = asked !== saved.email ? asked : "";
+        proofCode = "";
+        proof.problem = null;
+      }
+      email = saved.email;
       password = "";
       currentPassword = "";
     });
+    if (done) {
+      const waits = asked !== undefined && pending;
+      loginSaved = waits ? `a code is on its way to ${pending}. it works for 10 minutes.` : "saved";
+    }
+  }
+
+  async function proveEmail(event: SubmitEvent) {
+    event.preventDefault();
+    const done = await proof.run(async () => {
+      const saved = await api<User>("POST", "/me/email/confirm", { email: pending, code: proofCode });
+      updateUser(saved);
+      email = saved.email;
+    });
+    if (done) {
+      pending = "";
+      loginSaved = "email changed";
+    }
   }
 
   // The second factor by mail (ADR 0026), offered only with a relay.
@@ -120,7 +151,7 @@
         autocomplete="email"
         required
         problem={login.field("email")}
-        oninput={() => (loginSaved = false)}
+        oninput={() => (loginSaved = "")}
       />
       <Field
         label="new password"
@@ -128,7 +159,7 @@
         bind:value={password}
         autocomplete="new-password"
         problem={login.field("password")}
-        oninput={() => (loginSaved = false)}
+        oninput={() => (loginSaved = "")}
       />
       <Field
         label="current password"
@@ -139,9 +170,25 @@
       />
       <p class="meta">a new email or password needs the current one</p>
       {#if login.problem}<p class="problem" role="alert">{login.problem}</p>{/if}
-      {#if loginSaved}<p class="notice" role="status">saved</p>{/if}
+      {#if loginSaved}<p class="notice" role="status">{loginSaved}</p>{/if}
       <button class="button" disabled={login.busy}>save</button>
     </form>
+    {#if pending}
+      <form aria-label="new email" onsubmit={proveEmail}>
+        <Field
+          label="code"
+          bind:value={proofCode}
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          spellcheck="false"
+          required
+          problem={proof.field("code")}
+        />
+        {#if proof.problem}<p class="problem" role="alert">{proof.problem}</p>{/if}
+        {#if proof.field("email")}<p class="problem" role="alert">another account took this email</p>{/if}
+        <button class="button" disabled={proof.busy}>change email</button>
+      </form>
+    {/if}
   </section>
 
   {#if mail}

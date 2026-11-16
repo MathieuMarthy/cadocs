@@ -1,5 +1,6 @@
 //! Accounts and sessions: first run, login, logout, `/session` and `/me`, and what an instance
-//! with a relay adds (ADR 0026): the reset link by mail, registration and a second factor.
+//! with a relay adds (ADR 0026): the reset link by mail, registration, a second factor and the
+//! proof of a new address.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -104,7 +105,8 @@ where
                     .route_layer(sends)
                     .merge(delete(disable_email_2fa)),
             )
-            .route("/me/email-2fa/confirm", post(enable_email_2fa));
+            .route("/me/email-2fa/confirm", post(enable_email_2fa))
+            .route("/me/email/confirm", post(confirm_email));
     }
     let authenticated =
         authenticated.route_layer(from_fn_with_state(state.clone(), session::require::<S, A>));
@@ -465,6 +467,8 @@ struct UpdateMeRequest {
     current_password: Option<String>,
 }
 
+/// With a relay, a new email is not changed here: a code goes to it, and `confirm_email` changes
+/// it (ADR 0026). The answer is then the same, in the same time, whether the address is free.
 async fn update_me<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
     Extension(current): Extension<CurrentSession>,
@@ -488,9 +492,20 @@ async fn update_me<S: AccountStore, A>(
     }
     fields.finish()?;
 
+    let client = (peer, &headers);
+    let user = current.user.clone();
+    let email = email.filter(|email| *email != user.email);
+    // With mail on, the new address waits for its code.
+    let (email, to_prove) = match (&state.mail, email) {
+        (Some(outbox), Some(email)) => {
+            count_request(&state.mail_requests, &state.http, peer, &headers)?;
+            (None, Some((outbox.clone(), email)))
+        }
+        (_, email) => (email, None),
+    };
+
     let mut checked_hash = None;
     if let Some(password) = body.current_password.filter(|_| needs_password) {
-        let client = (peer, &headers);
         checked_hash = check_current_password(&state, &current, client, password).await?;
     }
     let password_hash = match body.password {
@@ -509,7 +524,6 @@ async fn update_me<S: AccountStore, A>(
         session: &keep,
         checked_hash: checked_hash.as_deref(),
     };
-    let user = current.user;
     state
         .store
         .update_user(&user.id, &changes, &basis, now_ms())
@@ -517,12 +531,134 @@ async fn update_me<S: AccountStore, A>(
     if changes.password_hash.is_some() {
         state.access_changed();
     }
+    // Past the limit of the address the answer stays the same.
+    if let Some((outbox, email)) = to_prove.filter(|(_, email)| state.mail_addresses.check(email)) {
+        let (store, http, key) = (
+            state.store.clone(),
+            state.http.clone(),
+            state.code_key.clone(),
+        );
+        let user_id = user.id.clone();
+        tokio::spawn(async move {
+            let mailed = mail_new_address(store.as_ref(), &http, &key, &outbox, user_id, email);
+            if let Err(error) = mailed.await {
+                tracing::warn!("a code for a new address could not be mailed, {error}");
+            }
+        });
+    }
+    // An address changed without a code is one nobody proved (`update_user`).
+    let unproven = changes.email.is_some();
     Ok(Json(UserBody {
         name: changes.name.unwrap_or(user.name),
         email: changes.email.unwrap_or(user.email),
         id: user.id,
         is_instance_admin: user.is_instance_admin,
-        email_2fa: user.email_2fa,
+        email_2fa: user.email_2fa && !unproven,
+    }))
+}
+
+/// Mails a code that moves the account `user_id` to `email`, or tells the owner of the address
+/// that it has an account, as registration does.
+async fn mail_new_address<S: AccountStore>(
+    store: &S,
+    http: &HttpConfig,
+    key: &[u8; 32],
+    outbox: &Outbox,
+    user_id: String,
+    email: String,
+) -> anyhow::Result<()> {
+    let origin = http.public_url.origin();
+    match store.credentials(&email).await? {
+        None => {}
+        Some(found) if found.disabled => return Ok(()),
+        Some(found) => {
+            outbox.queue(Mail {
+                to: found.user.email,
+                subject: "Your cadocs account".to_owned(),
+                text: format!(
+                    "Someone asked to move another account on\n\
+                     {origin}\n\
+                     to this address, which already has an account. Nothing has\n\
+                     changed.\n"
+                ),
+            });
+            return Ok(());
+        }
+    }
+    // Before the new code replaces the one before, as for a reset link.
+    let Some(place) = outbox.reserve() else {
+        return Ok(());
+    };
+    let code = new_code()?;
+    let now = now_ms();
+    let purpose = CodePurpose::Email;
+    store
+        .create_email_code(&NewEmailCode {
+            purpose,
+            code_hash: code_hash(key, purpose, &email, &code),
+            email: email.clone(),
+            user_id: Some(user_id),
+            now,
+            expires_at: now + CODE_LIFETIME.as_millis() as i64,
+        })
+        .await?;
+    place.send(Mail {
+        to: email,
+        subject: "Your cadocs code".to_owned(),
+        text: format!(
+            "Your code to move your account on\n\
+             {origin}\n\
+             to this address\n\n\
+             \x20   {code}\n\n\
+             It works for 10 minutes. If you did not ask for it, ignore this\n\
+             message: nothing changes without the code.\n"
+        ),
+    });
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct ConfirmEmailRequest {
+    #[serde(default)]
+    email: String,
+    #[serde(default)]
+    code: String,
+}
+
+/// Moves the account to the address a code went to, which the code proves.
+async fn confirm_email<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    JsonBody(body): JsonBody<ConfirmEmailRequest>,
+) -> Result<Json<UserBody>, ApiError> {
+    let mut fields = Fields::default();
+    let email = fields.check("email", clean_email(&body.email));
+    let code = body.code.trim();
+    if code.is_empty() {
+        fields.check::<()>("code", Err("required"));
+    }
+    fields.finish()?;
+    // A guess at a code, as at login.
+    count_request(&state.password_guesses, &state.http, peer, &headers)?;
+    let user = current.user;
+    // The code that turns the factor on went to this address: it moves nothing.
+    if email == user.email {
+        return Err(code_problem("wrong"));
+    }
+    let purpose = CodePurpose::Email;
+    let hash = code_hash(&state.code_key, purpose, &email, code);
+    let attempt = CodeAttempt {
+        purpose,
+        email: &email,
+        code_hash: &hash,
+        now: now_ms(),
+    };
+    state.store.change_email(&user.id, &attempt).await?;
+    Ok(Json(UserBody {
+        email,
+        ..UserBody::from(user)
     }))
 }
 

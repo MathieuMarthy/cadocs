@@ -337,15 +337,16 @@ impl AccountStore for SqliteStore {
         .bind(user_id)
         .fetch_one(&mut *tx)
         .await?;
-        let stored: Option<String> =
-            sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?1")
+        let stored: Option<(Option<String>, String)> =
+            sqlx::query_as("SELECT password_hash, email FROM users WHERE id = ?1")
                 .bind(user_id)
                 .fetch_optional(&mut *tx)
-                .await?
-                .flatten();
+                .await?;
+        let (stored, old_email) = stored.unzip();
         let password_moved = basis
             .checked_hash
-            .is_some_and(|checked| stored.as_deref() != Some(checked));
+            .is_some_and(|checked| stored.flatten().as_deref() != Some(checked));
+        let email_moved = changes.email.is_some() && changes.email != old_email;
         if !session_alive || password_moved {
             return Err(StoreError::StaleCredentials);
         }
@@ -355,7 +356,9 @@ impl AccountStore for SqliteStore {
                  name = COALESCE(?2, name),
                  email = COALESCE(?3, email),
                  password_hash = COALESCE(?4, password_hash),
-                 email_2fa = CASE WHEN ?6 THEN 0 ELSE email_2fa END,
+                 email_2fa = CASE WHEN ?6 OR ?3 <> email THEN 0 ELSE email_2fa END,
+                 email_verified_at = CASE WHEN ?3 <> email THEN NULL
+                                          ELSE email_verified_at END,
                  updated_at = ?5
              WHERE id = ?1",
         )
@@ -378,6 +381,9 @@ impl AccountStore for SqliteStore {
                 .bind(basis.session)
                 .execute(&mut *tx)
                 .await?;
+        }
+        // A link mailed to the old address must not reach the account any more.
+        if changes.password_hash.is_some() || email_moved {
             sqlx::query(DELETE_RESETS)
                 .bind(user_id)
                 .execute(&mut *tx)
@@ -714,6 +720,53 @@ impl AccountStore for SqliteStore {
         } else {
             Err(StoreError::WrongCode)
         }
+    }
+
+    async fn change_email(
+        &self,
+        user_id: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        // A code another account asked for is none of this one's to guess.
+        let owner: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT user_id FROM email_codes
+             WHERE purpose = ?1 AND email = ?2 AND expires_at > ?3",
+        )
+        .bind(attempt.purpose.as_str())
+        .bind(attempt.email)
+        .bind(attempt.now)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if owner.flatten().as_deref() != Some(user_id) {
+            return Err(StoreError::WrongCode);
+        }
+        if !use_code(&mut tx, attempt).await? {
+            // The try it counted stays.
+            tx.commit().await?;
+            return Err(StoreError::WrongCode);
+        }
+        sqlx::query(
+            "UPDATE users SET email = ?2, email_verified_at = ?3, updated_at = ?3
+             WHERE id = ?1",
+        )
+        .bind(user_id)
+        .bind(attempt.email)
+        .bind(attempt.now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| match error.as_database_error() {
+            // Rolled back with the rest, so the code stays.
+            Some(database) if database.is_unique_violation() => StoreError::EmailTaken,
+            _ => error.into(),
+        })?;
+        // A link mailed to the old address must not reach the account any more.
+        sqlx::query(DELETE_RESETS)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     async fn email_2fa_users(&self) -> Result<u64, StoreError> {

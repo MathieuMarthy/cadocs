@@ -214,3 +214,42 @@ withMail("a second factor turned on in the account makes a login ask for a maile
   await factor.getByRole("button", { name: "turn off" }).click();
   await expect(factor).toContainText("off: after your password");
 });
+
+withMail("a new email changes only once the code mailed to it is typed", async ({
+  page,
+  server,
+  relay,
+}) => {
+  await asOwner(page, server);
+  await page.goto(`${server.url}/account`);
+  const login = page.getByRole("form", { name: "email and password" });
+  await login.getByLabel("email").fill("ada@example.net");
+  await login.getByLabel("current password").fill(PASSWORD);
+  await login.getByRole("button", { name: "save" }).click();
+  await expect(login.getByRole("status")).toContainText("a code is on its way to ada@example.net");
+  await expect(login.getByLabel("email")).toHaveValue("ada@example.org");
+
+  const message = await relay.message();
+  expect(message.to).toBe("ada@example.net");
+  const code = /^ {4}(\d{6})$/m.exec(message.text)?.[1];
+  expect(code).toBeTruthy();
+  const proof = page.getByRole("form", { name: "new email" });
+  // Another change meanwhile leaves the code waiting.
+  await login.getByLabel("new password").fill(NEW_PASSWORD);
+  await login.getByLabel("current password").fill(PASSWORD);
+  await login.getByRole("button", { name: "save" }).click();
+  await expect(login.getByRole("status")).toContainText("saved");
+  await expect(proof).toBeVisible();
+  const wrong = String((Number(code) + 1) % 1_000_000).padStart(6, "0");
+  await proof.getByLabel("code").fill(wrong);
+  await proof.getByRole("button", { name: "change email" }).click();
+  await expect(proof.getByText("wrong")).toBeVisible();
+  await proof.getByLabel("code").fill(code!);
+  await proof.getByRole("button", { name: "change email" }).click();
+  await expect(login.getByRole("status")).toContainText("email changed");
+  await expect(proof).toHaveCount(0);
+  await expect(login.getByLabel("email")).toHaveValue("ada@example.net");
+
+  await page.reload();
+  await expect(login.getByLabel("email")).toHaveValue("ada@example.net");
+});
