@@ -44,7 +44,7 @@ Other rules:
 
 ## Conventions
 
-- **Language:** everything in the repository is in English: docs, code comments, commit messages. UI strings are written in English in the catalogue, which is the source of every translation (step 35).
+- **Language:** everything in the repository is in English: docs, code comments, commit messages. UI strings are written in English in the catalogue, which is the source of every translation (step 34).
 - **Errors:** `thiserror` in library crates, `anyhow` in binaries.
 - **Dependencies:** each one must justify its RAM and binary cost, and be compatible with AGPL-3.0 (ADR 0010). Update `docs/CARGO_WORKSPACE.md` when adding one.
 - **Reference project:** https://github.com/MathieuMarthy/uptime-monitoring uses the same stack (SQLite setup in `src/db.rs`, embedded assets in `src/assets.rs`, release profile).

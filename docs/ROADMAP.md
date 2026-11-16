@@ -36,7 +36,7 @@ Scope:
 - Public sharing with server-rendered pages, and optional indexing by search engines
 - Groups and group grants
 - OIDC login, TOTP multi-factor authentication (a code by mail came first, ADR 0026)
-- Bulk Markdown import and export, space export, Docmost import through its Markdown export (what this export loses is checked when this stage starts)
+- Bulk Markdown import and export, space export
 - Backlinks, page duplication and copy to another space
 - Math (KaTeX) and Mermaid blocks, loaded on demand in the browser
 - Diff between revisions
@@ -44,41 +44,38 @@ Scope:
 - Internationalized interface, in English and French
 - Page templates
 
-Decided when the stage started: math and Mermaid render in the browser only, so public pages and exports show their source as a code block. OIDC is tested against a fake provider in Rust, and checked by hand once with Authentik and Keycloak. Notion import moved to V2, for want of a real export to test.
+Decided when the stage started: math and Mermaid render in the browser only, so public pages and exports show their source as a code block. OIDC is tested against a fake provider in Rust, and checked by hand once with Authentik and Keycloak.
 
-Steps. The rules of the MVP steps apply, and every new screen takes its strings from the catalogue of step 35.
+Steps. The rules of the MVP steps apply, and every new screen takes its strings from the catalogue of step 34.
 
 - [x] Step 33: upgrade tests. One fixture database per release (`v0.1.0`, `v0.2.0`), opened by the current build in a test that checks its data. CI fails if the release binary passes 30 MB or a default build links S3 code. Done when both checks run in CI.
-- [ ] Step 34: Docmost export. Make a real export (Docmost in Docker), list what it keeps and loses (tree, attachments, links, callouts, math, comments), and write the mapping to cadocs nodes in `docs/notes/content.md`. Done when the mapping is written and the export is kept as a test fixture.
-- [ ] Step 35: i18n foundation. A string catalogue in `web/`, English as the source, a language setting per user that falls back to the browser's, every existing string moved into it. Done when the UI looks the same in English and a test fails on a string left out of the catalogue.
-- [ ] Step 36: groups, server. REST routes of groups and their members, `access_changed()` on each change, the permission matrix extended. Done when group grants change what a member reaches, over REST and sockets.
-- [ ] Step 37: groups, screens. Groups in workspace settings, groups in space grants.
-- [ ] Step 38: comments, server. Migration, REST routes, resolve and reopen, one level of replies, anchors stored as given (ADR 0012), a `comment` event on the events socket, permission tests.
-- [ ] Step 39: comments, screens. The side panel, anchors from the selection, highlights as decorations, lost anchors shown with their quote, resolve and reopen.
-- [ ] Step 40: mentions. A user mention node in the editor and in `cadocs-content`, mentions of users and pages in comments, body mentions diffed by the reindex job into `mentions`.
-- [ ] Step 41: backlinks. `page_links` filled by the reindex job, a route and a panel listing the pages that link here.
-- [ ] Step 42: in-app notifications. `notifications` for mentions, replies and comments on one's pages, the `notification` event, a list with unread count and read state.
-- [ ] Step 43: mail notifications. Through the relay only, a setting per user, grouped by a job so one burst sends one message. Done when, with no relay, nothing of it answers.
-- [ ] Step 44: math and Mermaid. Block and inline math, Mermaid blocks, loaded on demand in the editor. `cadocs-content` writes their source to Markdown and as a code block in HTML.
-- [ ] Step 45: revision diff. Compare a revision with the current page or another revision, on the screen of revisions.
-- [ ] Step 46: public shares, server. `page_shares`, its routes, `/s/{token}` rendered by the bounded reader, descendants, files, `ETag`, the strict CSP, `X-Robots-Tag` unless indexable, a rate limit. Done when a test shows a script in content cannot run there.
-- [ ] Step 47: public shares, screens. A share dialog on the page: children, indexing, expiry, revoke.
-- [ ] Step 48: TOTP. `user_totp`, recovery codes, login asking for the code, the account screen. Mail codes (ADR 0026) keep working beside it.
-- [ ] Step 49: OIDC, server. Providers in `CADOCS_OIDC_*`, code flow with PKCE, `user_identities`, how an identity meets an existing account, tests against a fake provider. An ADR for the HTTP client and its RAM and binary cost.
-- [ ] Step 50: OIDC, screens and providers. Login buttons, linking on the account screen, a manual check with Authentik and Keycloak written into `OPERATIONS.md`.
-- [ ] Step 51: duplication. `POST /pages/{page}/duplicate`, with descendants and attachments, into the same space or another, through a room.
-- [ ] Step 52: templates. `templates`, saving a page as one, a new page from one.
-- [ ] Step 53: exports. `format=html` for one page, the space export as a job behind `/jobs/{id}`, in Markdown or HTML, streamed as a zip.
-- [ ] Step 54: bulk import. A zip of Markdown files and folders becomes a tree of pages with its attachments, as a job.
-- [ ] Step 55: Docmost import. The mapping of step 34 on top of step 54, tested with the real export. Done when its tree and attachments come in intact.
-- [ ] Step 56: French. Every string of the catalogue translated, the language picker on the account screen.
-- [ ] Step 57: V1 exit. Benchmark, binary size, security review of shares, OIDC, TOTP and comments, `COVERAGE.md` and the permission matrix for the new routes.
+- [ ] Step 34: i18n foundation. A string catalogue in `web/`, English as the source, a language setting per user that falls back to the browser's, every existing string moved into it. Done when the UI looks the same in English and a test fails on a string left out of the catalogue.
+- [ ] Step 35: groups, server. REST routes of groups and their members, `access_changed()` on each change, the permission matrix extended. Done when group grants change what a member reaches, over REST and sockets.
+- [ ] Step 36: groups, screens. Groups in workspace settings, groups in space grants.
+- [ ] Step 37: comments, server. Migration, REST routes, resolve and reopen, one level of replies, anchors stored as given (ADR 0012), a `comment` event on the events socket, permission tests.
+- [ ] Step 38: comments, screens. The side panel, anchors from the selection, highlights as decorations, lost anchors shown with their quote, resolve and reopen.
+- [ ] Step 39: mentions. A user mention node in the editor and in `cadocs-content`, mentions of users and pages in comments, body mentions diffed by the reindex job into `mentions`.
+- [ ] Step 40: backlinks. `page_links` filled by the reindex job, a route and a panel listing the pages that link here.
+- [ ] Step 41: in-app notifications. `notifications` for mentions, replies and comments on one's pages, the `notification` event, a list with unread count and read state.
+- [ ] Step 42: mail notifications. Through the relay only, a setting per user, grouped by a job so one burst sends one message. Done when, with no relay, nothing of it answers.
+- [ ] Step 43: math and Mermaid. Block and inline math, Mermaid blocks, loaded on demand in the editor. `cadocs-content` writes their source to Markdown and as a code block in HTML.
+- [ ] Step 44: revision diff. Compare a revision with the current page or another revision, on the screen of revisions.
+- [ ] Step 45: public shares, server. `page_shares`, its routes, `/s/{token}` rendered by the bounded reader, descendants, files, `ETag`, the strict CSP, `X-Robots-Tag` unless indexable, a rate limit. Done when a test shows a script in content cannot run there.
+- [ ] Step 46: public shares, screens. A share dialog on the page: children, indexing, expiry, revoke.
+- [ ] Step 47: TOTP. `user_totp`, recovery codes, login asking for the code, the account screen. Mail codes (ADR 0026) keep working beside it.
+- [ ] Step 48: OIDC, server. Providers in `CADOCS_OIDC_*`, code flow with PKCE, `user_identities`, how an identity meets an existing account, tests against a fake provider. An ADR for the HTTP client and its RAM and binary cost.
+- [ ] Step 49: OIDC, screens and providers. Login buttons, linking on the account screen, a manual check with Authentik and Keycloak written into `OPERATIONS.md`.
+- [ ] Step 50: duplication. `POST /pages/{page}/duplicate`, with descendants and attachments, into the same space or another, through a room.
+- [ ] Step 51: templates. `templates`, saving a page as one, a new page from one.
+- [ ] Step 52: exports. `format=html` for one page, the space export as a job behind `/jobs/{id}`, in Markdown or HTML, streamed as a zip.
+- [ ] Step 53: bulk import. A zip of Markdown files and folders becomes a tree of pages with its attachments, as a job.
+- [ ] Step 54: French. Every string of the catalogue translated, the language picker on the account screen.
+- [ ] Step 55: V1 exit. Benchmark, binary size, security review of shares, OIDC, TOTP and comments, `COVERAGE.md` and the permission matrix for the new routes.
 
 Exit criteria:
 
 - [ ] Public pages contain no JavaScript requirement, and a test confirms a script in content cannot execute.
 - [ ] OIDC works with at least two providers (for example Authentik and Keycloak).
-- [ ] A real Docmost export imports with its tree and attachments intact.
 - [ ] Binary size stays under 30 MB, and a default build contains no S3 code.
 - [ ] Idle RSS and active-user thresholds of the MVP still hold.
 - [ ] Upgrade from every earlier release is tested through migrations.
@@ -94,7 +91,6 @@ Scope:
 - Audit log
 - Public API tokens and webhooks
 - Page labels
-- Notion import through its Markdown export, once a real export is at hand
 - Plugins from an operator library (ADR 0016): content plugins offered per workspace, user plugins such as themes and client-side exports enabled per user, built-in plugins embedded in the binary
 - Embeds through iframes, with an allow-list that fits the CSP
 - Attachment text extraction for search, if memory allows
