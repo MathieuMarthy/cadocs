@@ -2,28 +2,17 @@
 
 Each stage ends when all of its exit criteria hold. RAM figures are measured with `bench/rss.sh` on the release binary, and use RSS unless stated otherwise.
 
-## Stage 0: prototype
+A step to do says what it covers and when it is done, one session each. Once checked, it shrinks to one line: its lessons go to `docs/notes/`, its reasons to an ADR.
 
-Purpose: check the RAM hypothesis before building the product.
+## Stage 0: prototype (done)
 
-Scope: collaboration server, SQLite persistence, a minimal TipTap page, a benchmark.
+Checked the RAM hypothesis before building the product: collaboration server, SQLite persistence, a minimal TipTap page, a benchmark. Verdict **go**, on glibc with `malloc_trim` after unload (ADR 0015). Results in [ARCHITECTURE.md](ARCHITECTURE.md#measured-results).
 
-Steps, one session each:
-
-- [x] **Step 1:** Cargo workspace, `cadocs-core` (permissions), `cadocs-store` (migrations, updates, snapshots). Done when the matrix of [PERMISSIONS.md](PERMISSIONS.md) and the store tests pass.
-- [x] **Step 2:** `cadocs-collab` (rooms, y-sync, batched flush, compaction, unload, limits from [OPERATIONS.md](OPERATIONS.md)). Done when replay, compaction equivalence, unload and reload, load/unload concurrency, read-only, awareness cleanup, room cap and flush failure tests pass.
-- [x] **Step 3:** `cadocs-server` (`/ws/{doc}`, `/health`, embedded front end), `web/` (TipTap, Brut tokens), `docs/DESIGN_SYSTEM.md`. Done when the page edits and persists when opened by hand.
-- [x] **Step 4:** Node test with the real `yjs` and `y-websocket`, Playwright test with two browsers. Done when both pass, including after a server restart.
-- [x] **Step 5:** `cadocs-bench`, `bench/rss.sh`, allocator comparison, following the [benchmark scenario](ARCHITECTURE.md#benchmark-scenario). Done when the results are in `ARCHITECTURE.md` and the go or no-go is recorded.
-
-Exit criteria:
-
-- [x] Two browsers edit one document at the same time, with visible cursors.
-- [x] Content survives a server restart.
-- [x] Compaction and unloading keep the document identical (automated tests).
-- [x] The real `yjs` and `y-websocket` clients pass the compatibility test.
-- [x] RSS is measured idle, with 10 and 100 open documents, and after unload.
-- [x] A go or no-go on the architecture is recorded, using the rule in the benchmark scenario.
+- [x] Step 1: workspace, `cadocs-core` permissions, `cadocs-store`.
+- [x] Step 2: `cadocs-collab` rooms, sync, flush, compaction, unload.
+- [x] Step 3: `cadocs-server`, `web/` with TipTap and Brut tokens, `DESIGN_SYSTEM.md`.
+- [x] Step 4: compatibility test with real `yjs` and `y-websocket`, Playwright with two browsers.
+- [x] Step 5: `cadocs-bench`, `bench/rss.sh`, allocator comparison, go or no-go.
 
 ## MVP
 
@@ -47,77 +36,46 @@ Scope:
 - A link to the source code in the interface (ADR 0010)
 - Docker image, `aarch64` and `x86_64` binaries, backup and restore commands, [OPERATIONS.md](OPERATIONS.md) complete
 
-Steps, one session each. Each step adds the migration for the tables it needs, and its REST routes come with tests of the permissions they use. A step that adds a dependency or a background task reports the idle RSS, so a drift shows before the final benchmark.
+Rules every step followed, and later stages keep: each step adds the migration for the tables it needs, its REST routes come with tests of the permissions they use, and a step that adds a dependency or a background task reports the idle RSS.
 
-- [x] **Step 1:** HTTP foundation: `/api/v1` router, error shape, `CADOCS_PUBLIC_URL` and the `Origin` check, `CADOCS_TRUSTED_PROXIES`, rate limiter, security headers, read and write pools, data folder lock, `serve` subcommand. Done when each of these has a test and the prototype socket still works.
-- [x] **Step 2:** Accounts and sessions: `users`, `sessions`, `workspaces`, `workspace_members`, `/auth/setup`, login, logout, `/session`, `/me`, session middleware, CSRF, Argon2 behind a semaphore. Done when first run, login, expiry, CSRF and rate limits are tested.
-- [x] **Step 3:** Instance administration: `/admin/users`, `password_resets`, reset links, `cadocs reset-password`, the last instance admin check. Done when the instance actions of [PERMISSIONS.md](PERMISSIONS.md) pass over REST.
-- [x] **Step 4:** Workspaces, members and invitations, with the last owner check. Done when the workspace actions pass over REST and an invited user can join with a link.
-- [x] **Step 5:** Spaces and grants: routes, space trash, role resolution from database rows. Done when each rule of the resolution order passes over REST.
-- [x] **Step 6:** Pages: `pages`, fractional index, tree, create, read, move, trash, restore, purge, recent pages. Done when the move and trash rules of [DATA_MODEL.md](DATA_MODEL.md#pages) pass over REST. The prototype socket stays as it is: its documents have no `pages` row.
-- [x] **Step 7:** Page socket behind sessions: `/ws/pages/{id}` replaces `/ws/{doc}`, a real `Authorizer` replaces `Permissive`, `doc_id` becomes `page_id` with its foreign key, a flush copies the title to `pages`, the server can write to a room, and `PATCH /pages/{page}` uses that. `cadocs-bench`, its seed, `web/e2e/` and the prototype page all use the old route or columns, so they move in this step. Done when the end-to-end tests and a short benchmark run pass on the new route.
-- [x] **Step 8:** Socket closes and collab hardening: every trigger of [Reacting to changes](PERMISSIONS.md#reacting-to-changes) on page sockets, awareness ownership, cursor shape validation, a per-room awareness cap, a way out for a dependency that never arrives. Done when revoking a role closes the user's page sockets with the right code, in a test.
-- [x] **Step 9:** Events socket: `/ws/events`, workspace hub, `resync`, the same triggers on events sockets, a socket count shared with page sockets. Done when two clients see each other's tree changes and a lagging client gets `resync`.
-- [x] **Step 10:** `cadocs-jobs` and the reader outside a room: `jobs`, worker, retries, purge of sessions, tokens and the trash, `CADOCS_DOC_READS`. Done when a crash during a job, retries and the read bound are tested.
-- [x] **Step 11:** Svelte shell: routing, setup, login, invitation and reset pages, account, instance administration, light and dark themes, phone layout, the source code link, `4401`, `4403` and `4404` shown in the page. Done when Playwright goes from first run to an empty workspace.
-- [x] **Step 12:** Navigation: spaces, lazy tree with drag and drop, trash, recent pages, live updates from the events socket. Done when two browsers see each other's tree changes.
-- [x] **Step 12a:** Icons and action menus (ADR 0017). The Lucide icons of [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md#iconography) as inline SVG with their ISC notice in `web/public/licenses`, an icon button, and an action menu with arrow keys, Enter and Escape. The tree gets `plus` and `ellipsis`, removed from layout when not hovered or focused, so labels use the full width, and loses the space numbers. One verb per action everywhere: `move to trash`, `restore`, `delete forever`. Moving to trash shows `moved to trash` with an `undo` that restores. Labels lose their capitals. Comes first, before step 14. Done when Playwright moves a page to trash from its menu by keyboard alone, undoes it, and checks that a tree label is as wide as its row allows.
-- [x] **Step 12b:** Shell. The sidebar stays on screen and scrolls its tree alone. Under 840px it becomes a drawer behind the `menu` button, so a page shows first. The footer becomes a user menu (account, theme, log out), with the source link and license on one line (ADR 0010). The breadcrumb links its parents, drops the repeated workspace on the workspace home, and shows no workspace on account and administration. Opening a page opens its ancestors in the tree. A page keeps the shell while it loads instead of flashing a bare `loading…`. Names users typed keep their case: only interface words are lowercase. Done when Playwright, at 390px wide, opens a nested page from the drawer, and a page opened by its address shows selected in the tree.
-- [x] **Step 12c:** Screens. Home: no role line, relative dates with the exact one as `title`, recent pages as plain titles with their space, `new space` moved to a `plus` beside the `spaces` label, and empty states that offer the next action. Page: a title that wraps, presence shown from two people, an `ellipsis` menu in the top bar (copy link, move to trash). Trash: reached from the space menu, titled with the space in the breadcrumb, plain wording (`restoring a page also restores its subpages`). Account: separate profile and password forms, the current password asked only by the password form, account deletion in `danger`. Administration: an `ellipsis` menu per user, a `(you)` mark and no self-demotion or self-deletion offered, status badges, a copy button for the reset link. Done when Playwright goes through each screen in both themes, and the self actions are absent for the current admin.
-- [x] **Step 13:** Administration screens: workspace settings, members, invitations, space settings and grants. Comes after step 14, which brings the page view. Done when Playwright invites a user and changes their role, and the open page reacts.
-- [x] **Step 14:** Editor, first blocks: read-only mode from the role, slash menu, headings, lists, tasks, code with syntax highlighting, quotes, dividers, links, Markdown shortcuts. Blocks, slash menu and shortcuts come from an internal registry, and `enableContentCheck` is on, with a reload banner (ADR 0016). The Markdown source of the block under the caret is edited as text, every heading level is numbered and code shows its language (ADR 0018). Done when each block works in Playwright with two browsers, and a tab whose schema lacks a block leaves that block intact for the others.
-- [x] **Step 15:** Editor, other blocks: callouts, toggles, tables, links to pages, table of contents. Done when each block works in Playwright with two browsers.
-- [x] **Step 16:** `cadocs-content`: `XmlFragment` to AST, renderers to text, HTML and Markdown, Markdown to AST to Yjs, and the test that compares the Rust and TipTap schemas (ADR 0008). The node list includes the `plugin` envelope node (ADR 0016). Done when every node round-trips and HTML escaping and the URL allow-list are tested.
-- [x] **Step 17:** Attachments: `cadocs-files`, streaming upload, download, limits and quota, reference tracking, orphan cleanup, image and file blocks. Done when the attachment rules of [DATA_MODEL.md](DATA_MODEL.md#attachments) pass, including a full disk. The reference added when a page's content holds an attachment belongs to step 18, which owns the indexing job.
-- [x] **Step 18:** Search: `cadocs-search`, stemming, FTS5, the reindex job, the search route and screen. The indexing job also adds the attachment references it finds. Done when results respect readable spaces, stemming is tested in English and French, and an image pasted into another page is readable there.
-- [x] **Step 19:** Revisions: creation job, list, view, restore, thinning, screens. Done when a restore reaches connected clients as a normal edit and keeps the previous content as a revision.
-- [x] **Step 19a:** SQLite upkeep (ADR 0019): incremental auto-vacuum, conversion of older databases at startup, WAL size limit, the `maintain_database` job, and no `mmap_size`. Done when a new and an older database both end in incremental mode and the job gives free pages back.
-- [x] **Step 20b:** S3 file store (ADR 0020): `CADOCS_FILE_STORE`, the `s3` feature, the S3 `FileStore` on `rusty-s3` and `reqwest`, the disk layout as keys, the startup check, `proxy` and `redirect` downloads with windowed presigned URLs, the CSP origin. Done when the file store contract passes on disk, on a fake S3 and on a real MinIO, and a download in `redirect` mode answers a presigned `302` after the permission check.
-- [x] **Step 20c:** Compressed snapshots: `doc_snapshots.codec`, zstd level 3 at each compaction, raw rows still read. Done when a compacted state is stored compressed and loads as it was, and a raw one still loads.
-- [x] **Step 20d:** Room memory budget: `CADOCS_ROOM_MEMORY_MB`, each room counted from its encoded size. Done when the budget refuses or evicts as `CADOCS_MAX_ROOMS` does, and a large document weighs by its size.
-- [x] **Step 20:** Markdown import and export for one page, with or without attachments, and the print stylesheet. Done when an export imports back with its content and attachments.
-- [x] **Step 21:** Delivery: `cadocs backup` and `cadocs restore`, Docker image, `aarch64` and `x86_64` binaries, [OPERATIONS.md](OPERATIONS.md) complete. Done when a backup and restore round trip passes on a running server.
-- [x] **Step 22:** Coverage: the whole permission matrix over REST and WebSocket, and a check of each scope item against its tests. Done when nothing in the scope lacks an automated test.
-- [x] **Step 23:** MVP benchmark: idle, 30 active users, login peaks, 10,000 pages, and the value of `CADOCS_MAX_ROOMS`. Comes last, after step 24, whose fixes could invalidate the measures. Done when the results are recorded against the exit criteria, as measured.
-- [x] **Step 24:** Security review of auth, uploads and rendered HTML. Done when its findings are fixed or recorded.
-- [x] **Step 23b:** Remove `CADOCS_MAX_ROOMS`: step 23 found that the room budget and `CADOCS_MAX_SOCKETS` already bound what it bounds ([MVP results](ARCHITECTURE.md#mvp-results)). A short ADR, the setting gone from the configuration and `OPERATIONS.md` (a server that still gets it says it is ignored), eviction and `503` driven by the budget alone, and the tests that used the cap moved to the budget. Done when the collab tests pass without the cap and a page opens past 256 rooms of small documents.
-- [x] **Step 23a:** Give back the memory of password hashes (step 23 found that `malloc_trim` misses it, see [MVP results](ARCHITECTURE.md#mvp-results)). A new ADR chooses between a fixed mmap threshold set with `mallopt` at start, a single arena, or a hash block mapped by cadocs itself, measured on the login peaks. Done when the login peak phase of `bench/rss.sh mvp` ends at idle plus 10 MB or less.
-- [x] **Step 25:** Leave a trashed page for its parent. Moving the shown page, or one of its ancestors, to the trash opens the parent, or the workspace when it has none, and `undo` opens the restored page again. A page deleted by someone else names its parent as a way out. Done when Playwright covers a trash from the top bar, from the tree on an ancestor, and from another browser.
-- [x] **Step 26:** Any user creates a workspace (ADR). `POST /workspaces` needs a user, unless `CADOCS_WORKSPACE_CREATION=admins` keeps it to instance admins (default `all`). The `new workspace` form moves from the admin screen to the workspace switcher and to the screen of a user with no workspace. Done when the permission matrix covers both settings over REST and Playwright creates a workspace as a plain member.
-- [x] **Step 27:** Motion. A `motion` section in [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) and its tokens: short, linear, no bounce, none under `prefers-reduced-motion`. It applies to opening and closing tree levels, menus, the notice and the confirm dialog. Done when each is animated, and a Playwright test with reduced motion finds no transition.
+Steps, all done. What each one taught is in `docs/notes/`, its tests in [COVERAGE.md](COVERAGE.md).
 
-The two weeks of daily use start once steps 23 and 24 are both done.
-
-### Order and parallel work
-
-Steps keep their numbers, but this order wins over them: the next step is the first unchecked one in this table, and steps of one wave can run at the same time, each in its own worktree. A session running in parallel is told its step.
-
-| Wave | Steps | Needs |
-| --- | --- | --- |
-| 1 | 9, 10, 11 | Nothing left |
-| 2 | 12 | 9 and 11 |
-| 2a | 12a | 12 |
-| 2b | 12b, 12c | 12a |
-| 2c | 14 | 11, and 12a for its icons and menus |
-| 3 | 13, 15 | 13: 14. 15: 14, and 12 for picking a page to link to |
-| 4 | 16 | 15, for the schema comparison test |
-| 5 | 17, 18, 19 | 10 and 16. 17 and 19 also need 14 for their blocks and screens |
-| 6 | 20 | 16 and 17 |
-| 7 | 22, 24 | Every feature step |
-| 8 | 23 | Everything, alone on a quiet machine |
-| 9 | 23a, 23b | 23. 23a alone on a quiet machine for its measure. Both touch the server's start and configuration |
-| 10 | 25, 26 | Feedback from daily use. Both touch the Svelte routes |
-| 11 | 27 | 25 and 26, since it touches the tree, the shell and their styles |
-
-Step 21 needs nothing left and fits any wave before 7. If it runs before step 17, its round trip test gains attachments afterwards, and `OPERATIONS.md` is finished at the end. Step 16 can start beside 14 and 15 for the AST and renderers, once the node list is fixed, but it only ends after 15.
-
-When steps run in parallel:
-
-- **Migrations:** agree on the numbers before starting, since two branches would otherwise both take the next one. This matters most in wave 5.
-- **Steps 9 and 10:** both touch `lib.rs` and `DocRegistry`. When they meet, check that the trash purge job publishes the same events as `purge_page`.
-- **Steps 12 and 14:** both touch the Svelte routes.
-- **Steps 12b and 12c:** both touch `Shell.svelte` and `base.css`. 12b owns the shell, 12c the screens inside it.
-- **Idle RSS:** a step only measures its own branch, so measure again after each merge to see the combined drift.
+- [x] Step 1: HTTP foundation (`/api/v1`, error shape, `Origin` check, trusted proxies, rate limiter, security headers, pools, data folder lock).
+- [x] Step 2: accounts and sessions, CSRF, Argon2 behind a semaphore.
+- [x] Step 3: instance administration, reset links, `cadocs reset-password`.
+- [x] Step 4: workspaces, members, invitations.
+- [x] Step 5: spaces, grants, space trash, role resolution.
+- [x] Step 6: pages, fractional index, tree, trash, recent pages.
+- [x] Step 7: page socket `/ws/pages/{id}` behind sessions, real `Authorizer`.
+- [x] Step 8: socket closes on access changes, awareness hardening.
+- [x] Step 9: events socket `/ws/events`, `resync`.
+- [x] Step 10: `cadocs-jobs`, purges, reader outside a room (`CADOCS_DOC_READS`).
+- [x] Step 11: Svelte shell, setup, login, account, administration, themes.
+- [x] Step 12: navigation, lazy tree with drag and drop, live updates.
+- [x] Step 12a: icons and action menus (ADR 0017).
+- [x] Step 12b: shell layout, drawer under 840px, user menu, breadcrumb.
+- [x] Step 12c: home, page, trash, account and administration screens.
+- [x] Step 13: workspace and space settings, members, invitations, grants.
+- [x] Step 14: editor, first blocks, block registry, Markdown source under the caret (ADR 0016, 0018).
+- [x] Step 15: callouts, toggles, tables, links to pages, table of contents.
+- [x] Step 16: `cadocs-content`, Yjs ↔ AST ↔ text, HTML, Markdown, schema comparison (ADR 0008).
+- [x] Step 17: attachments, `cadocs-files`, quota, orphan cleanup.
+- [x] Step 18: search, `cadocs-search`, FTS5, stemming, reindex job.
+- [x] Step 19: revisions, thinning, restore.
+- [x] Step 19a: SQLite upkeep (ADR 0019).
+- [x] Step 20b: S3 file store (ADR 0020).
+- [x] Step 20c: zstd snapshots.
+- [x] Step 20d: room memory budget, `CADOCS_ROOM_MEMORY_MB`.
+- [x] Step 20: Markdown import and export of one page, print stylesheet.
+- [x] Step 21: `cadocs backup` and `restore`, Docker image, release binaries.
+- [x] Step 22: full permission matrix over REST and sockets, [COVERAGE.md](COVERAGE.md).
+- [x] Step 23: MVP benchmark ([MVP results](ARCHITECTURE.md#mvp-results)).
+- [x] Step 24: security review of auth, uploads and rendered HTML.
+- [x] Step 23b: `CADOCS_MAX_ROOMS` removed (ADR 0022).
+- [x] Step 23a: fixed mmap threshold for password hashes (ADR 0023).
+- [x] Step 25: leaving a trashed page for its parent.
+- [x] Step 26: any user creates a workspace (ADR 0024).
+- [x] Step 27: motion tokens and transitions.
 
 Exit criteria:
 
@@ -135,13 +93,13 @@ Exit criteria:
 
 Purpose: an instance with a mail relay lets people register, recover a password and add a second factor by themselves, and an instance without one works as before (ADR 0026).
 
-Steps, one session each, in this order. The rules of the MVP steps apply.
+Steps, all done. The rules of the MVP steps applied.
 
-- [x] **Step 28:** Mail relay: `cadocs-mail` (`Mailer`, `SmtpMailer` on `lettre`), `CADOCS_SMTP_*`, `AppState::mail`, the relay check at start, `cadocs test-mail`. Done when a message reaches a relay in a test, TLS that was asked for is never skipped, and the binary size and idle RSS are reported.
-- [x] **Step 29:** Forgot password: the outbox that sends without holding a handler, `mail` in `GET /auth/setup`, `POST /auth/forgot-password` with the same answer and time for every address, its limits per client and per address, the link on the login screen and its form. Done when a reset link arrives by mail in a test, an unknown address is told nothing, and the route is a `404` with mail off.
-- [x] **Step 30:** Registration: `email_codes`, `users.email_verified_at`, `CADOCS_REGISTRATION`, `POST /auth/register` and its confirmation, the screens. Done when Playwright registers with a code read from a fake relay, 5 wrong codes kill a code, and a closed or mail-free instance refuses.
-- [x] **Step 31:** Second factor by mail: `users.email_2fa`, the login challenge, the switch in the account screen, the notice at start when mail is off. Done when a login with the factor on needs the code over REST and in Playwright, and the session only exists after it.
-- [x] **Step 32:** Proof of a new address: `PATCH /me` with an email sends a code to the new address and changes it once confirmed, with mail on. Done when the address only changes after the code, and an instance without mail changes it as before.
+- [x] Step 28: `cadocs-mail`, `SmtpMailer` on `lettre`, `CADOCS_SMTP_*`, `cadocs test-mail`.
+- [x] Step 29: forgot password, the outbox.
+- [x] Step 30: registration by mailed code, `CADOCS_REGISTRATION`.
+- [x] Step 31: second factor by mail.
+- [x] Step 32: proof of a new address.
 
 Exit criteria:
 
