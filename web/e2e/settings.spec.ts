@@ -1,4 +1,5 @@
-// Workspace and space settings: members, invitations, grants, trash of a space (step 13).
+// Workspace and space settings: members, invitations, grants, trash of a space (step 13), groups
+// (step 36).
 
 import { expect, type Page } from "@playwright/test";
 
@@ -247,4 +248,174 @@ test("a refused role or grant shows why, and its picker goes back to what is sto
   await access.getByLabel("access of Grace").selectOption("viewer");
   await expect(access.getByRole("alert")).toHaveText("grants: unknown target");
   await expect(access.getByLabel("access of Grace")).toHaveValue("editor");
+});
+
+test("an admin makes a group, fills it, renames it and deletes it, and a member only reads it", async ({
+  page,
+  server,
+  browser,
+}) => {
+  const member = await server.addMember("grace@example.org");
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/tests/settings`);
+  const groups = section(page, "groups");
+  await groups.getByLabel("group name").fill("Writers");
+  await groups.getByRole("button", { name: "create group" }).click();
+  const writers = groups.getByRole("listitem").filter({ hasText: "Writers" });
+  await expect(writers).toContainText("0 members");
+
+  // A second group of the same name is refused, and says why.
+  await groups.getByLabel("group name").fill("Writers");
+  await groups.getByRole("button", { name: "create group" }).click();
+  await expect(groups.getByRole("alert")).toHaveText("taken");
+
+  await groups.getByRole("button", { name: "members of Writers" }).click();
+  await expect(groups.getByRole("button", { name: "members of Writers" })).toHaveAttribute("aria-expanded", "true");
+  await groups.getByLabel("add to Writers").selectOption({ label: "Grace" });
+  await groups.getByRole("button", { name: "add", exact: true }).click();
+  await expect(writers).toContainText("1 member");
+  await expect(groups.getByRole("button", { name: "remove Grace from Writers" })).toBeVisible();
+
+  await groups.getByLabel("name of Writers").fill("Editors");
+  await groups.getByRole("button", { name: "rename", exact: true }).click();
+  const editors = groups.getByRole("listitem").filter({ hasText: "Editors" });
+  await expect(editors).toContainText("1 member");
+
+  // A member sees the groups and who is in them, and changes nothing.
+  const guest = await memberPage(browser, server, member);
+  await guest.goto(`${server.url}/w/tests/settings`);
+  const seen = section(guest, "groups");
+  await expect(seen.getByRole("listitem").filter({ hasText: "Editors" })).toContainText("1 member");
+  await seen.getByRole("button", { name: "members of Editors" }).click();
+  await expect(seen).toContainText("grace@example.org");
+  await expect(seen.getByLabel("group name")).toHaveCount(0);
+  await expect(seen.getByRole("button", { name: "remove Grace from Editors" })).toHaveCount(0);
+  await expect(seen.getByRole("button", { name: "delete the group" })).toHaveCount(0);
+
+  await groups.getByRole("button", { name: "remove Grace from Editors" }).click();
+  await expect(editors).toContainText("0 members");
+
+  // A member removed from the workspace leaves its groups, and the count follows.
+  await groups.getByLabel("add to Editors").selectOption({ label: "Grace" });
+  await groups.getByRole("button", { name: "add", exact: true }).click();
+  await expect(editors).toContainText("1 member");
+  await section(page, "members").getByRole("button", { name: "remove" }).click();
+  await section(page, "members").getByRole("button", { name: "remove Grace" }).click();
+  await expect(editors).toContainText("0 members");
+
+  await groups.getByRole("button", { name: "delete the group" }).click();
+  await groups.getByRole("button", { name: "delete Editors for good?" }).click();
+  await expect(editors).toHaveCount(0);
+  const { workspaceId } = await server.session();
+  expect((await server.call("GET", `/workspaces/${workspaceId}/groups`)).items).toEqual([]);
+});
+
+test("a group grant raises its members above their own grant, and the open page follows", async ({
+  page,
+  server,
+  browser,
+}) => {
+  const id = await newPage(server, "Plans");
+  const member = await server.addMember("grace@example.org");
+  const { workspaceId, spaceId } = await server.session();
+  await server.call("PUT", `/spaces/${spaceId}/grants`, { grants: [{ user_id: member.id, role: "viewer" }] });
+  const group = await server.call("POST", `/workspaces/${workspaceId}/groups`, { name: "Writers" });
+  await server.call("PUT", `/groups/${group.id}/members/${member.id}`);
+  const guest = await memberPage(browser, server, member);
+  await guest.goto(`${server.url}/?page=${id}`);
+  await expect(editor(guest)).toHaveAttribute("contenteditable", "false");
+
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/tests/settings/pages`);
+  const access = section(page, "access");
+  const writers = access.getByRole("listitem").filter({ hasText: "Writers" });
+  await expect(writers).toContainText("1 member");
+  await expect(access.getByLabel("access of the group Writers")).toHaveValue("");
+  await access.getByLabel("access of the group Writers").selectOption("editor");
+  await expect(notice(page)).toContainText("access changed");
+  await expect(editor(guest)).toHaveAttribute("contenteditable", "true");
+  // The socket reconnects after its `4409`: a demotion before then would reach no socket.
+  await expect(status(guest)).toHaveText(/^synced(?!.*read only)/);
+  // Her own grant stays, and the screen says where the higher one comes from.
+  const grants = await server.call("GET", `/spaces/${spaceId}/grants`);
+  expect(grants.items).toMatchObject([
+    { user_id: member.id, role: "viewer" },
+    { group_id: group.id, role: "editor" },
+  ]);
+  await expect(access.getByLabel("access of Grace")).toHaveValue("viewer");
+  await expect(access.getByRole("listitem").filter({ hasText: "grace@example.org" })).toContainText(
+    "editor through Writers",
+  );
+
+  // Without the group's grant, her own applies again.
+  await access.getByLabel("access of the group Writers").selectOption("");
+  await expect(editor(guest)).toHaveAttribute("contenteditable", "false");
+  await expect(access.getByRole("listitem").filter({ hasText: "grace@example.org" })).not.toContainText(
+    "through Writers",
+  );
+});
+
+test("a group opened while another loads shows its own members, and a group made meanwhile shows", async ({
+  page,
+  server,
+}) => {
+  const member = await server.addMember("grace@example.org");
+  const { workspaceId } = await server.session();
+  const slow = await server.call("POST", `/workspaces/${workspaceId}/groups`, { name: "Slow" });
+  const quick = await server.call("POST", `/workspaces/${workspaceId}/groups`, { name: "Quick" });
+  await server.call("PUT", `/groups/${quick.id}/members/${member.id}`);
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  await page.route(`**/api/v1/groups/${slow.id}/members*`, async (route) => {
+    await held;
+    await route.fallback();
+  });
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/tests/settings`);
+  const groups = section(page, "groups");
+  await groups.getByRole("button", { name: "members of Slow" }).click();
+  await groups.getByLabel("group name").fill("Fresh");
+  await groups.getByRole("button", { name: "create group" }).click();
+  await expect(groups.getByRole("listitem").filter({ hasText: "Fresh" })).toContainText("0 members");
+
+  await groups.getByRole("button", { name: "members of Quick" }).click();
+  await expect(groups.getByRole("button", { name: "remove Grace from Quick" })).toBeVisible();
+  await expect(groups.getByLabel("add to Quick")).toBeVisible();
+  // The slow answer, for a group no longer open, changes nothing.
+  release();
+  await page.waitForTimeout(500);
+  await expect(groups.getByRole("button", { name: "remove Grace from Quick" })).toBeVisible();
+});
+
+test("a group does not say everyone is in it while the workspace's members are unknown", async ({
+  page,
+  server,
+}) => {
+  const { workspaceId } = await server.session();
+  await server.call("POST", `/workspaces/${workspaceId}/groups`, { name: "Writers" });
+  await page.route("**/api/v1/workspaces/*/members*", (route) =>
+    route.request().method() === "GET" ? route.fulfill({ status: 500, body: "" }) : route.fallback(),
+  );
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/tests/settings`);
+  const groups = section(page, "groups");
+  await groups.getByRole("button", { name: "members of Writers" }).click();
+  await expect(groups).toContainText("nobody is in this group yet.");
+  await expect(groups).not.toContainText("every member of the workspace is in it.");
+  await expect(groups.getByLabel("add to Writers")).toHaveCount(0);
+});
+
+test("a group whose members fail to load says so, until another group opens", async ({ page, server }) => {
+  const { workspaceId } = await server.session();
+  const broken = await server.call("POST", `/workspaces/${workspaceId}/groups`, { name: "Broken" });
+  await server.call("POST", `/workspaces/${workspaceId}/groups`, { name: "Fine" });
+  await page.route(`**/api/v1/groups/${broken.id}/members*`, (route) => route.fulfill({ status: 500, body: "" }));
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/tests/settings`);
+  const groups = section(page, "groups");
+  await groups.getByRole("button", { name: "members of Broken" }).click();
+  await expect(groups.getByRole("alert")).toBeVisible();
+  await groups.getByRole("button", { name: "members of Fine" }).click();
+  await expect(groups).toContainText("nobody is in this group yet.");
+  await expect(groups.getByRole("alert")).toHaveCount(0);
 });

@@ -50,3 +50,15 @@ export interface Member {
 
 /** At most this many members are listed, which no workspace this size should reach. */
 export const MAX_MEMBERS = 1000;
+
+/** A group of the workspace, as `GET /workspaces/{ws}/groups` answers. */
+export interface Group {
+  id: string;
+  name: string;
+  member_count: number;
+  created_at: string;
+}
+
+/** The higher of two space roles, `""` standing for none. */
+export const higherRole = (a: string, b: string) =>
+  SPACE_ROLES.indexOf(a) >= SPACE_ROLES.indexOf(b) ? a : b;
