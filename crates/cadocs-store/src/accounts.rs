@@ -98,6 +98,52 @@ pub struct NewPasswordReset {
     pub expires_at: i64,
 }
 
+/// The account a registration makes: no workspace, no instance role, a verified address.
+#[derive(Debug, Clone)]
+pub struct NewUser {
+    pub id: String,
+    pub email: String,
+    pub name: String,
+    pub password_hash: String,
+}
+
+/// Wrong tries that kill a code (ADR 0026).
+pub const MAX_CODE_TRIES: i64 = 5;
+
+/// What a code sent by mail proves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodePurpose {
+    Register,
+}
+
+impl CodePurpose {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Register => "register",
+        }
+    }
+}
+
+/// A code to store in place of the one of the same purpose and address.
+#[derive(Debug, Clone)]
+pub struct NewEmailCode {
+    pub purpose: CodePurpose,
+    /// Lowercased.
+    pub email: String,
+    pub code_hash: String,
+    pub now: i64,
+    pub expires_at: i64,
+}
+
+/// A code someone typed, for an address.
+#[derive(Debug, Clone, Copy)]
+pub struct CodeAttempt<'a> {
+    pub purpose: CodePurpose,
+    pub email: &'a str,
+    pub code_hash: &'a str,
+    pub now: i64,
+}
+
 /// What a change was authorized with. Checking a password takes a while, and another session may
 /// change it or revoke this one in the meantime.
 #[derive(Debug, Clone, Copy)]
@@ -233,4 +279,23 @@ pub trait AccountStore: Send + Sync + 'static {
         password_hash: &str,
         now: i64,
     ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Stores a code in place of the one of the same purpose and address, and deletes the codes
+    /// that expired.
+    fn create_email_code(
+        &self,
+        code: &NewEmailCode,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Uses a registration code, then makes the account, verified, and its session, in one
+    /// transaction. A code that is missing, expired or other is a `WrongCode`, and a wrong one
+    /// counts a try that is kept: the `MAX_CODE_TRIES`th deletes the code. An address another
+    /// account took meanwhile is an `EmailTaken`, and the code stays. Before first-run setup every
+    /// code is a `WrongCode`.
+    fn register_user(
+        &self,
+        user: &NewUser,
+        attempt: &CodeAttempt<'_>,
+        session: &NewSession,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }

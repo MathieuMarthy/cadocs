@@ -1,6 +1,8 @@
 //! A real server over real sockets, for the tests of the REST API. Each test binary uses part of it.
 #![allow(dead_code)]
 
+pub mod mail;
+
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -157,6 +159,7 @@ async fn start_custom_in(
         config.attachments,
     );
     state.workspace_creation = config.workspace_creation;
+    state.registration = config.registration;
     // As `main` does it, without the check of the relay at start.
     if let Some(smtp) = config.mail {
         state.mail = Some(Outbox::start(Arc::new(SmtpMailer::new(smtp).unwrap())));

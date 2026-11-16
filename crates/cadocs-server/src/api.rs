@@ -209,6 +209,7 @@ impl From<StoreError> for ApiError {
             StoreError::TooDeep => invalid("parent_id", "too_deep"),
             StoreError::UnknownSibling => invalid("after", "unknown"),
             StoreError::OtherWorkspace => invalid("space_id", "other_workspace"),
+            StoreError::WrongCode => invalid("code", "wrong").with_message("Wrong code"),
             StoreError::NotAllowed => ApiError::new(ErrorCode::Forbidden),
             StoreError::QuotaExceeded => ApiError::new(ErrorCode::TooLarge)
                 .with_message("The workspace has no room left for this file"),

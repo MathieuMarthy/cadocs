@@ -40,7 +40,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Notify, oneshot, watch};
 use tokio::time::{MissedTickBehavior, interval, timeout};
 
-use crate::config::{AttachmentLimits, HttpConfig, SocketConfig};
+use crate::config::{AttachmentLimits, HttpConfig, Registration, SocketConfig};
 use crate::password::Passwords;
 use crate::rate_limit::{AddressLimiter, RateLimiter};
 
@@ -67,6 +67,11 @@ pub struct AppState<S, A> {
     /// Where mail goes, set after `new` and before the router is built. `None` on an instance
     /// that sends none: the routes that need mail are then not even registered (ADR 0026).
     pub mail: Option<Outbox>,
+    /// Whether `mail` also lets people register, set after `new` like it.
+    pub registration: Registration,
+    /// Keys the hash of the codes sent by mail, new at each start: a copy of the database tells
+    /// nothing about a code, and a restart kills the codes, which live 10 minutes anyway.
+    pub code_key: Arc<[u8; 32]>,
     /// Shared by the routes that send mail: what one client may ask for.
     pub mail_requests: Arc<RateLimiter>,
     /// Shared by the routes that send mail: what one address may get, whoever asks.
@@ -92,6 +97,8 @@ impl<S, A> Clone for AppState<S, A> {
             setup_code: self.setup_code.clone(),
             workspace_creation: self.workspace_creation,
             mail: self.mail.clone(),
+            registration: self.registration,
+            code_key: self.code_key.clone(),
             mail_requests: self.mail_requests.clone(),
             mail_addresses: self.mail_addresses.clone(),
             sockets: self.sockets.clone(),
@@ -129,6 +136,8 @@ impl<S, A> AppState<S, A> {
                 .into(),
             workspace_creation: WorkspaceCreation::default(),
             mail: None,
+            registration: Registration::default(),
+            code_key: Arc::new(session::new_key().expect("the system's random source")),
             mail_requests: Arc::new(RateLimiter::new(
                 api::auth::MAIL_BURST,
                 api::auth::MAIL_REFILL,

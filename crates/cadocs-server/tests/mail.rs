@@ -4,29 +4,12 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use cadocs_mail::fake::{Behavior, FakeRelay, Received};
-use common::{Api, ORIGIN, PASSWORD, start, start_tuned};
+use cadocs_mail::fake::{Behavior, Received};
+use common::mail::{messages, settle, text, with_mail, with_relay};
+use common::{Api, ORIGIN, PASSWORD, start};
 use serde_json::json;
 
 const NEW_PASSWORD: &str = "another horse battery";
-
-async fn with_relay(behavior: Behavior, proxies: &str) -> (Api, FakeRelay) {
-    let relay = FakeRelay::start(behavior).await;
-    let port = relay.port().to_string();
-    let settings = [
-        ("CADOCS_SMTP_HOST", "127.0.0.1"),
-        ("CADOCS_SMTP_PORT", port.as_str()),
-        ("CADOCS_SMTP_TLS", "none"),
-        ("CADOCS_SMTP_FROM", "Team wiki <wiki@example.org>"),
-    ];
-    let api = start_tuned(ORIGIN, proxies, &settings).await;
-    assert_eq!(api.setup().await.status, 201);
-    (api, relay)
-}
-
-async fn with_mail() -> (Api, FakeRelay) {
-    with_relay(Behavior::default(), "").await
-}
 
 impl Api {
     async fn forgot(&self, email: &str) -> common::Reply {
@@ -38,28 +21,6 @@ impl Api {
         self.send("POST", "/auth/forgot-password", headers, body)
             .await
     }
-}
-
-async fn messages(relay: &FakeRelay, count: usize) -> Vec<Received> {
-    let limit = Instant::now() + Duration::from_secs(5);
-    loop {
-        let messages = relay.messages();
-        if messages.len() >= count {
-            return messages;
-        }
-        assert!(Instant::now() < limit, "{count} messages never arrived");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
-/// Long enough for a message that should not exist to show up.
-async fn settle() {
-    tokio::time::sleep(Duration::from_millis(300)).await;
-}
-
-/// The text of a message, with the soft line breaks of quoted-printable taken out.
-fn text(message: &Received) -> String {
-    message.data.replace("=\r\n", "")
 }
 
 /// The token of the reset link in a message.
@@ -193,7 +154,7 @@ async fn setup_state_says_whether_mail_is_on() {
 
     let (api, _relay) = with_mail().await;
     let reply = api.raw("GET", "/auth/setup", &[], b"").await;
-    assert_eq!(reply.body, json!({ "required": false, "mail": true }));
+    assert_eq!(reply.body["mail"], true);
 }
 
 #[tokio::test]

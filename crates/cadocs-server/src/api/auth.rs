@@ -1,5 +1,5 @@
-//! Accounts and sessions: first run, login, logout, `/session` and `/me`, and the reset link by
-//! mail of an instance with a relay (ADR 0026).
+//! Accounts and sessions: first run, login, logout, `/session` and `/me`, and what an instance
+//! with a relay adds (ADR 0026): the reset link by mail and registration.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -15,17 +15,18 @@ use cadocs_collab::Authorizer;
 use cadocs_core::permissions::{InstanceAction, instance_allows, instance_role};
 use cadocs_mail::{Mail, Outbox};
 use cadocs_store::{
-    AccountStore, DocStore, FirstUser, MAX_SLUG_CHARS, Membership, NewSession, StoreError,
-    UpdateBasis, User, UserChanges, now_ms,
+    AccountStore, CodeAttempt, CodePurpose, DocStore, FirstUser, MAX_SLUG_CHARS, Membership,
+    NewEmailCode, NewSession, NewUser, StoreError, UpdateBasis, User, UserChanges, now_ms,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{ApiError, ErrorCode, JsonBody, PathParam, count_request, rate_limit};
 use crate::AppState;
-use crate::config::HttpConfig;
+use crate::config::{HttpConfig, Registration};
 use crate::session::{
-    self, CurrentSession, check_setup_code, csrf_token, new_password_reset, new_token, token_hash,
+    self, CODE_LIFETIME, CurrentSession, check_setup_code, code_hash, csrf_token, new_code,
+    new_password_reset, new_token, token_hash,
 };
 
 /// Each client can guess this many passwords at once, then one per `GUESS_REFILL`. Setup, login,
@@ -65,18 +66,27 @@ where
         .route("/auth/login", post(login).route_layer(limit.clone()))
         .route(
             "/auth/password-reset/{token}",
-            post(use_password_reset).route_layer(limit),
+            post(use_password_reset).route_layer(limit.clone()),
         );
     // Not registered with mail off: the route then answers as any path that never was.
     if state.mail.is_some() {
-        let limit = from_fn_with_state(
+        let sends = from_fn_with_state(
             (state.mail_requests.clone(), state.http.clone()),
             rate_limit,
         );
         public = public.route(
             "/auth/forgot-password",
-            post(forgot_password).route_layer(limit),
+            post(forgot_password).route_layer(sends.clone()),
         );
+        if state.registration == Registration::Open {
+            public = public
+                .route("/auth/register", post(register).route_layer(sends))
+                // It hashes a password, and each try is a guess at a code.
+                .route(
+                    "/auth/register/confirm",
+                    post(confirm_registration).route_layer(limit),
+                );
+        }
     }
     let authenticated = Router::new()
         .route("/auth/logout", post(logout))
@@ -190,6 +200,9 @@ struct SetupState {
     /// when it does not: an instance with no relay answers as it did before ADR 0026.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     mail: bool,
+    /// Whether anyone can make an account, which needs mail. Left out when not.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    registration: bool,
 }
 
 /// Tells the front end to show first-run setup, since `GET /session` is a `401` either way.
@@ -199,7 +212,14 @@ async fn setup_state<S: AccountStore, A>(
     let required = !state.store.has_users().await?;
     let no_store = [(CACHE_CONTROL, HeaderValue::from_static("no-store"))];
     let mail = state.mail.is_some();
-    Ok((no_store, Json(SetupState { required, mail })).into_response())
+    // Before first-run setup, an account would take the instance from its operator.
+    let registration = mail && state.registration == Registration::Open && !required;
+    let body = SetupState {
+        required,
+        mail,
+        registration,
+    };
+    Ok((no_store, Json(body)).into_response())
 }
 
 #[derive(Deserialize)]
@@ -503,6 +523,149 @@ async fn mail_reset<S: AccountStore>(
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct RegisterRequest {
+    email: String,
+}
+
+/// Mails a code that makes an account, or tells the owner of the address that it has one. As
+/// for a forgotten password, the answer and its time are the same for every address.
+async fn register<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    JsonBody(body): JsonBody<RegisterRequest>,
+) -> Result<StatusCode, ApiError> {
+    let Some(outbox) = state.mail.clone() else {
+        return Err(ApiError::new(ErrorCode::NotFound));
+    };
+    let mut fields = Fields::default();
+    let email = fields.check("email", clean_email(&body.email));
+    fields.finish()?;
+
+    if state.mail_addresses.check(&email) {
+        let (store, http, key) = (
+            state.store.clone(),
+            state.http.clone(),
+            state.code_key.clone(),
+        );
+        tokio::spawn(async move {
+            let mailed = mail_registration(store.as_ref(), &http, &key, &outbox, email);
+            if let Err(error) = mailed.await {
+                tracing::warn!("a registration code could not be mailed, {error}");
+            }
+        });
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn mail_registration<S: AccountStore>(
+    store: &S,
+    http: &HttpConfig,
+    key: &[u8; 32],
+    outbox: &Outbox,
+    email: String,
+) -> anyhow::Result<()> {
+    // Before first-run setup, an account would take the instance from its operator (ADR 0021).
+    if !store.has_users().await? {
+        return Ok(());
+    }
+    let origin = http.public_url.origin();
+    match store.credentials(&email).await? {
+        None => {}
+        Some(found) if found.disabled => return Ok(()),
+        Some(found) => {
+            outbox.queue(Mail {
+                to: found.user.email,
+                subject: "Your cadocs account".to_owned(),
+                text: format!(
+                    "Someone asked to create an account on\n\
+                     {origin}\n\
+                     with this address, which already has an account. Nothing has\n\
+                     changed.\n\n\
+                     To log in: {origin}/login\n\
+                     If you forgot your password: {origin}/forgot-password\n"
+                ),
+            });
+            return Ok(());
+        }
+    }
+    // Before the new code replaces the one before, as for a reset link.
+    let Some(place) = outbox.reserve() else {
+        return Ok(());
+    };
+    let code = new_code()?;
+    let now = now_ms();
+    let purpose = CodePurpose::Register;
+    store
+        .create_email_code(&NewEmailCode {
+            purpose,
+            code_hash: code_hash(key, purpose, &email, &code),
+            email: email.clone(),
+            now,
+            expires_at: now + CODE_LIFETIME.as_millis() as i64,
+        })
+        .await?;
+    place.send(Mail {
+        to: email,
+        subject: "Your cadocs code".to_owned(),
+        text: format!(
+            "Your code to create an account on\n\
+             {origin}\n\n\
+             \x20   {code}\n\n\
+             It works for 10 minutes. If you did not ask for it, ignore this\n\
+             message: no account is made without the code.\n"
+        ),
+    });
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct ConfirmRequest {
+    email: String,
+    code: String,
+    name: String,
+    password: String,
+}
+
+/// Makes the account a mailed code was for. It belongs to no workspace (ADR 0026).
+async fn confirm_registration<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    JsonBody(body): JsonBody<ConfirmRequest>,
+) -> Result<Response, ApiError> {
+    let mut fields = Fields::default();
+    let email = fields.check("email", clean_email(&body.email));
+    let code = body.code.trim();
+    if code.is_empty() {
+        fields.check::<()>("code", Err("required"));
+    }
+    let name = fields.check("name", clean_name(&body.name));
+    fields.check("password", check_password(&body.password));
+    fields.finish()?;
+
+    let user = User {
+        id: Uuid::now_v7().to_string(),
+        email,
+        name,
+        is_instance_admin: false,
+    };
+    let new = NewUser {
+        id: user.id.clone(),
+        email: user.email.clone(),
+        name: user.name.clone(),
+        password_hash: state.passwords.hash(body.password).await?,
+    };
+    let purpose = CodePurpose::Register;
+    let hash = code_hash(&state.code_key, purpose, &user.email, code);
+    let (token, session) = new_session(&state, &user.id)?;
+    let attempt = CodeAttempt {
+        purpose,
+        email: &user.email,
+        code_hash: &hash,
+        now: session.now,
+    };
+    state.store.register_user(&new, &attempt, &session).await?;
+    Ok(new_account_body(&state, user, Vec::new(), &token))
+}
+
 async fn delete_me<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
     Extension(current): Extension<CurrentSession>,
@@ -551,7 +714,7 @@ pub fn normalize_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
-/// An email is an identifier only, nothing is sent to it (ADR 0013): this catches typing mistakes.
+/// Catches typing mistakes. Only a code sent to an address proves it (ADR 0026).
 pub(super) fn clean_email(email: &str) -> Result<String, &'static str> {
     let email = normalize_email(email);
     if email.is_empty() {

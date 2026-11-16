@@ -8,7 +8,9 @@ use axum::http::{HeaderMap, HeaderValue};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use cadocs_core::permissions::WorkspaceRole;
-use cadocs_store::{AccountStore, ActiveSession, NewInvitation, NewPasswordReset, User, now_ms};
+use cadocs_store::{
+    AccountStore, ActiveSession, CodePurpose, NewInvitation, NewPasswordReset, User, now_ms,
+};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tokio::time::timeout;
@@ -30,6 +32,8 @@ const TOUCH_WAIT: Duration = Duration::from_secs(1);
 const MAX_COOKIES: usize = 4;
 /// ADR 0013.
 const RESET_LIFETIME: Duration = Duration::from_secs(60 * 60);
+/// ADR 0026.
+pub const CODE_LIFETIME: Duration = Duration::from_secs(10 * 60);
 /// ADR 0013.
 const INVITATION_LIFETIME: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
@@ -54,6 +58,37 @@ pub fn new_token() -> Result<String, getrandom::Error> {
 
 pub fn token_hash(token: &str) -> String {
     hex(&Sha256::digest(token))
+}
+
+pub fn new_key() -> Result<[u8; 32], getrandom::Error> {
+    let mut key = [0; 32];
+    getrandom::fill(&mut key)?;
+    Ok(key)
+}
+
+/// 6 digits, each value as likely as the others (ADR 0026).
+pub fn new_code() -> Result<String, getrandom::Error> {
+    // The largest multiple of a million under 2^32: past it, `% 1_000_000` would favor some.
+    const BOUND: u32 = 4_294_000_000;
+    loop {
+        let value = getrandom::u32()?;
+        if value < BOUND {
+            return Ok(format!("{:06}", value % 1_000_000));
+        }
+    }
+}
+
+/// What is stored of a code: bound to the key of this start, to its purpose and to its address,
+/// so that 6 digits cannot be found back from a copy of the database.
+pub fn code_hash(key: &[u8; 32], purpose: CodePurpose, email: &str, code: &str) -> String {
+    hex(&Sha256::new()
+        .chain_update(key)
+        .chain_update(purpose.as_str())
+        .chain_update([0])
+        .chain_update(email)
+        .chain_update([0])
+        .chain_update(code)
+        .finalize())
 }
 
 /// A link to hand over, and the row that makes it work, of which only the hash of the token is
@@ -281,6 +316,39 @@ async fn touch<S: AccountStore, A>(state: &AppState<S, A>, token: &str, now: i64
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_code_has_six_digits() {
+        for _ in 0..1000 {
+            let code = new_code().unwrap();
+            assert_eq!(code.len(), 6, "{code}");
+            assert!(code.bytes().all(|b| b.is_ascii_digit()), "{code}");
+        }
+    }
+
+    #[test]
+    fn a_code_hash_depends_on_the_key_the_purpose_and_the_address() {
+        let key = [1; 32];
+        let hash = code_hash(&key, CodePurpose::Register, "a@b.c", "123456");
+        assert_eq!(hash.len(), 64);
+        assert!(!hash.contains("123456"));
+        assert_eq!(
+            hash,
+            code_hash(&key, CodePurpose::Register, "a@b.c", "123456")
+        );
+        assert_ne!(
+            hash,
+            code_hash(&[2; 32], CodePurpose::Register, "a@b.c", "123456")
+        );
+        assert_ne!(
+            hash,
+            code_hash(&key, CodePurpose::Register, "a@b.d", "123456")
+        );
+        assert_ne!(
+            hash,
+            code_hash(&key, CodePurpose::Register, "a@b.c", "123457")
+        );
+    }
 
     #[test]
     fn tokens_are_long_and_never_repeat() {

@@ -80,7 +80,7 @@ withMail("a logged-in person is sent home from the forgot password screen", asyn
   await expect(page).toHaveURL(`${server.url}/w/tests`);
 });
 
-test("without a relay, login offers no link and the screen does not exist", async ({
+test("without a relay, login offers no link and the screens do not exist", async ({
   page,
   server,
 }) => {
@@ -89,7 +89,82 @@ test("without a relay, login offers no link and the screen does not exist", asyn
   await expect(page.getByText("ask an administrator for a reset link")).toBeVisible();
   await expect(page.getByRole("link", { name: "forgot your password?" })).toHaveCount(0);
 
+  await expect(page.getByRole("link", { name: "create an account" })).toHaveCount(0);
+
   await page.goto(`${server.url}/forgot-password`);
   await expect(page.getByRole("heading", { name: "not found" })).toBeVisible();
   await expect(page.getByRole("button", { name: "send reset link" })).toHaveCount(0);
+  await page.goto(`${server.url}/register`);
+  await expect(page.getByRole("heading", { name: "not found" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "send code" })).toHaveCount(0);
+});
+
+withMail("a code read from the mail makes an account with no workspace", async ({
+  page,
+  server,
+  relay,
+}) => {
+  await server.session();
+  await page.goto(`${server.url}/login`);
+  await page.getByRole("link", { name: "create an account" }).click();
+  await expect(page).toHaveURL(`${server.url}/register`);
+  await page.getByLabel("email").fill("Grace@example.org");
+  await page.getByRole("button", { name: "send code" }).click();
+  await expect(page.getByRole("status")).toContainText("a code is on its way");
+
+  const message = await relay.message();
+  expect(message.to).toBe("grace@example.org");
+  const code = /^ {4}(\d{6})$/m.exec(message.text)?.[1];
+  expect(code).toBeTruthy();
+  const wrong = String((Number(code) + 1) % 1_000_000).padStart(6, "0");
+
+  await page.getByLabel("code").fill(wrong);
+  await page.getByLabel("name").fill("Grace");
+  await page.getByLabel("password").fill(NEW_PASSWORD);
+  await page.getByRole("button", { name: "create account" }).click();
+  await expect(page.getByRole("alert")).toHaveText("wrong");
+  await page.getByLabel("code").fill(code!);
+  await page.getByRole("button", { name: "create account" }).click();
+  await expect(page.getByRole("heading", { name: "no workspace" })).toBeVisible();
+  await expect(page).toHaveURL(`${server.url}/`);
+});
+
+withMail("a new code can be asked for from the code form", async ({ page, server, relay }) => {
+  await server.session();
+  await page.goto(`${server.url}/register`);
+  await page.getByLabel("email").fill("grace@example.org");
+  await page.getByRole("button", { name: "send code" }).click();
+  await relay.message();
+  await page.getByRole("button", { name: "send a new code" }).click();
+  await expect(page.getByLabel("email")).toHaveValue("grace@example.org");
+  await page.getByRole("button", { name: "send code" }).click();
+  expect((await relay.message(2)).to).toBe("grace@example.org");
+});
+
+const closed = withMail.extend({
+  server: async ({ relay }, use) => {
+    const server = await TestServer.start({ ...relay.env, CADOCS_REGISTRATION: "closed" });
+    await use(server);
+    await server.dispose();
+  },
+});
+
+closed("a closed instance offers recovery and no registration", async ({ page, server }) => {
+  await server.session();
+  await page.goto(`${server.url}/login`);
+  await expect(page.getByRole("link", { name: "forgot your password?" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "create an account" })).toHaveCount(0);
+  await page.goto(`${server.url}/register`);
+  await expect(page.getByRole("heading", { name: "not found" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "send code" })).toHaveCount(0);
+});
+
+withMail("a logged-in person is sent home from the registration screen", async ({
+  page,
+  server,
+}) => {
+  const { token } = await server.session();
+  await page.context().addCookies([{ name: "session", value: token, url: server.url }]);
+  await page.goto(`${server.url}/register`);
+  await expect(page).toHaveURL(`${server.url}/w/tests`);
 });

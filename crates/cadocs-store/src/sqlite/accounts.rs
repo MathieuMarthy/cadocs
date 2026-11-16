@@ -6,9 +6,9 @@ use sqlx::{AssertSqlSafe, Row, SqliteConnection, SqliteExecutor};
 
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
-    AccountStore, ActiveSession, AdminChanges, Credentials, FirstUser, Membership,
-    NewPasswordReset, NewSession, SessionStanding, StoreError, UpdateBasis, User, UserChanges,
-    UserRecord,
+    AccountStore, ActiveSession, AdminChanges, CodeAttempt, Credentials, FirstUser, MAX_CODE_TRIES,
+    Membership, NewEmailCode, NewPasswordReset, NewSession, NewUser, SessionStanding, StoreError,
+    UpdateBasis, User, UserChanges, UserRecord,
 };
 
 pub(super) const INSERT_SESSION: &str =
@@ -93,6 +93,39 @@ async fn revoke_access(tx: &mut SqliteConnection, user_id: &str) -> Result<(), S
         .execute(&mut *tx)
         .await?;
     Ok(())
+}
+
+/// Whether `attempt` is the code of its purpose and address, if that code still works. A right
+/// code is deleted. A wrong one counts a try, and the last try deletes it.
+async fn use_code(
+    tx: &mut SqliteConnection,
+    attempt: &CodeAttempt<'_>,
+) -> Result<bool, StoreError> {
+    let purpose = attempt.purpose.as_str();
+    let stored: Option<(String, i64)> = sqlx::query_as(
+        "SELECT code_hash, tries FROM email_codes
+         WHERE purpose = ?1 AND email = ?2 AND expires_at > ?3",
+    )
+    .bind(purpose)
+    .bind(attempt.email)
+    .bind(attempt.now)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((code_hash, tries)) = stored else {
+        return Ok(false);
+    };
+    let right = code_hash == attempt.code_hash;
+    let statement = if right || tries + 1 >= MAX_CODE_TRIES {
+        "DELETE FROM email_codes WHERE purpose = ?1 AND email = ?2"
+    } else {
+        "UPDATE email_codes SET tries = tries + 1 WHERE purpose = ?1 AND email = ?2"
+    };
+    sqlx::query(statement)
+        .bind(purpose)
+        .bind(attempt.email)
+        .execute(&mut *tx)
+        .await?;
+    Ok(right)
 }
 
 fn user(row: &SqliteRow) -> User {
@@ -530,5 +563,76 @@ impl AccountStore for SqliteStore {
         revoke_access(&mut tx, &user_id).await?;
         tx.commit().await?;
         Ok(true)
+    }
+
+    async fn create_email_code(&self, code: &NewEmailCode) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        sqlx::query("DELETE FROM email_codes WHERE expires_at <= ?1")
+            .bind(code.now)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO email_codes (purpose, email, code_hash, expires_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (purpose, email) DO UPDATE SET
+                 code_hash = excluded.code_hash, tries = 0,
+                 expires_at = excluded.expires_at, created_at = excluded.created_at",
+        )
+        .bind(code.purpose.as_str())
+        .bind(&code.email)
+        .bind(&code.code_hash)
+        .bind(code.expires_at)
+        .bind(code.now)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn register_user(
+        &self,
+        user: &NewUser,
+        attempt: &CodeAttempt<'_>,
+        session: &NewSession,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        // First-run setup makes the first account, never a registration.
+        let set_up: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users)")
+            .fetch_one(&mut *tx)
+            .await?;
+        if !set_up {
+            return Err(StoreError::WrongCode);
+        }
+        if !use_code(&mut tx, attempt).await? {
+            // The try it counted stays.
+            tx.commit().await?;
+            return Err(StoreError::WrongCode);
+        }
+        sqlx::query(
+            "INSERT INTO users (id, email, name, password_hash, email_verified_at,
+                                created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?5)",
+        )
+        .bind(&user.id)
+        .bind(&user.email)
+        .bind(&user.name)
+        .bind(&user.password_hash)
+        .bind(session.now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| match error.as_database_error() {
+            // Rolled back with the rest, so the code stays.
+            Some(database) if database.is_unique_violation() => StoreError::EmailTaken,
+            _ => error.into(),
+        })?;
+        sqlx::query(INSERT_SESSION)
+            .bind(&session.token_hash)
+            .bind(&session.user_id)
+            .bind(session.now)
+            .bind(session.expires_at)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
     }
 }

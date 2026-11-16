@@ -1,11 +1,11 @@
 # API
 
-All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today `/ws/pages/{page_id}`, and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces, grants, pages, attachments, search and revisions, with the export and import of one page, apart from `/duplicate` and the space exports. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
+All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today `/ws/pages/{page_id}`, and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/auth/forgot-password` and `/auth/register` with its confirmation when mail is on, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces, grants, pages, attachments, search and revisions, with the export and import of one page, apart from `/duplicate` and the space exports. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
 
 ## Conventions
 
 - **Authentication**: an `HttpOnly`, `Secure`, `SameSite=Lax` session cookie, named `__Host-session` over HTTPS so that no other host can set it, and `session` over plain HTTP, where `Secure` and the prefix are impossible.
-- **CSRF**: mutating requests with a session require the `X-CSRF-Token` header, whose value comes from `GET /session`. It is derived from the session token, so it needs no storage and lasts as long as the session. Routes that run before a session exists (`/auth/setup`, `/auth/login`, `/auth/password-reset/{token}`, and `/invitations/{token}/accept` for a new account) have no token to check: they rely on the `Origin` check and on requiring a JSON content type, which a cross-site form cannot send.
+- **CSRF**: mutating requests with a session require the `X-CSRF-Token` header, whose value comes from `GET /session`. It is derived from the session token, so it needs no storage and lasts as long as the session. Routes that run before a session exists (`/auth/setup`, `/auth/login`, `/auth/password-reset/{token}`, `/auth/forgot-password`, `/auth/register` and its confirmation, and `/invitations/{token}/accept` for a new account) have no token to check: they rely on the `Origin` check and on requiring a JSON content type, which a cross-site form cannot send.
 - **Ids**: UUIDv7 strings.
 - **Pagination**: `?limit=` (maximum 100) and an opaque `?cursor=`. Responses have the form `{ "items": [...], "next_cursor": "..." | null }`.
 - **Origin**: a request that sends an `Origin` other than the one of `CADOCS_PUBLIC_URL` gets `403` `forbidden`. Clients outside a browser send none.
@@ -44,6 +44,8 @@ Minimum role per route: `member` is a workspace role. Space roles are `viewer` <
 | POST | `/auth/logout` | user | End the session, close its sockets |
 | POST | `/auth/password-reset/{token}` | none, rate limited | Set a new password from a reset link, revoke all sessions (ADR 0013) |
 | POST | `/auth/forgot-password` | none, rate limited | Mail the reset link of ADR 0013 to an address. Only with a mail relay (ADR 0026) |
+| POST | `/auth/register` | none, rate limited | Mail a code that makes an account. Only with a mail relay and open registration (ADR 0026) |
+| POST | `/auth/register/confirm` | none, rate limited | Make the account with the code, a name and a password |
 | GET | `/auth/oidc/{provider}` | none | Start an OIDC login (V1) |
 | GET | `/auth/oidc/{provider}/callback` | none | Finish an OIDC login (V1) |
 | GET | `/session` | user | Current user, workspaces, CSRF token |
@@ -53,7 +55,7 @@ Minimum role per route: `member` is a workspace role. Space roles are `viewer` <
 
 Bodies and answers:
 
-- `GET /auth/setup` answers `{ required }`, `true` while no account exists. An instance with a mail relay adds `mail: true`, which tells the login screen to offer what needs mail. Without a relay the field is left out.
+- `GET /auth/setup` answers `{ required }`, `true` while no account exists. An instance with a mail relay adds `mail: true`, which tells the login screen to offer what needs mail, and `registration: true` unless `CADOCS_REGISTRATION=closed`. A field that would be `false` is left out.
 - `POST /auth/setup` takes `{ email, name, password, workspace_name, code }`, and answers `201` with the session body and the cookie. `code` is the one of the link the server logs at each start while setup is pending (ADR 0021): missing or empty is `400` with `code: required`, any other value `400` with `code: wrong`. Once an account exists it answers `409`, whatever the code.
 - `POST /auth/login` takes `{ email, password }`, and answers `200` with the session body and the cookie. An unknown email, a wrong password and a disabled account all answer the same `401`, in the same time.
 - `GET /session` answers `{ user: { id, email, name, is_instance_admin }, workspaces: [{ id, slug, name, role }], can_create_workspace, csrf_token }`, where `can_create_workspace` says whether `POST /workspaces` would let the user through. The other routes that answer the session body carry it too.
@@ -63,9 +65,11 @@ Bodies and answers:
 An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a password 8 to 1024 characters. These routes refuse bodies over 16 KiB.
 
 - `POST /auth/forgot-password` takes `{ email }` and answers `204` with no body, for every address: one with an account, one with none, one whose account is disabled. The lookup, the link and the message come after the answer, so its time tells nothing either. The account gets a message with a reset link valid one hour, which replaces any link it had. An address that is not one is a `400` that names `email`. Each client can ask 5 times at once, then once a minute, a budget every route that sends mail shares: past it the answer is `429`. Each address gets 3 messages at once, then one per 10 minutes, whoever asks: past it the answer is still `204`, and nothing is sent. Without a relay the route does not exist: a `404`, whatever the method or the body.
+- `POST /auth/register` takes `{ email }` and answers `204` with no body, for every address, in the same time, as `/auth/forgot-password` does, and shares both of its limits. An address with no account gets a 6-digit code, valid 10 minutes, which replaces any code it had. An address with an account gets a message that says so, with no code, and a disabled one gets nothing. With mail off or registration closed the route does not exist: a `404`, whatever the method or the body. Before first-run setup it sends nothing, so the first account stays the operator's (ADR 0021).
+- `POST /auth/register/confirm` takes `{ email, code, name, password }` and answers `201` with the session body and the cookie, as setup does: the account has no workspace and no instance role, and its address is verified. A missing, used, replaced, expired or other code is a `400` with `code: wrong`, and so is any code for an address that has an account. A wrong code counts a try, and the 5th kills the code. A refused field counts nothing. An address another account took after the code was sent is a `409` with `email: taken`, which only the holder of the code can see. It shares the limit of password guesses, since it hashes one. It exists only when `/auth/register` does.
 - `POST /auth/password-reset/{token}` takes `{ password }` and answers `204`, without opening a session. An unknown, used, replaced or expired token is a `404`. A refused password leaves the link usable.
 
-`/auth/setup`, `/auth/login`, `/auth/password-reset/{token}`, `/invitations/{token}/accept` and a `PATCH /me` that checks the current password share one limit per client: a burst of 10, then one every 15 seconds. A hash that waits over 10 seconds for its turn answers `503`.
+`/auth/setup`, `/auth/login`, `/auth/password-reset/{token}`, `/auth/register/confirm`, `/invitations/{token}/accept` and a `PATCH /me` that checks the current password share one limit per client: a burst of 10, then one every 15 seconds. A hash that waits over 10 seconds for its turn answers `503`.
 
 ### Instance administration
 

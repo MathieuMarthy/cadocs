@@ -56,6 +56,8 @@ pub struct Config {
     pub workspace_creation: WorkspaceCreation,
     /// The relay mail goes through, or `None` for an instance that sends none (ADR 0026).
     pub mail: Option<SmtpConfig>,
+    /// Whether people register by themselves, which needs mail (ADR 0026).
+    pub registration: Registration,
     /// Retired settings that are set, which the server names at start and otherwise ignores.
     pub ignored: Vec<&'static str>,
 }
@@ -65,6 +67,15 @@ const RETIRED: &[&str] = &[
     // ADR 0022: the room budget and `CADOCS_MAX_SOCKETS` bound rooms.
     "CADOCS_MAX_ROOMS",
 ];
+
+/// `CADOCS_REGISTRATION`: whether an instance with mail lets anyone make an account (ADR 0026).
+/// Without mail no one registers, whatever this says.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Registration {
+    #[default]
+    Open,
+    Closed,
+}
 
 /// Where attachments go: `CADOCS_FILE_STORE` (ADR 0020).
 #[derive(Debug, Clone)]
@@ -230,6 +241,7 @@ impl Config {
             files: read.file_store()?,
             workspace_creation: read.workspace_creation()?,
             mail: read.mail()?,
+            registration: read.registration()?,
             ignored: RETIRED
                 .iter()
                 .copied()
@@ -372,6 +384,15 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
             None | Some("all") => Ok(WorkspaceCreation::All),
             Some("admins") => Ok(WorkspaceCreation::Admins),
             Some(other) => bail!("invalid {name}: {other:?}, expected all or admins"),
+        }
+    }
+
+    fn registration(&self) -> anyhow::Result<Registration> {
+        let name = "CADOCS_REGISTRATION";
+        match (self.0)(name).as_deref() {
+            None | Some("open") => Ok(Registration::Open),
+            Some("closed") => Ok(Registration::Closed),
+            Some(other) => bail!("invalid {name}: {other:?}, expected open or closed"),
         }
     }
 
@@ -979,6 +1000,20 @@ mod tests {
             let error = config(&[("CADOCS_WORKSPACE_CREATION", refused)]).unwrap_err();
             let message = error.to_string();
             assert!(message.contains("CADOCS_WORKSPACE_CREATION"), "{message}");
+        }
+    }
+
+    #[test]
+    fn registration_is_open_unless_closed() {
+        assert_eq!(config(&[]).unwrap().registration, Registration::Open);
+        let set = config(&[("CADOCS_REGISTRATION", "open")]).unwrap();
+        assert_eq!(set.registration, Registration::Open);
+        let set = config(&[("CADOCS_REGISTRATION", "closed")]).unwrap();
+        assert_eq!(set.registration, Registration::Closed);
+        for refused in ["", "Closed", "off"] {
+            let error = config(&[("CADOCS_REGISTRATION", refused)]).unwrap_err();
+            let message = error.to_string();
+            assert!(message.contains("CADOCS_REGISTRATION"), "{message}");
         }
     }
 

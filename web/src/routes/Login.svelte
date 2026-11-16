@@ -3,15 +3,15 @@
   import Solo from "../components/Solo.svelte";
   import { api, ApiError, type Session } from "../lib/api";
   import { describe, Form } from "../lib/form.svelte";
-  import { app, sendsMail, signIn } from "../lib/session.svelte";
+  import { app, mailFeatures, signIn, type MailFeatures } from "../lib/session.svelte";
 
   let email = $state("");
   let password = $state("");
   const form = new Form();
 
   /** Unknown at first, and nothing shows until then. */
-  let mail = $state<boolean | null>(null);
-  sendsMail().then((sends) => (mail = sends));
+  let features = $state<MailFeatures | null>(null);
+  mailFeatures().then((read) => (features = read));
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -47,13 +47,16 @@
     {#if form.problem}<p class="problem" role="alert">{form.problem}</p>{/if}
     <button class="button" disabled={form.busy}>log in</button>
   </form>
-  {#if mail}
+  {#if features?.mail}
     <p class="meta" style="margin-top: var(--space-6)">
       <a href="/forgot-password">forgot your password?</a>
     </p>
-  {:else if mail === false}
+  {:else if features}
     <p class="meta" style="margin-top: var(--space-6)">
       forgot your password? ask an administrator for a reset link.
     </p>
+  {/if}
+  {#if features?.registration}
+    <p class="meta">no account? <a href="/register">create an account</a></p>
   {/if}
 </Solo>

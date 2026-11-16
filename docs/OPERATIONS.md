@@ -72,7 +72,7 @@ Attachments go to `data/files/` unless `CADOCS_FILE_STORE` is `s3` (ADR 0020). S
 
 Mail is off unless `CADOCS_SMTP_HOST` is set (ADR 0026). Off, accounts come from first-run setup and invitations, and an instance admin makes reset links. On, cadocs hands each message to this relay, one connection per message, and keeps none: a message the relay cannot take is logged and lost. The server tries the relay at start and logs whether it answers. A relay that is down does not stop the start. `cadocs test-mail <email>` sends one message and prints what the relay answered.
 
-With mail on, the login screen links to a form that mails a reset link to the address of an account. Messages wait in memory, 64 at most, for one of 4 connections to the relay. One that waited two minutes, or arrives when 64 already wait, is logged and dropped. Nothing waits on disk, so a restart loses what was not sent: the person asks again.
+With mail on, the login screen links to a form that mails a reset link to the address of an account, and to registration: anyone gets a 6-digit code at their address, and the code, a name and a password make an account that belongs to no workspace. `CADOCS_WORKSPACE_CREATION=admins` and `CADOCS_WORKSPACE_QUOTA_MB` bound what a stranger can then store. `CADOCS_REGISTRATION=closed` keeps recovery and turns registration off. Codes are hashed with a key new at each start, so a restart kills the codes not used yet: they live 10 minutes anyway. Messages wait in memory, 64 at most, for one of 4 connections to the relay. One that waited two minutes, or arrives when 64 already wait, is logged and dropped. Nothing waits on disk, so a restart loses what was not sent: the person asks again.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -83,6 +83,7 @@ With mail on, the login screen links to a form that mails a reset link to the ad
 | `CADOCS_SMTP_USERNAME` | | For a relay that asks for a login. Needs a password, and is refused with `CADOCS_SMTP_TLS=none` |
 | `CADOCS_SMTP_PASSWORD` | | The password, unless the next one is set. Never both |
 | `CADOCS_SMTP_PASSWORD_FILE` | | A file holding the password, for container secrets. A final newline is ignored |
+| `CADOCS_REGISTRATION` | `open` | `open`: with mail on, anyone can make an account. `closed`: no one can, and mail serves recovery. Without mail no one registers, whatever this says |
 
 A Postfix on the same Docker network that relays for it needs only `CADOCS_SMTP_HOST=postfix`, `CADOCS_SMTP_TLS=none` and `CADOCS_SMTP_FROM`.
 

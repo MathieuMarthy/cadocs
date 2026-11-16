@@ -3,7 +3,7 @@
   import Solo from "../components/Solo.svelte";
   import { api } from "../lib/api";
   import { Form } from "../lib/form.svelte";
-  import { sendsMail } from "../lib/session.svelte";
+  import { mailFeatures } from "../lib/session.svelte";
   import Message from "./Message.svelte";
 
   let email = $state("");
@@ -12,7 +12,7 @@
 
   /** With mail off this screen does not exist (ADR 0026). Unknown at first. */
   let mail = $state<boolean | null>(null);
-  sendsMail().then((sends) => (mail = sends));
+  mailFeatures().then((features) => (mail = features.mail));
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
