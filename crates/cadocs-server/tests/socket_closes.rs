@@ -251,6 +251,23 @@ async fn joining_a_group_with_a_higher_grant_closes_with_4409() {
 }
 
 #[tokio::test]
+async fn losing_a_group_grant_above_ones_own_closes_with_4409() {
+    let wiki = wiki(Value::Null).await;
+    let bob = wiki.member("member").await;
+    let group = group_with(&wiki, "editor").await;
+    wiki.api.join_group(&wiki.ada, &group, BOB).await;
+    wiki.set_grants(json!([
+        { "user_id": BOB, "role": "viewer" },
+        { "group_id": group, "role": "editor" },
+    ]))
+    .await;
+    let mut socket = wiki.socket(&bob).await;
+    wiki.set_grants(json!([{ "user_id": BOB, "role": "viewer" }]))
+        .await;
+    assert_eq!(close_code(&mut socket).await, Some(MODE_CHANGED));
+}
+
+#[tokio::test]
 async fn deleting_a_group_closes_with_4403() {
     let wiki = wiki(Value::Null).await;
     let bob = wiki.member("member").await;

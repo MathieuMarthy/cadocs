@@ -3,6 +3,7 @@
 
   import Confirm from "../components/Confirm.svelte";
   import Field from "../components/Field.svelte";
+  import Groups from "../components/Groups.svelte";
   import IconButton from "../components/IconButton.svelte";
   import Select from "../components/Select.svelte";
   import Shell from "../components/Shell.svelte";
@@ -82,6 +83,8 @@
   // Members.
   let members = $state<Member[] | null>(null);
   const memberForm = new Form();
+  /** Members removed from here, which the groups count. */
+  let left = $state(0);
 
   const fetchMembers = async () =>
     (members = (await collect<Member>(`/workspaces/${workspace.id}/members`, MAX_MEMBERS)).items);
@@ -129,7 +132,10 @@
     const done = await memberForm.run(() =>
       api("DELETE", `/workspaces/${workspace.id}/members/${member.id}`),
     );
-    if (done) members = (members ?? []).filter((item) => item.id !== member.id);
+    if (!done) return;
+    members = (members ?? []).filter((item) => item.id !== member.id);
+    // They left the workspace's groups too.
+    left += 1;
   }
 
   // Invitations.
@@ -293,6 +299,8 @@
       </ul>
     {/if}
   </section>
+
+  <Groups {workspace} {manages} {members} changed={left} />
 
   {#if manages}
     <section aria-labelledby="invitations-heading">
