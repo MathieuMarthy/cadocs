@@ -16,96 +16,15 @@ Checked the RAM hypothesis before building the product: collaboration server, SQ
 
 ## MVP
 
-Purpose: a small team can use cadocs as its only wiki.
+Purpose, reached: a small team can use cadocs as its only wiki, and an instance with a mail relay lets people register, recover a password and add a second factor by themselves (ADR 0026). Done in steps 1 to 32: server and sessions (1 to 10), Svelte interface (11 to 15, 27), content, files, search and revisions (16 to 20d), operations, permission matrix, benchmark and security review (21 to 26), mail (28 to 32). What each step taught is in `docs/notes/`, its tests in [COVERAGE.md](COVERAGE.md), its measures in [ARCHITECTURE.md](ARCHITECTURE.md#mvp-results).
 
-Scope:
-
-- Email and password accounts, sessions, invitation and reset links with no mail server (ADR 0013)
-- Instance administration: users, disabling, instance admins
-- Workspaces, spaces, page tree, trash, recent pages
-- Per-space roles
-- Live updates of the tree and titles (ADR 0011)
-- Collaborative editor with a slash menu and these blocks: headings, lists, tasks, code with syntax highlighting, quotes, callouts, toggles, dividers, tables, links, links to pages, images, file attachments
-- Table of contents, generated in the browser
-- Markdown shortcuts, Markdown import and export for one page, with or without attachments
-- Printing to PDF through a print stylesheet
-- Image and file attachments on local disk or S3, chosen by the operator, with size limits (ADR 0020)
-- Full-text search (FTS5, stemming)
-- Revisions: list, view, restore, retention
-- Brut interface in Svelte, light and dark themes, usable on a phone browser
-- A link to the source code in the interface (ADR 0010)
-- Docker image, `aarch64` and `x86_64` binaries, backup and restore commands, [OPERATIONS.md](OPERATIONS.md) complete
+Scope: email and password accounts with links that need no mail server (ADR 0013), mail by an optional relay, instance administration, workspaces, spaces, page tree, trash, per-space roles, live updates (ADR 0011), the collaborative editor and its blocks, Markdown import and export of one page, printing, attachments on disk or S3 (ADR 0020), full-text search, revisions, the Brut interface in light and dark, Docker image, release binaries, backup and restore.
 
 Rules every step followed, and later stages keep: each step adds the migration for the tables it needs, its REST routes come with tests of the permissions they use, and a step that adds a dependency or a background task reports the idle RSS.
 
-Steps, all done. What each one taught is in `docs/notes/`, its tests in [COVERAGE.md](COVERAGE.md).
+Exit criteria, all met: tests cover the scope and the permission matrix over REST and WebSocket; revoking a role closes sockets; idle RSS under 30 MB; under 100 MB with 30 active users; after login peaks, idle plus at most 10 MB (ADR 0023); backup and restore tested on a running server; security review done; without `CADOCS_SMTP_HOST`, nothing of the mail stage answers. Search latency (16 ms p95 on one desktop core) and daily use were accepted by the maintainer without a Raspberry Pi run or a full two weeks.
 
-- [x] Step 1: HTTP foundation (`/api/v1`, error shape, `Origin` check, trusted proxies, rate limiter, security headers, pools, data folder lock).
-- [x] Step 2: accounts and sessions, CSRF, Argon2 behind a semaphore.
-- [x] Step 3: instance administration, reset links, `cadocs reset-password`.
-- [x] Step 4: workspaces, members, invitations.
-- [x] Step 5: spaces, grants, space trash, role resolution.
-- [x] Step 6: pages, fractional index, tree, trash, recent pages.
-- [x] Step 7: page socket `/ws/pages/{id}` behind sessions, real `Authorizer`.
-- [x] Step 8: socket closes on access changes, awareness hardening.
-- [x] Step 9: events socket `/ws/events`, `resync`.
-- [x] Step 10: `cadocs-jobs`, purges, reader outside a room (`CADOCS_DOC_READS`).
-- [x] Step 11: Svelte shell, setup, login, account, administration, themes.
-- [x] Step 12: navigation, lazy tree with drag and drop, live updates.
-- [x] Step 12a: icons and action menus (ADR 0017).
-- [x] Step 12b: shell layout, drawer under 840px, user menu, breadcrumb.
-- [x] Step 12c: home, page, trash, account and administration screens.
-- [x] Step 13: workspace and space settings, members, invitations, grants.
-- [x] Step 14: editor, first blocks, block registry, Markdown source under the caret (ADR 0016, 0018).
-- [x] Step 15: callouts, toggles, tables, links to pages, table of contents.
-- [x] Step 16: `cadocs-content`, Yjs ↔ AST ↔ text, HTML, Markdown, schema comparison (ADR 0008).
-- [x] Step 17: attachments, `cadocs-files`, quota, orphan cleanup.
-- [x] Step 18: search, `cadocs-search`, FTS5, stemming, reindex job.
-- [x] Step 19: revisions, thinning, restore.
-- [x] Step 19a: SQLite upkeep (ADR 0019).
-- [x] Step 20b: S3 file store (ADR 0020).
-- [x] Step 20c: zstd snapshots.
-- [x] Step 20d: room memory budget, `CADOCS_ROOM_MEMORY_MB`.
-- [x] Step 20: Markdown import and export of one page, print stylesheet.
-- [x] Step 21: `cadocs backup` and `restore`, Docker image, release binaries.
-- [x] Step 22: full permission matrix over REST and sockets, [COVERAGE.md](COVERAGE.md).
-- [x] Step 23: MVP benchmark ([MVP results](ARCHITECTURE.md#mvp-results)).
-- [x] Step 24: security review of auth, uploads and rendered HTML.
-- [x] Step 23b: `CADOCS_MAX_ROOMS` removed (ADR 0022).
-- [x] Step 23a: fixed mmap threshold for password hashes (ADR 0023).
-- [x] Step 25: leaving a trashed page for its parent.
-- [x] Step 26: any user creates a workspace (ADR 0024).
-- [x] Step 27: motion tokens and transitions.
-
-Exit criteria:
-
-- [x] All of the scope is covered by automated tests, including the permission matrix over REST and WebSocket ([COVERAGE.md](COVERAGE.md)).
-- [x] Revoking a role closes the user's open sockets, and this is tested.
-- [x] Idle RSS under 30 MB.
-- [x] RSS under 100 MB with 30 simulated active users on 30 pages, each with one page socket and one events socket.
-- [x] After login peaks, RSS returns to the idle target plus at most 10 MB. Missed in step 23, then 12.2 MB against an idle of 10.8 after step 23a (ADR 0023).
-- [ ] 10,000 pages load and search with p95 latency under 100 ms on a Raspberry Pi 4 or an equivalent 1 vCPU VPS. Step 23 measured 16 ms on one desktop core: run `bench/rss.sh mvp` on such a machine to check it.
-- [x] A backup and restore round trip is tested, on a running server.
-- [x] A security review of auth, uploads and rendered HTML is done.
-- [ ] One team uses it daily for two weeks with no data loss.
-
-## Mail
-
-Purpose: an instance with a mail relay lets people register, recover a password and add a second factor by themselves, and an instance without one works as before (ADR 0026).
-
-Steps, all done. The rules of the MVP steps applied.
-
-- [x] Step 28: `cadocs-mail`, `SmtpMailer` on `lettre`, `CADOCS_SMTP_*`, `cadocs test-mail`.
-- [x] Step 29: forgot password, the outbox.
-- [x] Step 30: registration by mailed code, `CADOCS_REGISTRATION`.
-- [x] Step 31: second factor by mail.
-- [x] Step 32: proof of a new address.
-
-Exit criteria:
-
-- [x] With `CADOCS_SMTP_HOST` unset, no route or screen of this stage answers, and the MVP tests pass unchanged.
-- [ ] No route tells whether an address has an account. Open: with registration open and `CADOCS_WORKSPACE_CREATION=all`, the defaults, anyone registers, creates a workspace, invites an address and reads `has_account` from `GET /invitations/{token}`. Without a relay, `PATCH /me` still answers `409` for a taken address, as in the MVP.
-- [x] Idle RSS and active-user thresholds of the MVP still hold.
+Accepted risk: a user who can invite learns whether an address has an account ([OPERATIONS.md](OPERATIONS.md#security)).
 
 ## V1
 
@@ -117,13 +36,43 @@ Scope:
 - Public sharing with server-rendered pages, and optional indexing by search engines
 - Groups and group grants
 - OIDC login, TOTP multi-factor authentication (a code by mail came first, ADR 0026)
-- Bulk Markdown import and export, space export, Docmost and Notion import through their Markdown exports (what these exports lose is checked when this stage starts)
+- Bulk Markdown import and export, space export, Docmost import through its Markdown export (what this export loses is checked when this stage starts)
 - Backlinks, page duplication and copy to another space
 - Math (KaTeX) and Mermaid blocks, loaded on demand in the browser
 - Diff between revisions
 - Email notifications through the relay of ADR 0026
-- Internationalized interface
+- Internationalized interface, in English and French
 - Page templates
+
+Decided when the stage started: math and Mermaid render in the browser only, so public pages and exports show their source as a code block. OIDC is tested against a fake provider in Rust, and checked by hand once with Authentik and Keycloak. Notion import moved to V2, for want of a real export to test.
+
+Steps. The rules of the MVP steps apply, and every new screen takes its strings from the catalogue of step 35.
+
+- [ ] Step 33: upgrade tests. One fixture database per release (`v0.1.0`, `v0.2.0`), opened by the current build in a test that checks its data. CI fails if the release binary passes 30 MB or a default build links S3 code. Done when both checks run in CI.
+- [ ] Step 34: Docmost export. Make a real export (Docmost in Docker), list what it keeps and loses (tree, attachments, links, callouts, math, comments), and write the mapping to cadocs nodes in `docs/notes/content.md`. Done when the mapping is written and the export is kept as a test fixture.
+- [ ] Step 35: i18n foundation. A string catalogue in `web/`, English as the source, a language setting per user that falls back to the browser's, every existing string moved into it. Done when the UI looks the same in English and a test fails on a string left out of the catalogue.
+- [ ] Step 36: groups, server. REST routes of groups and their members, `access_changed()` on each change, the permission matrix extended. Done when group grants change what a member reaches, over REST and sockets.
+- [ ] Step 37: groups, screens. Groups in workspace settings, groups in space grants.
+- [ ] Step 38: comments, server. Migration, REST routes, resolve and reopen, one level of replies, anchors stored as given (ADR 0012), a `comment` event on the events socket, permission tests.
+- [ ] Step 39: comments, screens. The side panel, anchors from the selection, highlights as decorations, lost anchors shown with their quote, resolve and reopen.
+- [ ] Step 40: mentions. A user mention node in the editor and in `cadocs-content`, mentions of users and pages in comments, body mentions diffed by the reindex job into `mentions`.
+- [ ] Step 41: backlinks. `page_links` filled by the reindex job, a route and a panel listing the pages that link here.
+- [ ] Step 42: in-app notifications. `notifications` for mentions, replies and comments on one's pages, the `notification` event, a list with unread count and read state.
+- [ ] Step 43: mail notifications. Through the relay only, a setting per user, grouped by a job so one burst sends one message. Done when, with no relay, nothing of it answers.
+- [ ] Step 44: math and Mermaid. Block and inline math, Mermaid blocks, loaded on demand in the editor. `cadocs-content` writes their source to Markdown and as a code block in HTML.
+- [ ] Step 45: revision diff. Compare a revision with the current page or another revision, on the screen of revisions.
+- [ ] Step 46: public shares, server. `page_shares`, its routes, `/s/{token}` rendered by the bounded reader, descendants, files, `ETag`, the strict CSP, `X-Robots-Tag` unless indexable, a rate limit. Done when a test shows a script in content cannot run there.
+- [ ] Step 47: public shares, screens. A share dialog on the page: children, indexing, expiry, revoke.
+- [ ] Step 48: TOTP. `user_totp`, recovery codes, login asking for the code, the account screen. Mail codes (ADR 0026) keep working beside it.
+- [ ] Step 49: OIDC, server. Providers in `CADOCS_OIDC_*`, code flow with PKCE, `user_identities`, how an identity meets an existing account, tests against a fake provider. An ADR for the HTTP client and its RAM and binary cost.
+- [ ] Step 50: OIDC, screens and providers. Login buttons, linking on the account screen, a manual check with Authentik and Keycloak written into `OPERATIONS.md`.
+- [ ] Step 51: duplication. `POST /pages/{page}/duplicate`, with descendants and attachments, into the same space or another, through a room.
+- [ ] Step 52: templates. `templates`, saving a page as one, a new page from one.
+- [ ] Step 53: exports. `format=html` for one page, the space export as a job behind `/jobs/{id}`, in Markdown or HTML, streamed as a zip.
+- [ ] Step 54: bulk import. A zip of Markdown files and folders becomes a tree of pages with its attachments, as a job.
+- [ ] Step 55: Docmost import. The mapping of step 34 on top of step 54, tested with the real export. Done when its tree and attachments come in intact.
+- [ ] Step 56: French. Every string of the catalogue translated, the language picker on the account screen.
+- [ ] Step 57: V1 exit. Benchmark, binary size, security review of shares, OIDC, TOTP and comments, `COVERAGE.md` and the permission matrix for the new routes.
 
 Exit criteria:
 
@@ -145,6 +94,7 @@ Scope:
 - Audit log
 - Public API tokens and webhooks
 - Page labels
+- Notion import through its Markdown export, once a real export is at hand
 - Plugins from an operator library (ADR 0016): content plugins offered per workspace, user plugins such as themes and client-side exports enabled per user, built-in plugins embedded in the binary
 - Embeds through iframes, with an allow-list that fits the CSP
 - Attachment text extraction for search, if memory allows

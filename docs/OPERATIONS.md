@@ -224,6 +224,7 @@ In `redirect` mode, only safe images (AVIF, GIF, JPEG, PNG, WebP) are redirected
   - A session lasts `CADOCS_SESSION_DAYS` after its last use, with no absolute limit. Logout, a password change or reset, disabling and deletion end it.
   - Invitation links can be read without a limit: a token has 256 bits, so this only costs a hash and a read per request.
   - An attachment id works as a key inside its workspace ([PERMISSIONS.md](PERMISSIONS.md#special-cases)).
+- **Accepted at the end of the MVP:** a user who can invite learns whether an address has an account, from `has_account` in `GET /invitations/{token}`, and, without a relay, from the `409` of `PATCH /me`. Hiding it would leave the invitation page unable to choose between login and sign-up, and needs mail to answer a taken address. It reveals no content and needs an account.
   - A page's position key grows a little with each move between two close siblings, so an editor scripting moves can make the keys of their own spaces long. Writers are trusted.
   - `style-src` allows inline styles (see below). Scripts only load from the instance itself.
 
