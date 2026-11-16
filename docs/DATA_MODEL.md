@@ -21,6 +21,8 @@ CREATE TABLE users (
     password_hash  TEXT,                     -- NULL for OIDC-only accounts
     is_instance_admin SMALLINT NOT NULL DEFAULT 0 CHECK (is_instance_admin IN (0, 1)),
     disabled_at    BIGINT,
+    email_verified_at BIGINT,                -- ADR 0026: NULL until a code sent to it is used
+    email_2fa      SMALLINT NOT NULL DEFAULT 0 CHECK (email_2fa IN (0, 1)), -- ADR 0026: a login needs a mailed code
     created_at     BIGINT NOT NULL,
     updated_at     BIGINT NOT NULL,
     UNIQUE (email)
@@ -53,7 +55,22 @@ CREATE TABLE password_resets (               -- ADR 0013
     created_at BIGINT NOT NULL
 );
 CREATE INDEX password_resets_user ON password_resets(user_id);
+
+CREATE TABLE email_codes (                   -- ADR 0026
+    purpose    TEXT NOT NULL CHECK (purpose IN ('register', 'login', 'email')),
+    email      TEXT NOT NULL,                -- stored lowercased, where the code went
+    user_id    TEXT REFERENCES users(id) ON DELETE CASCADE, -- NULL for a registration; `login` and `email` codes go with their account
+    code_hash  TEXT NOT NULL,                -- keyed SHA-256, with a key new at each start
+    tries      INTEGER NOT NULL DEFAULT 0,   -- wrong ones; the 5th deletes the row
+    expires_at BIGINT NOT NULL,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (purpose, email)
+);
+CREATE INDEX email_codes_expiry ON email_codes(expires_at);
+CREATE INDEX email_codes_user ON email_codes(user_id);
 ```
+
+A new code replaces the one of the same purpose and address, and deletes every expired code. The hash binds the code to its purpose and its address, with a key the server draws at each start: 6 digits are a million guesses, which a copy of the database would otherwise give away. A registration sets `email_verified_at` with the account, and so does the first `login` or `email` code an account uses. An `email` code proves the account's own address before the second factor depends on it, or a new address before the account moves to it: only the account that asked can use it, and the address it moves to is verified. An address changed with no relay is not, and the second factor goes off with it.
 
 `sessions.last_seen_at` is written at most once every 5 minutes, so that reads do not turn into writes. Each such write also extends `expires_at`.
 

@@ -68,12 +68,34 @@ Attachments go to `data/files/` unless `CADOCS_FILE_STORE` is `s3` (ADR 0020). S
 | `CADOCS_S3_LINK_SECS` | `3600` | Lifetime of a presigned link, 2 to 604800. A link is the same for half of it, so browsers keep files in cache, and a leaked link works at most this long |
 | `CADOCS_S3_CA_FILE` | | A PEM bundle trusted besides the system roots, for an internal certificate authority |
 
+### Mail
+
+Mail is off unless `CADOCS_SMTP_HOST` is set (ADR 0026). Off, accounts come from first-run setup and invitations, and an instance admin makes reset links. On, cadocs hands each message to this relay, one connection per message, and keeps none: a message the relay cannot take is logged and lost. The server tries the relay at start and logs whether it answers. A relay that is down does not stop the start. `cadocs test-mail <email>` sends one message and prints what the relay answered.
+
+With mail on, the login screen links to a form that mails a reset link to the address of an account, and to registration: anyone gets a 6-digit code at their address, and the code, a name and a password make an account that belongs to no workspace. `CADOCS_WORKSPACE_CREATION=admins` and `CADOCS_WORKSPACE_QUOTA_MB` bound what a stranger can then store. `CADOCS_REGISTRATION=closed` keeps recovery and turns registration off. Codes are hashed with a key new at each start, so a restart kills the codes not used yet: they live 10 minutes anyway. Messages wait in memory, 64 at most, for one of 4 connections to the relay. One that waited two minutes, or arrives when 64 already wait, is logged and dropped. Nothing waits on disk, so a restart loses what was not sent: the person asks again.
+
+Each account can also turn on a second factor in its account screen, once a code mailed to its address proved that address: a login then asks for a code mailed after the password. That ties the account to its mailbox, as recovery already does. Turning mail off later does not lock anyone out: without a relay the factor is not asked for, and the server logs at start how many accounts have it on. `cadocs reset-password` does not turn it off.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CADOCS_SMTP_HOST` | unset | The relay: a host name or an address, with no scheme or port. Unset or empty turns mail off, whatever the others say. An empty value of any setting below counts as unset |
+| `CADOCS_SMTP_FROM` | | Required with a host. The sender, as `wiki@example.org` or `Team wiki <wiki@example.org>`. Its domain, in ASCII, is also the name cadocs greets the relay with |
+| `CADOCS_SMTP_TLS` | `starttls` | `starttls`: plain, then `STARTTLS`, and no message if the relay does not offer it. `tls`: TLS from the first byte. `none`: plain text, for a relay on the same host or a private network. The certificate is checked against the system roots |
+| `CADOCS_SMTP_PORT` | `587`, `465` or `25` | By default the port of the chosen `CADOCS_SMTP_TLS`, in that order |
+| `CADOCS_SMTP_USERNAME` | | For a relay that asks for a login. Needs a password, and is refused with `CADOCS_SMTP_TLS=none` |
+| `CADOCS_SMTP_PASSWORD` | | The password, unless the next one is set. Never both |
+| `CADOCS_SMTP_PASSWORD_FILE` | | A file holding the password, for container secrets. A final newline is ignored |
+| `CADOCS_REGISTRATION` | `open` | `open`: with mail on, anyone can make an account. `closed`: no one can, and mail serves recovery. Without mail no one registers, whatever this says |
+
+A Postfix on the same Docker network that relays for it needs only `CADOCS_SMTP_HOST=postfix`, `CADOCS_SMTP_TLS=none` and `CADOCS_SMTP_FROM`.
+
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
 | `cadocs` or `cadocs serve` | Run the server |
 | `cadocs reset-password <email>` | Print a one-time reset link (ADR 0013) |
+| `cadocs test-mail <email>` | Send one message through the mail relay and print what it answered. Opens no database |
 | `cadocs backup <dir>` | Write a consistent backup, on a running or stopped server |
 | `cadocs restore <dir>` | Restore a backup into an empty data folder, on a stopped server |
 

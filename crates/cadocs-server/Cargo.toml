@@ -23,6 +23,7 @@ cadocs-content.workspace = true
 cadocs-core.workspace = true
 cadocs-files.workspace = true
 cadocs-jobs.workspace = true
+cadocs-mail.workspace = true
 cadocs-search.workspace = true
 cadocs-store.workspace = true
 futures-util = { workspace = true, features = ["io"] }
@@ -41,6 +42,7 @@ tungstenite.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+cadocs-mail = { workspace = true, features = ["fake"] }
 async_zip.workspace = true
 bytes.workspace = true
 serde_json.workspace = true

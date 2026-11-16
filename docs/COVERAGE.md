@@ -1,6 +1,6 @@
 # Coverage
 
-Where the MVP scope of [ROADMAP.md](ROADMAP.md#mvp) and the matrix of [PERMISSIONS.md](PERMISSIONS.md) are tested. Checked item by item in step 22. A new feature adds its line here with the tests that cover it.
+Where the MVP scope of [ROADMAP.md](ROADMAP.md#mvp) and the matrix of [PERMISSIONS.md](PERMISSIONS.md) are tested. A new feature adds its line here with the tests that cover it.
 
 Paths are short: `server/auth.rs` is `crates/cadocs-server/tests/auth.rs`, `e2e/shell` is `web/e2e/shell.spec.ts`.
 
@@ -27,6 +27,10 @@ Comments, public shares, groups and plugins have no route before V1 or V2: their
 | Item | Tests |
 | --- | --- |
 | Accounts, sessions, invitation and reset links | `server/auth.rs` (with the setup code of ADR 0021), `server/admin.rs` (reset links), `server/workspaces.rs` (invitations), `server/cli.rs` (`reset-password`), `session.rs` unit tests (the `__Host-` cookie), `e2e/shell` (setup with and without the link, login, invitation, reset) |
+| Forgot password by mail | `mail/outbox.rs` (no wait, bounded, stale messages, reserved places), `server/mail.rs` (link arrives and works, same answer for any address, limits, full outbox, `404` with mail off), `rate_limit.rs` unit tests, `e2e/mail` |
+| Registration by mail | `server/register.rs` (verified account with no workspace, keyed hash, 5 wrong codes, expiry, replacement, same answer for any address, `409` for an address taken meanwhile, limits, `404` closed or with mail off), `session.rs` and `config.rs` unit tests, `e2e/mail` |
+| Second factor by mail | `server/second_factor.rs` (no session before the code, single use, wrong password mails nothing, 5 wrong codes, purposes not interchangeable, off needs the password, ignored and `404` with mail off), `server/cli.rs` (notice at start), `e2e/mail` |
+| Proof of a new address | `server/email_change.rs` (changes only after the code, taken address gets a notice, code bound to address and account, 5 wrong codes, limits, reset link voided; without a relay changes at once, unproven, factor off), `server/auth.rs`, `e2e/mail` |
 | Instance administration | `server/admin.rs`, `e2e/shell` `instance administration lists, disables and promotes users`, `e2e/screens` |
 | Workspaces, spaces, tree, trash, recent pages | `server/workspaces.rs`, `server/spaces.rs`, `server/pages.rs`, `server/jobs.rs` (trash purge), `e2e/navigation`, `e2e/settings` |
 | Per-space roles | Permission matrix above, `e2e/settings` (grants and roles while a page is open), `e2e/editor` (read-only viewer) |
@@ -42,6 +46,6 @@ Comments, public shares, groups and plugins have no route before V1 or V2: their
 | Source code link | `e2e/shell` `every screen links to the source code` |
 | Docker image, binaries | `scripts/check-image.sh`: serve, setup, backup, restore in the image, then a folder of root and a folder of the caller, each served without root (ADR 0025), with `server/privileges.rs`. CI runs it on `amd64` after each push to main, and `release.yml` on each architecture before pushing |
 | Backup and restore | `server/backup.rs`, `scripts/check-image.sh` |
-| `OPERATIONS.md` complete | A document, checked by reading in step 21 |
+| `OPERATIONS.md` complete | A document, checked by reading |
 
-Not automated: the RAM targets (step 23, `bench/rss.sh`), except that a hash's memory goes back with no trim (`server/hash_memory.rs`, ADR 0023), and the release workflow as a whole, which runs on a tag.
+Not automated: the RAM targets (`bench/rss.sh`), except that a hash's memory goes back with no trim (`server/hash_memory.rs`, ADR 0023), and the release workflow as a whole, which runs on a tag.

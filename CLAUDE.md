@@ -18,7 +18,7 @@ cargo deny check                                    # advisories, licenses, sour
 bench/rss.sh build && bench/rss.sh run              # RAM benchmark, about 12 minutes, results in target/bench
 ```
 
-Run it with `CADOCS_PUBLIC_URL=http://127.0.0.1:3000 target/release/cadocs`. The first visit offers first-run setup. Nothing lists pages before step 12: create a space and a page over REST, then open `http://127.0.0.1:3000/?page=<id>`. For front end work, set `CADOCS_PUBLIC_URL` to the Vite address (`http://localhost:5173`), run the server, then `npm --prefix web run dev`, which proxies `/ws` and `/api` to it.
+Run it with `CADOCS_PUBLIC_URL=http://127.0.0.1:3000 target/release/cadocs`. The first visit offers first-run setup. For front end work, set `CADOCS_PUBLIC_URL` to the Vite address (`http://localhost:5173`), run the server, then `npm --prefix web run dev`, which proxies `/ws` and `/api` to it.
 
 ## Workflow
 
@@ -54,11 +54,11 @@ Other rules:
 
 What later steps must know, by topic. Read the file of the code you touch, and add to it. Keep this section short: every session and subagent pays for it.
 
-- **Binding:** the server binds to `127.0.0.1` by default. The Docker image sets `CADOCS_BIND=0.0.0.0:3000`, and its port is published on `127.0.0.1` behind a TLS proxy ([OPERATIONS.md](docs/OPERATIONS.md#deployment)). Exposing it follows the Security section there, which step 24 wrote.
+- **Binding:** the server binds to `127.0.0.1` by default. The Docker image sets `CADOCS_BIND=0.0.0.0:3000`, and its port is published on `127.0.0.1` behind a TLS proxy ([OPERATIONS.md](docs/OPERATIONS.md#deployment)). Exposing it follows the Security section there.
 - **Access changes:** a handler whose change can alter what a user reaches calls `state.access_changed()` once it is stored ([store notes](docs/notes/store.md)).
 - [docs/notes/collab.md](docs/notes/collab.md): rooms, yrs, y-websocket, Yjs layout, socket RAM.
 - [docs/notes/content.md](docs/notes/content.md): schema check, Yjs layout of nodes, renderers, Markdown conventions.
-- [docs/notes/server.md](docs/notes/server.md): server, page socket, HTTP foundation, sessions, administration.
+- [docs/notes/server.md](docs/notes/server.md): HTTP, sockets, sessions, jobs, files, backup, mail.
 - [docs/notes/store.md](docs/notes/store.md): stores, permissions, workspaces, spaces, pages.
 - [docs/notes/web.md](docs/notes/web.md): front end, browser and end-to-end tests.
 - [docs/notes/benchmark.md](docs/notes/benchmark.md): benchmark rules and measures.

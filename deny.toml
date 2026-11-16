@@ -21,6 +21,8 @@ ignore = [
 [licenses]
 # Compatible with AGPL-3.0 (ADR 0010). A new license must be checked before it is added here.
 allow = [
+    # `quoted_printable`, through `lettre`: no conditions at all.
+    "0BSD",
     "AGPL-3.0-only",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",

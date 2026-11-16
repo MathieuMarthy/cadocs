@@ -147,7 +147,7 @@ Motion says where something went, and nothing more. It is short, linear and plai
 
 ## Components
 
-The shell uses the buttons, fields, breadcrumb and workspace selector. The others are the reference for the next steps. The icons, the action menu, the drawer and the lowercase labels came with ADR 0017. Step 12a brought the icons, the icon button, the action menu, the notice and the tree in line; step 12b brought the sticky sidebar, the drawer, the user menu and the linked breadcrumb; step 12c brought the screens in line.
+The icons, the action menu, the drawer and the lowercase labels come from ADR 0017. A component not used yet is the reference for the step that needs it.
 
 ### Page content
 

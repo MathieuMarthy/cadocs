@@ -1,6 +1,8 @@
 //! A real server over real sockets, for the tests of the REST API. Each test binary uses part of it.
 #![allow(dead_code)]
 
+pub mod mail;
+
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,6 +10,7 @@ use std::time::Duration;
 use cadocs_collab::{DocRegistry, PageAuthorizer};
 use cadocs_files::{FileStore, LocalFileStore};
 use cadocs_jobs::JobQueue;
+use cadocs_mail::{Outbox, SmtpMailer};
 use cadocs_server::config::Config;
 use cadocs_server::{AppState, serve, start_jobs};
 use cadocs_store::SqliteStore;
@@ -156,6 +159,11 @@ async fn start_custom_in(
         config.attachments,
     );
     state.workspace_creation = config.workspace_creation;
+    state.registration = config.registration;
+    // As `main` does it, without the check of the relay at start.
+    if let Some(smtp) = config.mail {
+        state.mail = Some(Outbox::start(Arc::new(SmtpMailer::new(smtp).unwrap())));
+    }
     let queue = start_jobs(&state, config.jobs);
     let setup_code = state.setup_code.to_string();
 

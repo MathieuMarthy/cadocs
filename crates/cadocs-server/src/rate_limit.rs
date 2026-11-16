@@ -1,28 +1,36 @@
-//! Limits per client address. Each client has one date, when it will have its whole burst back.
+//! Limits per client address, and per mail address. Each one has one date, when it will have its
+//! whole burst back.
 
 use std::collections::HashMap;
+use std::hash::{BuildHasher, Hash, RandomState};
 use std::net::IpAddr;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 /// About 300 KiB at most, reached only under a flood of addresses.
 const MAX_TRACKED: usize = 4096;
+/// A full table of addresses is logged this often at most, so a flood does not fill the log.
+const FULL_REPORT_EVERY: Duration = Duration::from_secs(60);
 
+/// What both limiters are made of: a date per key.
 #[derive(Debug)]
-pub struct RateLimiter {
+struct Buckets<K> {
     refill: Duration,
     /// How far ahead of now a client's date may go.
     burst: Duration,
-    clients: Mutex<HashMap<IpAddr, Instant>>,
+    clients: Mutex<HashMap<K, Instant>>,
+}
+
+#[derive(Debug)]
+pub struct RateLimiter {
+    buckets: Buckets<IpAddr>,
 }
 
 impl RateLimiter {
     /// Allows `burst` requests at once, then one more per `refill`.
     pub fn new(burst: u32, refill: Duration) -> Self {
         Self {
-            refill,
-            burst: refill * burst,
-            clients: Mutex::default(),
+            buckets: Buckets::new(burst, refill),
         }
     }
 
@@ -32,7 +40,78 @@ impl RateLimiter {
     }
 
     fn check_at(&self, client: IpAddr, now: Instant) -> Result<(), Duration> {
-        let key = key(client);
+        self.buckets.check_at(key(client), now)
+    }
+}
+
+/// Bounds the messages one address gets, whoever asks for them (ADR 0026). It keeps a keyed hash
+/// of each address, 8 bytes, so a flood of long addresses costs no more than one of clients, and
+/// nobody can pick two addresses that share a bucket.
+#[derive(Debug)]
+pub struct AddressLimiter {
+    buckets: Buckets<u64>,
+    hasher: RandomState,
+    /// When a full table was last logged.
+    reported: Mutex<Option<Instant>>,
+}
+
+impl AddressLimiter {
+    /// Allows `burst` messages at once, then one more per `refill`.
+    pub fn new(burst: u32, refill: Duration) -> Self {
+        Self {
+            buckets: Buckets::new(burst, refill),
+            hasher: RandomState::new(),
+            reported: Mutex::default(),
+        }
+    }
+
+    /// Counts one message to `address`, in the form it is stored in, and says whether it may go.
+    /// A refusal is never shown to a client, so a full table, which refuses every new address, is
+    /// logged: nothing else would tell the operator.
+    pub fn check(&self, address: &str) -> bool {
+        let (allowed, report) = self.count_at(address, Instant::now());
+        if report {
+            tracing::warn!("too many addresses are asking for mail, some get none for now");
+        }
+        allowed
+    }
+
+    /// Whether the message may go, and whether a full table is to be logged now.
+    fn count_at(&self, address: &str, now: Instant) -> (bool, bool) {
+        if self.check_at(address, now).is_ok() {
+            return (true, false);
+        }
+        if self.buckets.tracked() < MAX_TRACKED {
+            return (false, false);
+        }
+        let mut reported = self.reported.lock().unwrap_or_else(PoisonError::into_inner);
+        let due = reported.is_none_or(|at| now.duration_since(at) >= FULL_REPORT_EVERY);
+        if due {
+            *reported = Some(now);
+        }
+        (false, due)
+    }
+
+    fn check_at(&self, address: &str, now: Instant) -> Result<(), Duration> {
+        self.buckets.check_at(self.hasher.hash_one(address), now)
+    }
+}
+
+impl<K: Hash + Eq> Buckets<K> {
+    fn new(burst: u32, refill: Duration) -> Self {
+        Self {
+            refill,
+            burst: refill * burst,
+            clients: Mutex::default(),
+        }
+    }
+
+    fn tracked(&self) -> usize {
+        let clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
+        clients.len()
+    }
+
+    fn check_at(&self, key: K, now: Instant) -> Result<(), Duration> {
         let mut clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
 
         if clients.len() >= MAX_TRACKED && !clients.contains_key(&key) {
@@ -149,8 +228,43 @@ mod tests {
             limiter.check_at(numbered(n), now).unwrap();
         }
         assert_eq!(limiter.check_at(numbered(MAX_TRACKED), now), Err(REFILL));
-        assert_eq!(limiter.clients.lock().unwrap().len(), MAX_TRACKED);
+        assert_eq!(limiter.buckets.clients.lock().unwrap().len(), MAX_TRACKED);
         assert!(limiter.check_at(numbered(0), now).is_err());
+    }
+
+    #[test]
+    fn each_address_has_its_own_bucket() {
+        let limiter = AddressLimiter::new(2, REFILL);
+        let now = Instant::now();
+        limiter.check_at("ada@example.org", now).unwrap();
+        limiter.check_at("ada@example.org", now).unwrap();
+        assert_eq!(limiter.check_at("ada@example.org", now), Err(REFILL));
+        assert_eq!(limiter.check_at("grace@example.org", now), Ok(()));
+        assert_eq!(limiter.check_at("ada@example.org", now + REFILL), Ok(()));
+    }
+
+    #[test]
+    fn a_full_address_table_is_reported_once_a_minute() {
+        // A refill long enough for the table to stay full through the test.
+        let limiter = AddressLimiter::new(1, FULL_REPORT_EVERY * 10);
+        let now = Instant::now();
+        for n in 0..MAX_TRACKED {
+            let counted = limiter.count_at(&format!("user{n}@example.org"), now);
+            assert_eq!(counted, (true, false));
+        }
+        assert_eq!(limiter.count_at("a@example.org", now), (false, true));
+        let soon = now + Duration::from_secs(5);
+        assert_eq!(limiter.count_at("b@example.org", soon), (false, false));
+        let later = now + FULL_REPORT_EVERY;
+        assert_eq!(limiter.count_at("c@example.org", later), (false, true));
+    }
+
+    #[test]
+    fn an_address_past_its_burst_is_not_a_full_table() {
+        let limiter = AddressLimiter::new(1, REFILL);
+        let now = Instant::now();
+        assert_eq!(limiter.count_at("ada@example.org", now), (true, false));
+        assert_eq!(limiter.count_at("ada@example.org", now), (false, false));
     }
 
     #[test]
@@ -162,6 +276,6 @@ mod tests {
         }
         let later = now + REFILL;
         assert_eq!(limiter.check_at(numbered(MAX_TRACKED), later), Ok(()));
-        assert_eq!(limiter.clients.lock().unwrap().len(), 1);
+        assert_eq!(limiter.buckets.clients.lock().unwrap().len(), 1);
     }
 }

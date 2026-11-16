@@ -1,6 +1,6 @@
 # Cargo workspace
 
-## Target structure
+## Structure
 
 ```
 cadocs/
@@ -13,6 +13,7 @@ cadocs/
 │   ├── cadocs-search/        stemming and indexing (MVP)
 │   ├── cadocs-files/         FileStore trait, local disk, S3 feature (MVP)
 │   ├── cadocs-jobs/          worker and job handlers (MVP)
+│   ├── cadocs-mail/          Mailer trait, the SMTP client and the outbox (ADR 0026)
 │   ├── cadocs-server/        the binary: config, HTTP, WebSocket, embedded assets
 │   └── cadocs-bench/         y-sync load client, dev tool only
 ├── web/                      Vite, Svelte and TipTap front end
@@ -26,13 +27,13 @@ cadocs/
 
 `cadocs-bench` is outside `default-members`, so a plain `cargo build --release` does not build it. Built together, its dependency features would unify into the server's and change the shipped binary. Use `--workspace` for tests and clippy, and `-p` to build it.
 
-The prototype contains `core`, `store`, `collab`, `server` and `bench`, step 10 of the MVP added `jobs`, step 16 `content`, step 17 `files` and step 18 `search`. The others are created when their stage starts, and the split may be reduced if a crate turns out too small to justify itself.
+A new crate comes only when its stage needs it, and the split may shrink if a crate turns out too small to justify itself.
 
 ## Selected crates
 
 Costs are qualitative until measured. "Binary" is the effect on the release binary, "RAM" the effect at run time.
 
-### In the prototype
+### In the server
 
 | Crate | Why | RAM | Binary |
 | --- | --- | --- | --- |
@@ -54,11 +55,12 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `rust-stemmers`, MIT and BSD-3-Clause | Snowball stemmers for the 18 languages a workspace accepts, in `cadocs-search` (ADR 0007). Its `serde` dependency was already in the tree | A stemmer is a function pointer; the work buffer lives for one word | See step 18 in [benchmark notes](notes/benchmark.md) |
 | `tokio` `sync` feature in `cadocs-store` | `Notify`, so a write that adds a job wakes the worker. Already compiled for the other crates | None | None |
 | `zstd` (no default features: no legacy formats, no dictionary builder), MIT and BSD-3-Clause | Revision states, compressed at level 3 in `cadocs-jobs`. Bundles the C library | A compression or decompression context per call, sized to the input, freed after it | See step 19 in [benchmark notes](notes/benchmark.md) |
-| `async_zip` (`tokio` only, no compression features), MIT | Zips of one page and its attachments, exported as they are sent and imported from a scratch file (step 20). Entries are stored: attachments are mostly compressed already, and no `flate2` or `async-compression` comes in. Brings `crc32fast`, `futures-lite`, `pin-project` and `tokio-util` | A 64 KiB pipe per export in progress; an import parses at most a 1 MiB directory, checked before parsing | See step 20 in [benchmark notes](notes/benchmark.md) |
+| `async_zip` (`tokio` only, no compression features), MIT | Zips of one page and its attachments, exported as they are sent and imported from a scratch file. Entries are stored: attachments are mostly compressed already, and no `flate2` or `async-compression` comes in. Brings `crc32fast`, `futures-lite`, `pin-project` and `tokio-util` | A 64 KiB pipe per export in progress; an import parses at most a 1 MiB directory, checked before parsing | See step 20 in [benchmark notes](notes/benchmark.md) |
 | `tokio-util` (`compat`, `io`), `tempfile` in `cadocs-files`, `futures-util` `io` | Bridging async_zip's `futures` traits to tokio, reading a stream into a body, and the anonymous scratch file of an import, in `data/tmp`. `tempfile` was already in the tree | None | Low |
 | `serde_json` in `cadocs-store` | Revision authors stored and read as JSON arrays. Already in the tree | None | None |
 | `rusty-s3` 0.11 (`full`, `rustcrypto`), BSD-2-Clause, with `jiff` and `url` at its own versions. 0.11 parses with `instant-xml`, which replaced the `quick-xml` of 0.8 and its two advisories | S3 signatures and listing parsing, with no I/O of its own (ADR 0020). Only with the `s3` feature | None at rest | With the next row, 2.7 MB in a release binary, and nothing in a default build |
 | `reqwest` (`rustls-tls-native-roots`, `stream`, no default features), MIT or Apache-2.0 | Sends the S3 requests, with rustls and `ring`, the system roots and streamed bodies. Only with the `s3` feature | 1.4 MB of idle RSS once linked, 2.7 MB with S3 in use: the system roots and a pool of at most 2 idle connections (see step 20b in [benchmark notes](notes/benchmark.md)) | See `rusty-s3` |
+| `lettre` 0.11 (`builder`, `smtp-transport`, `tokio1-rustls`, `ring`, `rustls-native-certs`, no default features: no pool, no `hostname`, no `native-tls`), MIT | The SMTP client of `cadocs-mail` (ADR 0026), in every build. Brings rustls with `ring` and the system roots, as `reqwest` does in the S3 build, and `url` with `idna`, `nom`, `email_address`, `email-encoding`, `quoted_printable` (0BSD), `mime`, `httpdate`, `async-trait` | 0.5 MB of idle RSS with mail off, 1.3 MB with a relay set: the system roots are read for each TLS connection, and nothing stays connected (step 28 in [benchmark notes](notes/benchmark.md)) | 1.7 MB |
 | `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
 
 ### Dev tools only
@@ -68,27 +70,21 @@ These never reach the server binary.
 | Crate | Why |
 | --- | --- |
 | `tokio-tungstenite`, `futures-util` | WebSocket client in `cadocs-bench` and in integration tests. Same version as axum's, so it is not compiled twice |
-| `argon2`, `sha2`, `cadocs-content`, `cadocs-search`, `cadocs-core` in `cadocs-bench` | The MVP seed (step 23): the accounts' password hash and session token hashes, and the search index the reindex job would write. The server's own versions and features, so nothing unifies differently. Its few HTTP requests are written by hand over a `TcpStream` instead of bringing an HTTP client |
+| `argon2`, `sha2`, `cadocs-content`, `cadocs-search`, `cadocs-core` in `cadocs-bench` | The MVP seed: the accounts' password hash and session token hashes, and the search index the reindex job would write. The server's own versions and features, so nothing unifies differently. Its few HTTP requests are written by hand over a `TcpStream` instead of bringing an HTTP client |
 | `tower` (`util`) | Calling the router directly in tests |
 | `tempfile` | Temporary databases and data folders in tests |
 | `bytes` | Building file streams in the attachment tests |
 | `axum` (`query`) in `cadocs-files` | The in-memory S3 of the S3 store tests |
+| `cadocs-mail` with its `fake` feature | `FakeRelay`, a plain text SMTP server that keeps what it is sent, for the tests of `cadocs-mail` and of the binary |
 
 `web/` has two npm dev dependencies for the same purpose: `@playwright/test` (Apache-2.0) for the browser tests, and `@types/node` to type-check them. Neither reaches `web/dist`. `svelte` (MIT) is a runtime dependency of the shell, and `@sveltejs/vite-plugin-svelte` (MIT) a build dependency. The shell is about 73 KB of JavaScript, 26 KB compressed, and TipTap stays in a chunk that only a page loads.
 
-The editor (step 14) adds, all MIT except `highlight.js` (BSD-3-Clause): the TipTap block packages it builds from its registry (`@tiptap/extension-heading`, `-blockquote`, `-horizontal-rule`, `-link`, `-list`, already pulled in by `@tiptap/starter-kit`), `@tiptap/suggestion` for the slash menu (it brings `@floating-ui/dom` to place it), and `@tiptap/extension-code-block-lowlight` with `lowlight` and `highlight.js` for code. Only 18 languages are registered (`web/src/editor/code.ts`) instead of `lowlight`'s 37 common ones. The page chunk went from 521 KB to 632 KB, 165 KB to 203 KB compressed. None of this reaches the server's memory: the binary serves it from the embedded files.
-
-Step 15 adds `@tiptap/extension-table` (it brings nothing new: `prosemirror-tables` already came with `@tiptap/pm`) and `@tiptap/extension-details` for toggles, both MIT. Callouts, links to pages and the table of contents are our own nodes, in `web/src/editor/blocks.ts` and `pagelink.ts`. `@tiptap/extension-table-of-contents` was left out: it writes an id onto every heading, which each tab would write into the shared document. The page chunk went to 706 KB, 226 KB compressed.
-
-Step 16 adds a `plugin` node of our own (`blocks.ts`, ADR 0016) and `web/scripts/schema.ts`, which runs the registry under Node through Vite's `runnerImport` to export the schema: nothing new is installed, and `src/editor/schema.ts` is not part of the app.
+The editor adds, all MIT except `highlight.js` (BSD-3-Clause): the TipTap block packages of its registry (most already pulled in by `@tiptap/starter-kit`), `@tiptap/suggestion` for the slash menu (with `@floating-ui/dom`), `@tiptap/extension-code-block-lowlight` with `lowlight` and `highlight.js` (18 languages registered in `web/src/editor/code.ts`), `@tiptap/extension-table` and `@tiptap/extension-details`. Callouts, links to pages, the table of contents and the `plugin` node are our own (`blocks.ts`, `pagelink.ts`). `@tiptap/extension-table-of-contents` was left out: it writes an id onto every heading, which each tab would write into the shared document. The page chunk is about 738 KB, 234 KB compressed (Mail stage), and none of it reaches the server's memory.
 
 ### Planned
 
 | Crate | Stage | Why | Cost note |
 | --- | --- | --- | --- |
-| `tower-http` | MVP | Timeouts, compression, tracing, limited features | Low |
-| `jiff` | MVP | Dates, as in uptime-monitoring | Low without the bundled tz database |
-| `lettre` | V1 | SMTP, optional feature | Only in builds that enable it |
 | `totp-lite` | V1 | TOTP codes | Very low |
 | `openidconnect` or a smaller client | V1 | OIDC, optional feature. To evaluate against a hand-written flow | Pulls an HTTP client |
 
@@ -114,12 +110,9 @@ Fractional indexing, rate limiting, the data folder lock (`std::fs::File::try_lo
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
 opt-level = 3
 ```
 
-These are the settings of uptime-monitoring, plus `panic = "abort"`, which removes unwinding tables. The trade-off: a panic in one task stops the process instead of only that task. For a server whose rooms hold unflushed edits this needs care, so the choice is confirmed or reversed once the panic paths have been reviewed. The prototype keeps the default unwinding until then.
-
-Unwinding is load-bearing today. yrs can panic on crafted frames, and `cadocs-collab` catches that with `catch_unwind` to close one socket instead of losing a room. `panic = "abort"` would turn such a frame into a server crash, so it stays off until yrs is hardened or frames are validated first. This does not cover everything: yrs can also segfault on crafted frames ([ARCHITECTURE.md](ARCHITECTURE.md#limits-accepted-by-design)).
+These are the settings of uptime-monitoring. `panic = "abort"` would drop the unwinding tables, but unwinding is load-bearing: yrs can panic on crafted frames, and `cadocs-collab` catches that with `catch_unwind` to close one socket instead of losing a room. Abort would turn such a frame into a server crash, so it stays off until yrs is hardened or frames are validated first. yrs can also segfault on crafted frames, which no setting covers ([ARCHITECTURE.md](ARCHITECTURE.md#limits-accepted-by-design)).
 
 `[profile.dev.package.yrs]` turns off debug assertions and overflow checks for yrs alone, so tests exercise what the release binary does with crafted frames.

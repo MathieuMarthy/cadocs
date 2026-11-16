@@ -14,8 +14,9 @@ use std::future::Future;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use accounts::{
-    AccountStore, ActiveSession, AdminChanges, Credentials, FirstUser, Membership,
-    NewPasswordReset, NewSession, SessionStanding, UpdateBasis, User, UserChanges, UserRecord,
+    AccountStore, ActiveSession, AdminChanges, CodeAttempt, CodePurpose, Credentials, FirstUser,
+    MAX_CODE_TRIES, Membership, NewEmailCode, NewPasswordReset, NewSession, NewUser,
+    SessionStanding, UpdateBasis, User, UserChanges, UserRecord,
 };
 pub use attachments::{Attachment, AttachmentStore, NewAttachment, UploadTarget};
 pub use jobs::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob};
@@ -80,6 +81,8 @@ pub enum StoreError {
     NotUtf8Path,
     #[error("no such user")]
     UserNotFound,
+    #[error("the code is wrong, used, expired or dead")]
+    WrongCode,
     #[error("this account is disabled")]
     UserDisabled,
     #[error("no such workspace")]

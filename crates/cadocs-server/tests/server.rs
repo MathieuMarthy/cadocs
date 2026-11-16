@@ -22,14 +22,15 @@ use cadocs_server::rate_limit::RateLimiter;
 use cadocs_server::session::{csrf_token, token_hash};
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
-    AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, Credentials,
-    DateCursor, DocEdit, DocStore, FirstUser, Grant, IndexTarget, Invitation, InvitationPreview,
-    InvitedUser, Member, Membership, MovedPage, NewAttachment, NewGrant, NewInvitation, NewPage,
-    NewPasswordReset, NewRevision, NewSession, NewSpace, NewWorkspace, PageCrumb, PageIndex,
-    PageMove, PageRecord, PageSite, PageStore, Revision, RevisionStore, RevisionSummary, SearchHit,
-    SearchStore, SessionStanding, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore,
-    StoreError, StoredDoc, StoredUpdate, UpdateBasis, UploadTarget, UserChanges, UserRecord,
-    Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
+    AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, CodeAttempt,
+    Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant, IndexTarget, Invitation,
+    InvitationPreview, InvitedUser, Member, Membership, MovedPage, NewAttachment, NewEmailCode,
+    NewGrant, NewInvitation, NewPage, NewPasswordReset, NewRevision, NewSession, NewSpace, NewUser,
+    NewWorkspace, PageCrumb, PageIndex, PageMove, PageRecord, PageSite, PageStore, Revision,
+    RevisionStore, RevisionSummary, SearchHit, SearchStore, SessionStanding, Snapshot, Space,
+    SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, UpdateBasis,
+    UploadTarget, UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach,
+    WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -635,6 +636,50 @@ impl AccountStore for FlakyStore {
         self.inner
             .use_password_reset(token_hash, password_hash, now)
             .await
+    }
+
+    async fn create_email_code(&self, code: &NewEmailCode) -> Result<(), StoreError> {
+        self.inner.create_email_code(code).await
+    }
+
+    async fn register_user(
+        &self,
+        user: &NewUser,
+        attempt: &CodeAttempt<'_>,
+        session: &NewSession,
+    ) -> Result<(), StoreError> {
+        self.inner.register_user(user, attempt, session).await
+    }
+
+    async fn create_session_with_code(
+        &self,
+        session: &NewSession,
+        checked_hash: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<bool, StoreError> {
+        self.inner
+            .create_session_with_code(session, checked_hash, attempt)
+            .await
+    }
+
+    async fn enable_email_2fa(
+        &self,
+        user_id: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<(), StoreError> {
+        self.inner.enable_email_2fa(user_id, attempt).await
+    }
+
+    async fn change_email(
+        &self,
+        user_id: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<(), StoreError> {
+        self.inner.change_email(user_id, attempt).await
+    }
+
+    async fn email_2fa_users(&self) -> Result<u64, StoreError> {
+        self.inner.email_2fa_users().await
     }
 }
 

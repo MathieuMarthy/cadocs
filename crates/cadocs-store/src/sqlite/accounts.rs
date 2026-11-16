@@ -6,14 +6,18 @@ use sqlx::{AssertSqlSafe, Row, SqliteConnection, SqliteExecutor};
 
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
-    AccountStore, ActiveSession, AdminChanges, Credentials, FirstUser, Membership,
-    NewPasswordReset, NewSession, SessionStanding, StoreError, UpdateBasis, User, UserChanges,
-    UserRecord,
+    AccountStore, ActiveSession, AdminChanges, CodeAttempt, Credentials, FirstUser, MAX_CODE_TRIES,
+    Membership, NewEmailCode, NewPasswordReset, NewSession, NewUser, SessionStanding, StoreError,
+    UpdateBasis, User, UserChanges, UserRecord,
 };
 
 pub(super) const INSERT_SESSION: &str =
     "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at)
      VALUES (?1, ?2, ?3, ?3, ?4)";
+
+/// A code sent to the address of user `?1`, `?2`, was used at `?3`.
+const VERIFY_ADDRESS: &str = "UPDATE users SET email_verified_at = coalesce(email_verified_at, ?3)
+     WHERE id = ?1 AND email = ?2";
 
 const DELETE_RESETS: &str = "DELETE FROM password_resets WHERE user_id = ?1";
 
@@ -27,7 +31,7 @@ const USABLE_RESET: &str = "SELECT r.user_id FROM password_resets r
      WHERE r.token_hash = ?1 AND r.expires_at > ?2 AND u.disabled_at IS NULL";
 
 const SELECT_RECORD: &str =
-    "SELECT id, email, name, is_instance_admin, disabled_at, created_at FROM users";
+    "SELECT id, email, name, is_instance_admin, email_2fa, disabled_at, created_at FROM users";
 
 fn record(row: &SqliteRow) -> UserRecord {
     UserRecord {
@@ -95,12 +99,46 @@ async fn revoke_access(tx: &mut SqliteConnection, user_id: &str) -> Result<(), S
     Ok(())
 }
 
+/// Whether `attempt` is the code of its purpose and address, if that code still works. A right
+/// code is deleted. A wrong one counts a try, and the last try deletes it.
+async fn use_code(
+    tx: &mut SqliteConnection,
+    attempt: &CodeAttempt<'_>,
+) -> Result<bool, StoreError> {
+    let purpose = attempt.purpose.as_str();
+    let stored: Option<(String, i64)> = sqlx::query_as(
+        "SELECT code_hash, tries FROM email_codes
+         WHERE purpose = ?1 AND email = ?2 AND expires_at > ?3",
+    )
+    .bind(purpose)
+    .bind(attempt.email)
+    .bind(attempt.now)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((code_hash, tries)) = stored else {
+        return Ok(false);
+    };
+    let right = code_hash == attempt.code_hash;
+    let statement = if right || tries + 1 >= MAX_CODE_TRIES {
+        "DELETE FROM email_codes WHERE purpose = ?1 AND email = ?2"
+    } else {
+        "UPDATE email_codes SET tries = tries + 1 WHERE purpose = ?1 AND email = ?2"
+    };
+    sqlx::query(statement)
+        .bind(purpose)
+        .bind(attempt.email)
+        .execute(&mut *tx)
+        .await?;
+    Ok(right)
+}
+
 fn user(row: &SqliteRow) -> User {
     User {
         id: row.get("id"),
         email: row.get("email"),
         name: row.get("name"),
         is_instance_admin: row.get::<i64, _>("is_instance_admin") != 0,
+        email_2fa: row.get::<i64, _>("email_2fa") != 0,
     }
 }
 
@@ -170,7 +208,7 @@ impl AccountStore for SqliteStore {
 
     async fn credentials(&self, email: &str) -> Result<Option<Credentials>, StoreError> {
         let row = sqlx::query(
-            "SELECT id, email, name, is_instance_admin, password_hash, disabled_at
+            "SELECT id, email, name, is_instance_admin, email_2fa, password_hash, disabled_at
              FROM users WHERE email = ?1",
         )
         .bind(email)
@@ -218,7 +256,7 @@ impl AccountStore for SqliteStore {
         now: i64,
     ) -> Result<Option<ActiveSession>, StoreError> {
         let row = sqlx::query(
-            "SELECT u.id, u.email, u.name, u.is_instance_admin, s.last_seen_at
+            "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, s.last_seen_at
              FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_hash = ?1 AND s.expires_at > ?2 AND u.disabled_at IS NULL",
         )
@@ -299,15 +337,16 @@ impl AccountStore for SqliteStore {
         .bind(user_id)
         .fetch_one(&mut *tx)
         .await?;
-        let stored: Option<String> =
-            sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?1")
+        let stored: Option<(Option<String>, String)> =
+            sqlx::query_as("SELECT password_hash, email FROM users WHERE id = ?1")
                 .bind(user_id)
                 .fetch_optional(&mut *tx)
-                .await?
-                .flatten();
+                .await?;
+        let (stored, old_email) = stored.unzip();
         let password_moved = basis
             .checked_hash
-            .is_some_and(|checked| stored.as_deref() != Some(checked));
+            .is_some_and(|checked| stored.flatten().as_deref() != Some(checked));
+        let email_moved = changes.email.is_some() && changes.email != old_email;
         if !session_alive || password_moved {
             return Err(StoreError::StaleCredentials);
         }
@@ -317,6 +356,9 @@ impl AccountStore for SqliteStore {
                  name = COALESCE(?2, name),
                  email = COALESCE(?3, email),
                  password_hash = COALESCE(?4, password_hash),
+                 email_2fa = CASE WHEN ?6 OR ?3 <> email THEN 0 ELSE email_2fa END,
+                 email_verified_at = CASE WHEN ?3 <> email THEN NULL
+                                          ELSE email_verified_at END,
                  updated_at = ?5
              WHERE id = ?1",
         )
@@ -325,6 +367,7 @@ impl AccountStore for SqliteStore {
         .bind(&changes.email)
         .bind(&changes.password_hash)
         .bind(now)
+        .bind(changes.email_2fa_off)
         .execute(&mut *tx)
         .await
         .map_err(|error| match error.as_database_error() {
@@ -338,6 +381,9 @@ impl AccountStore for SqliteStore {
                 .bind(basis.session)
                 .execute(&mut *tx)
                 .await?;
+        }
+        // A link mailed to the old address must not reach the account any more.
+        if changes.password_hash.is_some() || email_moved {
             sqlx::query(DELETE_RESETS)
                 .bind(user_id)
                 .execute(&mut *tx)
@@ -530,5 +576,205 @@ impl AccountStore for SqliteStore {
         revoke_access(&mut tx, &user_id).await?;
         tx.commit().await?;
         Ok(true)
+    }
+
+    async fn create_email_code(&self, code: &NewEmailCode) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        sqlx::query("DELETE FROM email_codes WHERE expires_at <= ?1")
+            .bind(code.now)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO email_codes (purpose, email, code_hash, expires_at, created_at, user_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (purpose, email) DO UPDATE SET
+                 code_hash = excluded.code_hash, tries = 0, user_id = excluded.user_id,
+                 expires_at = excluded.expires_at, created_at = excluded.created_at",
+        )
+        .bind(code.purpose.as_str())
+        .bind(&code.email)
+        .bind(&code.code_hash)
+        .bind(code.expires_at)
+        .bind(code.now)
+        .bind(&code.user_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn register_user(
+        &self,
+        user: &NewUser,
+        attempt: &CodeAttempt<'_>,
+        session: &NewSession,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        // First-run setup makes the first account, never a registration.
+        let set_up: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users)")
+            .fetch_one(&mut *tx)
+            .await?;
+        if !set_up {
+            return Err(StoreError::WrongCode);
+        }
+        if !use_code(&mut tx, attempt).await? {
+            // The try it counted stays.
+            tx.commit().await?;
+            return Err(StoreError::WrongCode);
+        }
+        sqlx::query(
+            "INSERT INTO users (id, email, name, password_hash, email_verified_at,
+                                created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?5)",
+        )
+        .bind(&user.id)
+        .bind(&user.email)
+        .bind(&user.name)
+        .bind(&user.password_hash)
+        .bind(session.now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| match error.as_database_error() {
+            // Rolled back with the rest, so the code stays.
+            Some(database) if database.is_unique_violation() => StoreError::EmailTaken,
+            _ => error.into(),
+        })?;
+        sqlx::query(INSERT_SESSION)
+            .bind(&session.token_hash)
+            .bind(&session.user_id)
+            .bind(session.now)
+            .bind(session.expires_at)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn create_session_with_code(
+        &self,
+        session: &NewSession,
+        checked_hash: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<bool, StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        // What `create_session` checks, and the address the code went to.
+        let still: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM users WHERE id = ?1 AND password_hash = ?2
+                                                  AND disabled_at IS NULL)",
+        )
+        .bind(&session.user_id)
+        .bind(checked_hash)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !still {
+            return Ok(false);
+        }
+        if !use_code(&mut tx, attempt).await? {
+            // The try it counted stays.
+            tx.commit().await?;
+            return Err(StoreError::WrongCode);
+        }
+        sqlx::query(VERIFY_ADDRESS)
+            .bind(&session.user_id)
+            .bind(attempt.email)
+            .bind(session.now)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(INSERT_SESSION)
+            .bind(&session.token_hash)
+            .bind(&session.user_id)
+            .bind(session.now)
+            .bind(session.expires_at)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    async fn enable_email_2fa(
+        &self,
+        user_id: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        let right = use_code(&mut tx, attempt).await?;
+        let changed = if right {
+            sqlx::query(
+                "UPDATE users SET email_2fa = 1, updated_at = ?3,
+                     email_verified_at = coalesce(email_verified_at, ?3)
+                 WHERE id = ?1 AND email = ?2",
+            )
+            .bind(user_id)
+            .bind(attempt.email)
+            .bind(attempt.now)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+        } else {
+            0
+        };
+        // A wrong try stays counted, and a right code for an old address stays used.
+        tx.commit().await?;
+        if changed == 1 {
+            Ok(())
+        } else {
+            Err(StoreError::WrongCode)
+        }
+    }
+
+    async fn change_email(
+        &self,
+        user_id: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        // A code another account asked for is none of this one's to guess.
+        let owner: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT user_id FROM email_codes
+             WHERE purpose = ?1 AND email = ?2 AND expires_at > ?3",
+        )
+        .bind(attempt.purpose.as_str())
+        .bind(attempt.email)
+        .bind(attempt.now)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if owner.flatten().as_deref() != Some(user_id) {
+            return Err(StoreError::WrongCode);
+        }
+        if !use_code(&mut tx, attempt).await? {
+            // The try it counted stays.
+            tx.commit().await?;
+            return Err(StoreError::WrongCode);
+        }
+        sqlx::query(
+            "UPDATE users SET email = ?2, email_verified_at = ?3, updated_at = ?3
+             WHERE id = ?1",
+        )
+        .bind(user_id)
+        .bind(attempt.email)
+        .bind(attempt.now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| match error.as_database_error() {
+            // Rolled back with the rest, so the code stays.
+            Some(database) if database.is_unique_violation() => StoreError::EmailTaken,
+            _ => error.into(),
+        })?;
+        // A link mailed to the old address must not reach the account any more.
+        sqlx::query(DELETE_RESETS)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn email_2fa_users(&self) -> Result<u64, StoreError> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM users WHERE email_2fa = 1 AND disabled_at IS NULL",
+        )
+        .fetch_one(&self.reader)
+        .await?;
+        Ok(count as u64)
     }
 }

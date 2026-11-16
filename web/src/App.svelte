@@ -3,8 +3,10 @@
   import Account from "./routes/Account.svelte";
   import History from "./routes/History.svelte";
   import Admin from "./routes/Admin.svelte";
+  import ForgotPassword from "./routes/ForgotPassword.svelte";
   import Invite from "./routes/Invite.svelte";
   import Login from "./routes/Login.svelte";
+  import Register from "./routes/Register.svelte";
   import ResetPassword from "./routes/ResetPassword.svelte";
   import Search from "./routes/Search.svelte";
   import Setup from "./routes/Setup.svelte";
@@ -21,7 +23,7 @@
 
   type View =
     | { name: "redirect"; to: string }
-    | { name: "login" | "account" | "admin" | "home" | "not-found" }
+    | { name: "login" | "forgot" | "register" | "account" | "admin" | "home" | "not-found" }
     | { name: "setup"; code: string }
     | { name: "invite" | "reset"; token: string }
     | { name: "workspace" | "settings" | "search"; workspace: WorkspaceRow }
@@ -49,12 +51,15 @@
     const session = app.session;
     if (!session) {
       if (first === "login") return { name: "login" };
+      if (first === "forgot-password" && !second) return { name: "forgot" };
+      if (first === "register" && !second) return { name: "register" };
       const here = path + search;
       const next = here === "/" || first === "setup" ? "" : `?next=${encodeURIComponent(here)}`;
       return { name: "redirect", to: `/login${next}` };
     }
 
-    if (first === "login" || first === "setup") {
+    const outside = ["login", "setup", "forgot-password", "register"];
+    if (first && outside.includes(first)) {
       return { name: "redirect", to: safeNext(query.get("next")) };
     }
     if (!first) {
@@ -105,6 +110,10 @@
   <Setup code={view.code} />
 {:else if view.name === "login"}
   <Login />
+{:else if view.name === "forgot"}
+  <ForgotPassword />
+{:else if view.name === "register"}
+  <Register />
 {:else if view.name === "invite"}
   {#key view.token}<Invite token={view.token} />{/key}
 {:else if view.name === "reset"}

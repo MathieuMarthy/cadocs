@@ -1,6 +1,6 @@
 # ADR 0013: Account flows work without email
 
-Status: accepted
+Status: accepted. Amended by ADR 0026: with a mail relay, registration opens and the flows below gain mail.
 
 ## Context
 

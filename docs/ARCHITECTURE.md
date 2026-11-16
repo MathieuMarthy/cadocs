@@ -128,7 +128,7 @@ The flush queues the job in its own transaction, `REINDEX_DELAY` (5 seconds) ahe
 
 ## RAM budget
 
-These figures are design estimates. The prototype's measurements are in [Measured results](#measured-results), and they take precedence.
+These figures are design estimates. The measurements in [Measured results](#measured-results) take precedence.
 
 | Component | Estimate | How the budget is held |
 | --- | --- | --- |
@@ -219,7 +219,7 @@ Costs, from `bench/rss.sh extras` on glibc, outside the scenario:
 | Opening 100 documents with a 2,000-row log instead of a compacted one | 3.0 MB more in total | not estimated |
 
 - A socket's cost is mostly the write buffer, which keeps the capacity of the SyncStep2 it sent. It grows with the document, as a 4 MiB document showed in step 3.
-- A loaded document costs far more than estimated: each `yrs` block is a heap structure, and 2,000 edits make thousands of them. The cap of `CADOCS_MAX_ROOMS` (256) would therefore reach about 140 MB with this document, which is above the MVP's 100 MB. The MVP's scenario has 30 pages, so it holds, but a larger active set needs a lower cap.
+- A loaded document costs far more than estimated: each `yrs` block is a heap structure, and 2,000 edits make thousands of them. 256 such rooms would reach about 140 MB, so the room memory budget, not a room count, bounds them (ADR 0022).
 - `load` holding the whole log is not a problem at this size, so `DocStore` stays as it is.
 
 Not measured: documents much larger than 20 KB, peaks on `aarch64`, and variance beyond the three runs of this step. glibc agreed within 0.4 MB on every measure the trim does not touch, while mimalloc moved by up to 8 MB over two runs.

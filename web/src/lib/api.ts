@@ -5,6 +5,8 @@ export interface User {
   email: string;
   name: string;
   is_instance_admin: boolean;
+  /** A login needs a code by mail after the password (ADR 0026). */
+  email_2fa: boolean;
 }
 
 export interface Workspace {

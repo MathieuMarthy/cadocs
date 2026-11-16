@@ -52,6 +52,27 @@ export async function refreshSession() {
   signIn(await api<Session>("GET", "/session"));
 }
 
+/** What a mail relay turns on (ADR 0026). */
+export interface MailFeatures {
+  /** The instance sends mail: a forgotten password comes back by mail. */
+  mail: boolean;
+  /** Anyone can make an account. */
+  registration: boolean;
+}
+
+/**
+ * Read when a screen needs it: a person who logs out reaches login with no new boot. A failed
+ * read counts as no mail.
+ */
+export async function mailFeatures(): Promise<MailFeatures> {
+  try {
+    const state = await api<{ mail?: boolean; registration?: boolean }>("GET", "/auth/setup");
+    return { mail: state.mail === true, registration: state.registration === true };
+  } catch {
+    return { mail: false, registration: false };
+  }
+}
+
 export async function boot() {
   app.phase = "loading";
   try {

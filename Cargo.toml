@@ -9,6 +9,7 @@ default-members = [
     "crates/cadocs-core",
     "crates/cadocs-files",
     "crates/cadocs-jobs",
+    "crates/cadocs-mail",
     "crates/cadocs-search",
     "crates/cadocs-server",
     "crates/cadocs-store",
@@ -33,10 +34,14 @@ cadocs-content = { path = "crates/cadocs-content" }
 cadocs-core = { path = "crates/cadocs-core" }
 cadocs-files = { path = "crates/cadocs-files" }
 cadocs-jobs = { path = "crates/cadocs-jobs" }
+cadocs-mail = { path = "crates/cadocs-mail" }
 cadocs-search = { path = "crates/cadocs-search" }
 cadocs-store = { path = "crates/cadocs-store" }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 getrandom = "0.4"
+# SMTP to the operator's relay (ADR 0026). No pool: a connection per message, none at idle.
+# rustls with `ring` and the system roots, as `reqwest` has them in the S3 build.
+lettre = { version = "0.11", default-features = false, features = ["builder", "ring", "rustls-native-certs", "smtp-transport", "tokio1-rustls"] }
 percent-encoding = { version = "2", default-features = false, features = ["std"] }
 # Timestamps for S3 signatures and listings: the version `rusty-s3` takes, so no second copy.
 jiff = { version = "0.2", default-features = false, features = ["std"] }

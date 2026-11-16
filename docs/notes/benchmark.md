@@ -1,22 +1,52 @@
 # Benchmark
 
-What a change to `cadocs-bench` or a RAM measure must know.
+What a change to `cadocs-bench` or a RAM measure must know. Scenarios and results are in [ARCHITECTURE.md](../ARCHITECTURE.md#what-is-measured-and-how).
 
-- **Benchmark:** the scenario and go or no-go rule in `docs/ARCHITECTURE.md` are fixed. Do not change them to make a number pass. Stage 0 ended on a go, after ADR 0015 added `malloc_trim` on unload. A loaded document costs about 530 KiB, 10 to 15 times its encoded size, so 256 rooms would pass 100 MB: the MVP must keep that in mind when it sets `CADOCS_MAX_ROOMS`. `cadocs-bench seed` also makes the accounts behind `session_token(i)`, all with `BENCH_PASSWORD`, and needs an empty database. `cadocs-bench` is outside `default-members`: `--workspace` covers it, and building it with the server changes the server's features. glibc's in-use bytes need a preload probe, because `ptrace_scope` blocks `gdb -p`.
-- **Step 10:** the job worker costs about 0.1 MB of idle RSS: 8.97 MB against 8.86 MB, the mean of three runs after 45 seconds on an empty database, with the same thread count. The binary grows by 89 KB. Step 9 was measured on its own branch: measure again after a merge.
-- **Step 17:** attachments cost about 0.6 MB of idle RSS: 9.50 MB against 8.88 MB on the commit before, the mean of three runs after 45 seconds on an empty database, side by side. Anonymous memory grew by 0.2 MB (1.52 against 1.30), so most of it is the larger binary, which grew by 205 KB. The file store holds nothing at idle; the third recurring job runs once at start.
-- **Step 18:** search costs about 0.4 MB of idle RSS: 9.95 MB against 9.56 MB on the commit before, the mean of three runs after 45 seconds on an empty database, side by side. Anonymous memory grew by 0.15 MB (1.67 against 1.53), the rest is the binary, which grew by 499 KB: `cadocs-content` enters it with the indexing job, and `rust-stemmers` brings 18 stemmers. A page load costs nothing more; the reindex runs on the reader outside a room, 5 seconds after an edit. Step 23 must seed `page_text` for its 10,000 pages, or let the reindex jobs run before it measures: the migration and every flush queue them. `cadocs-bench seed` writes documents with no job, so it needs a way to queue them.
-- **Step 19:** revisions cost about 0.16 MB of idle RSS: 9.90 MB against 9.74 MB on the commit before, the mean of three runs after 45 seconds on an empty database, side by side. Anonymous memory grew by 0.08 MB (1.76 against 1.68), the rest is the binary, which grew by 1.0 MB: `zstd` bundles its C library. The thinning job recurs with the others. A revision job reads the document through the reader, and decoding a revision (job, view or restore) takes a turn of `CADOCS_DOC_READS`, so neither adds its own bound. Step 23 should measure a burst of revision views on a large page.
-- **Step 20:** export and import cost about 0.6 MB of idle RSS: 10.65 MB against 10.06 MB on the commit before, the mean of three runs after 45 seconds on an empty database, side by side. Anonymous memory grew by 0.09 MB (1.86 against 1.77), the rest is the binary, which grew by 732 KB (`async_zip`, `tokio-util`, the routes). Nothing runs at idle; an export holds a 64 KiB pipe while it streams. Run both binaries from fresh copies in the same folder: a first try with the old one fresh from its build and the new one cached by the end-to-end run read 7.7 against 10.6 MB, an artefact of the page cache.
-- **Side-by-side builds:** build the commit before in a worktree with its own `CARGO_TARGET_DIR`. Sharing `target/` leaves its workspace crates there, newer than the sources, so the next `cargo build --release` takes them as fresh and fails or links old code (step 19).
-- **Step 20b:** a default build is unchanged: `cargo tree` shows no `reqwest`, `rusty-s3`, `rustls` or `jiff` in it. With the `s3` feature the release binary grows from 8.64 MB to 11.33 MB, without `web/dist`. Idle RSS after 45 seconds on an empty database, three runs each, in KiB: default build 10384, 10508, 10540 (mean 10.7 MB); S3 build on local disk 11844, 11908, 11832 (12.1 MB); S3 build on MinIO 13244, 12952, 12964 (13.4 MB). So the S3 build costs 1.4 MB unused and 2.7 MB in use, mostly rustls and the system roots. Measured in the `rust:1` container on the dev machine, with MinIO on the same host.
-- **Steps 20c and 20d:** `bench/rss.sh run`, one run each, on `e2dd4fe` (before steps 19a to 20d) and on this branch, the same day, in the same `rust:1` container on the dev machine, so only the comparison counts, not the levels against `docs/ARCHITECTURE.md`. glibc, RSS in KiB, before then after: idle 13012 / 13784, 10 documents 20676 / 21164, after unload 16272 / 16836, idle 14752 / 14700, 100 documents 79032 / 79052, after unload 16448 / 16628. Every target holds. RAM did not drop and was not expected to: compression saves disk, the budget bounds RAM. The +0.5 MB on the small rows is one run each, unexplained, maybe noise. With the first default of `CADOCS_ROOM_MEMORY_MB`, 64, the 100-document row failed: the 189th of 200 clients got `503` around the 94th room, the estimate being about 670 KB a room for about 640 KB measured. The default became 72, from the 100 MB target less about 15 MB idle and 12 MB for 200 sockets; the scenario did not change. Disk, 100 seeded documents: snapshots 3.69 MB before, 1.13 MB after (3.3 times smaller), the uncompressed log 1.97 MB both, `cadocs.db` 8.65 MB before, 6.04 MB after (30 % smaller).
-- **Reading the steps 20c and 20d run:** one run is about 1 to 2 MB of noise: idle moved from 13.0 to 14.8 MB within the same baseline run. The +0.7 MB on the first idle row is gone at the second (14700 against 14752), so it is not a lasting cost; a likely cause, not measured, is the maintenance job running once at start, where `PRAGMA optimize` fills a connection's page cache. A loaded room costs about 640 KiB of anonymous memory with its sockets ((70040 - 5880) / 100); the estimate gives about 670 KiB, 5 % above, on the safe side. 100 rooms stay under the 72 MiB budget, so the budget refuses nothing in this scenario: it bounds large documents, it saves nothing. With these documents it caps at about 110 rooms, about 85 MB of RSS. Unload returns to idle plus about 2 MB on both sides. The lower peak on glibc (80260 against 82564) is noise: `glibc-arena2` moves the other way. Three runs a side would settle the gaps under 1 MB.
-- **Step 23 (MVP scenario):** `bench/rss.sh mvp`, about 17 minutes, results in [MVP results](../ARCHITECTURE.md#mvp-results). `cadocs-bench` gained `--pages`, `--users`, `--fanout` and `--index` on `seed`, `--users` and `--events` on `load`, and the `latency` and `logins` commands, which speak HTTP by hand (`http.rs`). Things a later run must know:
-  - **The seed drains the job queue.** `append_updates` queues a reindex and a revision per page, so seeded databases held them since step 19, and every server started on one ran them during what it measured. The stage 0 runs of steps 20c and 20d had 200 such jobs on 100 documents, which likely explains part of their higher idle (13 to 15 MB against 7.5). The seed now finishes every job at the end: seeded pages have no revision, and are indexed only with `--index`.
-  - **The generator panicked on some seeds** (330 is the first): backspaces can empty a paragraph that later gets a word inserted. Seeds that never empty one, such as 1 to 100, keep their exact bytes.
-  - **CPU pinning:** this shell's allowed CPUs changed during a run (from 0-7 to 4-7), and `taskset -c 0` then failed. `start_server` pins to the first allowed CPU at each start. The load tool is not pinned.
-  - **A search that ends with its last word is a prefix search** (`Analyzer::query`), so `latency` sends `q=<word>%20` and checks the hit count: `q=45` alone matched 111 titles.
-  - **Login peaks:** the 41 MB that stayed were the hash blocks in the arenas of blocking threads. Step 23a fixed the mmap threshold (ADR 0023) and ran `mvp` and `run` again, and both on the commit before, the same day: the numbers are in the ADR.
-  - **Not measured:** a burst of revision views on a large page (seeded pages have no revision), a Raspberry Pi 4 or a 1 vCPU VPS, variance over several runs, and the snapshot compression ratio beyond step 20c's (3.3 times on 100 seeded documents).
-- **Step 23a (mmap threshold):** compare only runs pinned to the same kind of core. This machine's shell was limited to CPUs 4 to 7, the efficiency cores (3.5 GHz against 4.7), and `start_server` pins to the first allowed one, so a run's latency depends on what the shell got that day: a search matching every page took 16 ms at p95 in step 23 and 30 ms in step 23a, on both servers. The stage 0 rows after unload are higher than in stage 0 (20 to 22 MB against 14), on the commit before step 23a too, so that drift comes from earlier steps, not the threshold. Not measured: what the threshold does to a document larger than 4 MiB when it loads.
+## Rules
+
+- **The scenarios are fixed.** Do not change them to make a number pass: a change needs an ADR, and old results are measured again.
+- **Compare side by side.** Build the commit before in a worktree with its own `CARGO_TARGET_DIR`: a shared `target/` keeps its workspace crates, newer than the sources, and the next release build links old code. Run both binaries from fresh copies in the same folder, or the page cache skews them (once 7.7 against 10.6 MB). For a step's idle cost: three runs each, 45 seconds after start, on an empty database.
+- **Noise.** One `bench/rss.sh run` moves by 1 to 2 MB. Three runs a side settle gaps under 1 MB.
+- **CPU.** `start_server` pins each server to the first CPU the shell may use, which can change during a run (once from 0-7 to 4-7, the slower efficiency cores here). Latency only compares between runs on the same kind of core: a search matching every page took 16 ms at p95 on one, 30 ms on the other. The load tool is not pinned.
+- **Probes.** glibc's in-use bytes need a preload probe, since `ptrace_scope` blocks `gdb -p`.
+
+## `cadocs-bench`
+
+- Outside `default-members`: `--workspace` covers it, and building it with the server would change the server's features.
+- `seed` needs an empty database, makes the accounts behind `session_token(i)` (all `BENCH_PASSWORD`), and drains the job queue at the end: `append_updates` queues a reindex and a revision per page, which used to run during measures (likely part of the 13 to 15 MB idle of steps 20c and 20d). Seeded pages have no revision, and are indexed only with `--index`.
+- The generator panics on some seeds (330 is the first): backspaces can empty a paragraph that later gets a word. Seeds 1 to 100 are safe and keep their exact bytes.
+- A search that ends with its last word is a prefix search (`Analyzer::query`), so `latency` sends `q=<word>%20` and checks the hit count.
+- `latency` and `logins` speak HTTP by hand (`http.rs`).
+
+## Costs per step
+
+Idle RSS against the commit before, three runs each unless stated. Binary sizes include `web/dist` from step 28.
+
+| Step | Idle RSS | Binary | Where it goes |
+| --- | --- | --- | --- |
+| 10, jobs | +0.1 MB | +89 KB | The worker |
+| 17, attachments | +0.6 MB | +205 KB | Mostly the binary; anonymous +0.2 MB |
+| 18, search | +0.4 MB | +499 KB | `cadocs-content` and 18 stemmers enter the binary |
+| 19, revisions | +0.16 MB | +1.0 MB | `zstd` bundles its C library |
+| 20, export and import | +0.6 MB | +732 KB | `async_zip`, `tokio-util`; an export holds a 64 KiB pipe |
+| 20b, S3 feature | +1.4 MB unused, +2.7 MB in use | 8.64 → 11.33 MB | rustls and the system roots; a default build has none of it |
+| 20c, 20d | no lasting change | | Compression saves disk (snapshots 3.3 times smaller, `cadocs.db` 30 %), the budget bounds RAM |
+| 28, mail relay | +0.5 MB mail off, +1.3 MB with a relay | 10.78 → 12.48 MB | `lettre` and rustls; the start check reads the system roots |
+| 29, outbox | none measurable | +65 KB | One task and an empty channel |
+
+## Measures
+
+- **Room cost.** A loaded benchmark document costs about 530 KiB, 10 to 15 times its encoded size (stage 0), and about 640 KiB of anonymous memory with its two sockets (steps 20c and 20d). `Room::estimate` gives about 670 KiB, on the safe side. The default `CADOCS_ROOM_MEMORY_MB` of 72 (the 100 MB target less about 15 MB idle and 12 MB for 200 sockets) caps such rooms at about 110, about 85 MB of RSS. The first default, 64, failed the 100-document row.
+- **Login peaks.** The 41 MB left after step 23 were hash blocks in the arenas of blocking threads. ADR 0023 fixed the mmap threshold, with its numbers.
+- **After unload.** The stage 0 rows after unload read 20 to 22 MB since the MVP, against 14 in stage 0, from steps before 23a.
+- **Mail stage exit** (`bench/rss.sh mvp`, mail off, RSS in KiB): idle 11276, 30 users 32700, unloaded 19188, after three login peaks 13260, 256 rooms 20232. `bench/rss.sh run`: idle 11516, 100 documents 79756. Every MVP target holds.
+
+## Not measured
+
+- A Raspberry Pi 4 or 1 vCPU VPS, which the MVP latency criterion needs.
+- A burst of revision views on a large page (seeded pages have no revision), and the pause of a restore on one.
+- The recheck cost of access changes at `CADOCS_MAX_SOCKETS`, and the scan of `pages` when a user is deleted.
+- The room factor on documents of other sizes, and a document over 4 MiB with the fixed mmap threshold.
+- An idle room with no socket, waiting to unload.
+- Memory while mail waits in the outbox (at most 64 messages under 1 KB), a relay answering over TLS, a burst of messages.
+- Variance over several runs.

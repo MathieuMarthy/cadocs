@@ -22,6 +22,8 @@ pub struct User {
     pub email: String,
     pub name: String,
     pub is_instance_admin: bool,
+    /// Whether a login needs a code by mail after the password (ADR 0026).
+    pub email_2fa: bool,
 }
 
 /// An account as an instance admin sees it.
@@ -39,6 +41,14 @@ pub struct Credentials {
     pub user: User,
     pub password_hash: Option<String>,
     pub disabled: bool,
+}
+
+impl Credentials {
+    /// Whether a login needs a code by mail, given whether the instance sends any. Without a
+    /// relay the factor is not asked (ADR 0026).
+    pub fn needs_code(&self, mail: bool) -> bool {
+        mail && self.user.email_2fa
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +89,8 @@ pub struct UserChanges {
     pub name: Option<String>,
     pub email: Option<String>,
     pub password_hash: Option<String>,
+    /// Only to turn the factor off: turning it on needs a code (`enable_email_2fa`).
+    pub email_2fa_off: bool,
 }
 
 /// Fields left to `None` keep their value.
@@ -96,6 +108,61 @@ pub struct NewPasswordReset {
     pub created_by: Option<String>,
     pub now: i64,
     pub expires_at: i64,
+}
+
+/// The account a registration makes: no workspace, no instance role, a verified address.
+#[derive(Debug, Clone)]
+pub struct NewUser {
+    pub id: String,
+    pub email: String,
+    pub name: String,
+    pub password_hash: String,
+}
+
+/// Wrong tries that kill a code (ADR 0026).
+pub const MAX_CODE_TRIES: i64 = 5;
+
+/// What a code sent by mail proves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodePurpose {
+    Register,
+    /// The second factor of a login.
+    Login,
+    /// That the account's holder reads an address: its own, to turn the second factor on, or a
+    /// new one, to move to it.
+    Email,
+}
+
+impl CodePurpose {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Register => "register",
+            Self::Login => "login",
+            Self::Email => "email",
+        }
+    }
+}
+
+/// A code to store in place of the one of the same purpose and address.
+#[derive(Debug, Clone)]
+pub struct NewEmailCode {
+    pub purpose: CodePurpose,
+    /// Lowercased.
+    pub email: String,
+    /// The account it is for, `None` for a registration: the code goes with the account.
+    pub user_id: Option<String>,
+    pub code_hash: String,
+    pub now: i64,
+    pub expires_at: i64,
+}
+
+/// A code someone typed, for an address.
+#[derive(Debug, Clone, Copy)]
+pub struct CodeAttempt<'a> {
+    pub purpose: CodePurpose,
+    pub email: &'a str,
+    pub code_hash: &'a str,
+    pub now: i64,
 }
 
 /// What a change was authorized with. Checking a password takes a while, and another session may
@@ -176,8 +243,9 @@ pub trait AccountStore: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Vec<Membership>, StoreError>> + Send;
 
     /// Applies `changes` in one transaction. A new password also voids the user's reset link and
-    /// ends every session of the user but `basis.session`. An email another account uses is an `EmailTaken`, and a `basis` that no
-    /// longer holds is a `StaleCredentials`.
+    /// ends every session of the user but `basis.session`. A new email is one nobody proved: it
+    /// clears `email_verified_at`, turns the second factor off and voids the reset link. An email another account uses
+    /// is an `EmailTaken`, and a `basis` that no longer holds is a `StaleCredentials`.
     fn update_user(
         &self,
         user_id: &str,
@@ -233,4 +301,56 @@ pub trait AccountStore: Send + Sync + 'static {
         password_hash: &str,
         now: i64,
     ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Stores a code in place of the one of the same purpose and address, and deletes the codes
+    /// that expired.
+    fn create_email_code(
+        &self,
+        code: &NewEmailCode,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Uses a registration code, then makes the account, verified, and its session, in one
+    /// transaction. A code that is missing, expired or other is a `WrongCode`, and a wrong one
+    /// counts a try that is kept: the `MAX_CODE_TRIES`th deletes the code. An address another
+    /// account took meanwhile is an `EmailTaken`, and the code stays. Before first-run setup every
+    /// code is a `WrongCode`.
+    fn register_user(
+        &self,
+        user: &NewUser,
+        attempt: &CodeAttempt<'_>,
+        session: &NewSession,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Uses a login code of the account `session.user_id`, then opens the session, in one
+    /// transaction. Returns `false`, with no try counted, when `create_session` would: the user
+    /// is disabled, or their password is no longer `checked_hash`. A code that is missing, expired
+    /// or other is a `WrongCode`, counted as for `register_user`. The code proves the address.
+    fn create_session_with_code(
+        &self,
+        session: &NewSession,
+        checked_hash: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Uses a code sent to the account's address, then turns the second factor on and marks the
+    /// address verified. A code that is missing, expired or other, or for an address the account
+    /// no longer has, is a `WrongCode`, counted as for `register_user`.
+    fn enable_email_2fa(
+        &self,
+        user_id: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Uses an `email` code that went to `attempt.email` for this account, then makes it the
+    /// account's address, verified, and voids its reset link. A code that is missing, expired, other or of another account
+    /// is a `WrongCode`, counted as for `register_user` when it is this account's. An address
+    /// another account took meanwhile is an `EmailTaken`, and the code stays.
+    fn change_email(
+        &self,
+        user_id: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// How many enabled accounts have the second factor on, for the notice at start.
+    fn email_2fa_users(&self) -> impl Future<Output = Result<u64, StoreError>> + Send;
 }
