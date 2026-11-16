@@ -58,6 +58,7 @@ jobs:
       TARGET: ${{ matrix.target }}
       FEATURES: ${{ matrix.features }}
       SUFFIX: ${{ matrix.suffix }}
+      FLAVOR: ${{ matrix.flavor }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -66,6 +67,7 @@ jobs:
         run: |
           docker buildx build --platform "linux/$ARCH" --build-arg "FEATURES=$FEATURES" \
             --target binary --output type=local,dest=out .
+          scripts/check-build.sh "$FLAVOR" out/cadocs
           name="cadocs-$TAG-$TARGET$SUFFIX"
           mkdir "$name"
           cp out/cadocs LICENSE "$name/"

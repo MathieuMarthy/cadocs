@@ -68,6 +68,9 @@ jobs:
             sleep 2
           done
           exit 1
+      - name: Dependencies of the flavor
+        # A default build has no S3 crate, an s3 build has them (ADR 0020).
+        run: scripts/check-build.sh ${{ matrix.name }}
       - name: Clippy
         run: cargo clippy --workspace --all-targets ${{ matrix.features }} -- -D warnings
       - name: Tests
@@ -117,6 +120,8 @@ jobs:
       # The binary embeds web/dist, so the front end is built first.
       - run: npm --prefix web run build
       - run: cargo build --release
+      # Under 30 MB, and no S3 code in the default binary.
+      - run: scripts/check-build.sh default target/release/cadocs
       - run: npx --prefix web playwright install --with-deps chromium
       - run: npm --prefix web run test:e2e
       - if: failure()

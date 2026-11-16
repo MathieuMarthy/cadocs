@@ -12,3 +12,5 @@ CLAUDE.local.md
 test-results/
 playwright-report/
 graphify-out/
+# Upgrade fixtures: the database each release left (docs/notes/ci.md).
+!crates/cadocs-server/tests/upgrade/*/cadocs.db

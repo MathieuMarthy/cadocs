@@ -48,7 +48,7 @@ Decided when the stage started: math and Mermaid render in the browser only, so 
 
 Steps. The rules of the MVP steps apply, and every new screen takes its strings from the catalogue of step 35.
 
-- [ ] Step 33: upgrade tests. One fixture database per release (`v0.1.0`, `v0.2.0`), opened by the current build in a test that checks its data. CI fails if the release binary passes 30 MB or a default build links S3 code. Done when both checks run in CI.
+- [x] Step 33: upgrade tests. One fixture database per release (`v0.1.0`, `v0.2.0`), opened by the current build in a test that checks its data. CI fails if the release binary passes 30 MB or a default build links S3 code. Done when both checks run in CI.
 - [ ] Step 34: Docmost export. Make a real export (Docmost in Docker), list what it keeps and loses (tree, attachments, links, callouts, math, comments), and write the mapping to cadocs nodes in `docs/notes/content.md`. Done when the mapping is written and the export is kept as a test fixture.
 - [ ] Step 35: i18n foundation. A string catalogue in `web/`, English as the source, a language setting per user that falls back to the browser's, every existing string moved into it. Done when the UI looks the same in English and a test fails on a string left out of the catalogue.
 - [ ] Step 36: groups, server. REST routes of groups and their members, `access_changed()` on each change, the permission matrix extended. Done when group grants change what a member reaches, over REST and sockets.
