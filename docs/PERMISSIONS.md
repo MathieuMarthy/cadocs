@@ -19,13 +19,13 @@ Instance admins have no implicit access to content. Their role covers accounts, 
 
 | Action | `member` | `admin` | `owner` |
 | --- | --- | --- | --- |
-| Read the workspace, list members, search | yes | yes | yes |
+| Read the workspace, list members and groups, search | yes | yes | yes |
 | Leave the workspace | yes | yes | yes, unless last owner |
 | Update the workspace | no | yes | yes |
 | Create a space | no | yes | yes |
 | Create or revoke an invitation | no | yes | yes |
 | Change or remove a `member` or `admin` | no | yes | yes |
-| Manage groups (V1) | no | yes | yes |
+| Manage groups | no | yes | yes |
 | Choose which installed content plugins the workspace offers (V2) | no | yes | yes |
 | Enable or disable an offered content plugin for oneself (V2) | yes | yes | yes |
 | Change or remove an `owner`, or grant `owner` | no | no | yes |

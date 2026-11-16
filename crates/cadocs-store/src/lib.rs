@@ -2,6 +2,7 @@
 
 mod accounts;
 mod attachments;
+mod groups;
 mod jobs;
 mod pages;
 mod revisions;
@@ -19,6 +20,7 @@ pub use accounts::{
     SessionStanding, UpdateBasis, User, UserChanges, UserRecord,
 };
 pub use attachments::{Attachment, AttachmentStore, NewAttachment, UploadTarget};
+pub use groups::{Group, GroupStore, NewGroup};
 pub use jobs::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob};
 pub use pages::{
     DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, MovedPage, NewPage, PageCrumb, PageMove,
@@ -91,6 +93,10 @@ pub enum StoreError {
     MemberNotFound,
     #[error("no such invitation")]
     InvitationNotFound,
+    #[error("no such group")]
+    GroupNotFound,
+    #[error("another group of the workspace has this name")]
+    GroupNameTaken,
     #[error("no such space")]
     SpaceNotFound,
     #[error("a grant names a user or group outside the workspace")]

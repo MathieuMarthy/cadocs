@@ -4,7 +4,7 @@ What a change to the stores, roles or the workspace, space and page routes must 
 
 ## Stores
 
-- **One store per area, beside each other:** `DocStore`, `AccountStore`, `WorkspaceStore`, `SpaceStore`, `PageStore`, `AttachmentStore`, `SearchStore`, `RevisionStore`, `JobStore`, all on `SqliteStore`. `DocStore` uses native `impl Future + Send` methods, so collab is generic over it instead of `dyn`. `StoreError` wraps `sqlx::Error`, so a failing test store can return `sqlx::Error::PoolTimedOut`. `SqliteStore::open` needs the parent folder to exist; `open_existing` neither creates nor migrates, for commands beside a live server.
+- **One store per area, beside each other:** `DocStore`, `AccountStore`, `WorkspaceStore`, `GroupStore`, `SpaceStore`, `PageStore`, `AttachmentStore`, `SearchStore`, `RevisionStore`, `JobStore`, all on `SqliteStore`. `DocStore` uses native `impl Future + Send` methods, so collab is generic over it instead of `dyn`. `StoreError` wraps `sqlx::Error`, so a failing test store can return `sqlx::Error::PoolTimedOut`. `SqliteStore::open` needs the parent folder to exist; `open_existing` neither creates nor migrates, for commands beside a live server.
 - **Roles are checked in the store.** A method takes the actor and checks the role itself, inside the write transaction (`authorize` in `sqlite/workspaces.rs`, `spaces.rs`, `pages.rs`, resolving through `SELECT_SPACE` or `SELECT_PAGE` and `cadocs-core`), so a route cannot forget it. A refusal becomes `SpaceNotFound`, `PageNotFound` or `NotAllowed`. Methods only jobs call (`index_target`, `index_page`, `latest_revision`, `add_revision`) check no role.
 - **Last owner, last admin:** counted on the enabled ones who would stay. `would_remove_last_instance_admin` is called by `delete_user` and `administer_user`.
 
@@ -29,7 +29,7 @@ What a change to the stores, roles or the workspace, space and page routes must 
 ## Workspaces, spaces, pages
 
 - Changing a workspace's `language` queues a reindex of every page (`queue_reindex` in `sqlite/search.rs`). `purge_expired` deletes expired invitations. `GET /invitations/{token}` has no rate limit, kept by the security review ([OPERATIONS.md](../OPERATIONS.md#security)).
-- Groups are resolved and `PUT /grants` writes group grants, but nothing makes groups before V1: tests insert them with SQL. The `purge_trash` job deletes a trashed space; no route does.
+- Groups (step 35) are a `GroupStore` beside `WorkspaceStore`. `authorize_group` in `sqlite/groups.rs` finds the workspace from the group row, then answers `GroupNotFound` to a stranger. Grants to groups resolve in `space_access!` only, which every read path shares. New tests make groups over REST with `new_group` and `join_group` in `tests/common`; `group_grant` in `tests/spaces.rs` still inserts one with SQL. The `purge_trash` job deletes a trashed space; no route does.
 - `POST /spaces/{space}/pages` takes no title: the Yjs document holds it. `page_to_edit` is the check of a change through a room. The store publishes no event: handlers do (see [server notes](server.md)).
 - `position` is computed from `after` and only grows: alternating moves inflate it, and it is also the tree cursor. No cap, since appending grows a key by a digit every 30 pages or so, and writers are trusted (ADR 0014).
 - `tree` resolves the role per row. A tree has at most `MAX_PAGE_DEPTH` levels, from SQLite's limit on nested triggers.

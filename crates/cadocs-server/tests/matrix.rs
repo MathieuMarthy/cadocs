@@ -1,6 +1,7 @@
 //! The space actions of PERMISSIONS.md, cell by cell, over REST and the page socket: one
 //! server per role, and each action of the matrix tried by a member holding that role.
-//! Comments and public shares come in V1, so their rows wait for their routes.
+//! Comments and public shares come in V1, so their rows wait for their routes. The workspace
+//! rows that have their own routes, reads and groups, are at the end.
 
 mod common;
 
@@ -527,6 +528,65 @@ async fn workspace_reads_follow_the_matrix_over_rest_and_the_events_socket() {
             }
             Err(other) => panic!("{role}: {other:?}"),
         }
+    }
+}
+
+/// The "Manage groups" row: every member reads the groups and their members, admins and owners
+/// change them, and a stranger finds nothing.
+#[tokio::test]
+async fn group_actions_follow_the_matrix_over_rest() {
+    let (api, ada) = logged_in().await;
+    let ws = api.first_workspace().await;
+    let mut logins = vec![("owner", ada.clone())];
+    for (n, role) in ["member", "admin"].into_iter().enumerate() {
+        let id = format!("11111111-0000-7000-8000-00000000000{n}");
+        let login = api
+            .add_member(&ws, &id, &format!("{role}@example.org"), role)
+            .await;
+        logins.push((role, login));
+    }
+    let stranger = api
+        .add_and_login("22222222-0000-7000-8000-000000000001", "eve@example.org")
+        .await;
+    logins.push(("stranger", stranger));
+    // Whoever the changes are made to: a member of the workspace.
+    let target = "11111111-0000-7000-8000-000000000000";
+
+    for (role, login) in &logins {
+        let (read, write, create) = match *role {
+            "stranger" => (404, 404, 404),
+            "member" => (200, 403, 403),
+            _ => (200, 0, 201),
+        };
+        let ok = |success: u16| if write == 0 { success } else { write };
+        let group = api.new_group(&ada, &ws, &format!("For the {role}")).await;
+        api.join_group(&ada, &group, target).await;
+
+        for path in [
+            format!("/workspaces/{ws}/groups"),
+            format!("/groups/{group}/members"),
+        ] {
+            let got = api.get(login, &path).await;
+            assert_eq!(got.status, read, "{role} GET {path}: {got:?}");
+        }
+
+        let path = format!("/workspaces/{ws}/groups");
+        let body = json!({ "name": format!("By the {role}") });
+        let got = api.send("POST", &path, &login.headers(), body).await;
+        assert_eq!(got.status, create, "{role} creates a group: {got:?}");
+
+        let path = format!("/groups/{group}");
+        let body = json!({ "name": format!("Renamed by the {role}") });
+        let got = api.send("PATCH", &path, &login.headers(), body).await;
+        assert_eq!(got.status, ok(200), "{role} renames: {got:?}");
+
+        let got = api.group_member(login, "DELETE", &group, target).await;
+        assert_eq!(got.status, ok(204), "{role} removes a member: {got:?}");
+        let got = api.group_member(login, "PUT", &group, target).await;
+        assert_eq!(got.status, ok(204), "{role} adds a member: {got:?}");
+
+        let got = api.raw("DELETE", &path, &login.headers(), b"").await;
+        assert_eq!(got.status, ok(204), "{role} deletes: {got:?}");
     }
 }
 

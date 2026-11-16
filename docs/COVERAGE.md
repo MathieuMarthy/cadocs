@@ -15,12 +15,12 @@ Paths are short: `server/auth.rs` is `crates/cadocs-server/tests/auth.rs`, `e2e/
 | Move across spaces | `move_needs_editor_on_both_spaces_of_one_workspace` | `server/pages.rs`, `server/events.rs` |
 | Attachment download | `download_needs_one_readable_referencing_page` | `server/attachments.rs` `a_download_needs_one_readable_page_that_references_the_file` |
 | Attachment delete | `delete_needs_an_editor_of_every_referencing_page` | `server/attachments.rs` `a_delete_needs_an_editor_of_every_page_that_references_the_file` |
-| Workspace actions | `workspace_matrix`, `owner_rows_are_needed_to_touch_an_owner`, `a_workspace_keeps_one_owner` | `server/workspaces.rs` (update, delete, members, invitations, last owner), `server/matrix.rs` (reads, search, events socket, space creation) |
+| Workspace actions | `workspace_matrix`, `owner_rows_are_needed_to_touch_an_owner`, `a_workspace_keeps_one_owner` | `server/workspaces.rs` (update, delete, members, invitations, last owner), `server/matrix.rs` (reads, search, events socket, space creation, `group_actions_follow_the_matrix_over_rest`) |
 | Instance actions | `instance_matrix`, `an_instance_keeps_one_enabled_admin` | `server/admin.rs`, `server/matrix.rs` `workspace_creation_follows_the_setting_over_rest`, `server/workspaces.rs` `the_creation_rule_is_checked_when_a_workspace_is_written`, `e2e/shell` (from the switcher, from the screen of a user with no workspace, and with `admins`), `server/auth.rs` (own account) |
-| Reacting to changes, page sockets | `recompute_keeps_or_closes_the_socket` and the two after it | `server/socket_closes.rs`, one test per trigger and outcome |
-| Reacting to changes, events sockets | | `server/events.rs` (`access.changed`, `4401`, `4403`, `4404`, trash leaves it open) |
+| Reacting to changes, page sockets | `recompute_keeps_or_closes_the_socket` and the two after it | `server/socket_closes.rs`, one test per trigger and outcome, group membership and group deletion included |
+| Reacting to changes, events sockets | | `server/events.rs` (`access.changed`, from grants and groups, `4401`, `4403`, `4404`, trash leaves it open) |
 
-Comments, public shares, groups and plugins have no route before V1 or V2: their rows are tested in the rules only, and their REST rows come with their routes.
+Comments, public shares and plugins have no route before V1 or V2: their rows are tested in the rules only, and their REST rows come with their routes.
 
 ## MVP scope
 
@@ -54,6 +54,7 @@ Comments, public shares, groups and plugins have no route before V1 or V2: their
 | --- | --- |
 | Upgrade from every earlier release | `server/upgrade.rs`: the data folder each release left (`tests/upgrade/<tag>`, from `scripts/make-upgrade-fixture.sh`), restored, migrated and served: logins, roles, grants, tree, content, attachment, search, revisions, trash, a write |
 | Interface in English, language per user (step 34) | `scripts/strings.ts`, run by `npm run build`, fails on words outside the catalogue, and `scripts/strings.test.ts` plants each kind of leftover; `scripts/i18n.test.ts` (the choice, then the browser, then English); `server/auth.rs` `the_interface_language_is_set_and_cleared_without_the_password`, `only_a_language_of_the_interface_is_accepted`; the unchanged end-to-end suite and `e2e/screens` for the English look |
+| Groups and group grants, server (step 35) | `server/groups.rs` (create, rename, delete, members, names, pages, other workspaces, a group grant over REST), `server/matrix.rs` `group_actions_follow_the_matrix_over_rest`, `server/socket_closes.rs` and `server/events.rs` (joining, leaving, deleting), `server/search.rs` `results_only_come_from_readable_spaces` |
 | Binary under 30 MB, no S3 code in a default build | `scripts/check-build.sh`: the dependency graph of each flavor in CI's `rust` job on every pull request; the size and S3 code of the release binary in the `e2e` job after each push to main, and of each binary in `release.yml` |
 
 Not automated: the RAM targets (`bench/rss.sh`), except that a hash's memory goes back with no trim (`server/hash_memory.rs`, ADR 0023), and the release workflow as a whole, which runs on a tag.

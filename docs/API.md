@@ -107,6 +107,7 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 | POST | `/invitations/{token}/accept` | none | Accept: a new user sends a name and password, a logged-in user with the invited email just joins |
 | GET, POST | `/workspaces/{ws}/groups` | member, admin to create | Groups (V1) |
 | PATCH, DELETE | `/groups/{group}` | admin | Rename or delete a group (V1) |
+| GET | `/groups/{group}/members` | member | Members of a group (V1) |
 | PUT, DELETE | `/groups/{group}/members/{user}` | admin | Add or remove a member (V1) |
 | GET | `/workspaces/{ws}/recent` | member | Recently updated pages in readable spaces |
 
@@ -122,6 +123,9 @@ An email is at most 254 bytes, a name or workspace name 1 to 100 characters, a p
 - `GET /invitations/{token}` answers `{ workspace_id, workspace_name, email, role, expires_at, has_account }`. `has_account` tells the page to ask for a login rather than a password.
 - `POST /invitations/{token}/accept` always takes a JSON body. `{ name, password }` makes the account of the invited email, and answers `201` with the session body and the cookie, or `409` with `email: taken` if that email has an account. `{}` joins with the current session, needs the CSRF token, and answers `200` with the session body: `401` with no session, `403` for an account with another email. A member keeps their role. A refused password leaves the link usable.
 - A link that is unknown, used, replaced, revoked or expired, or whose workspace is gone, is a `404`. Answers that hold a link or a session have `Cache-Control: no-store`.
+- A group is `{ id, workspace_id, name, member_count, created_at }`. `GET /workspaces/{ws}/groups` is paginated, oldest first. `POST` takes `{ name }`, at most 100 characters once trimmed, and answers `201` with the group; `PATCH /groups/{group}` takes the same and answers the group. A name another group of the workspace has is a `409` with `name: taken`. `DELETE /groups/{group}` answers `204`, and takes the group's memberships and grants with it.
+- `GET /groups/{group}/members` lists members as `GET /workspaces/{ws}/members` does, paginated by account age. `PUT /groups/{group}/members/{user}` answers `204`, also for a user already in the group, and `404` for a user who is not a member of the workspace. `DELETE` answers `204`, or `404` for a user who is not in the group. A member who leaves the workspace leaves its groups.
+- A group route answers `404` to whoever is not a member of the group's workspace, and `403` to a member who may not change it. A change of members and a deleted group recheck open sockets ([PERMISSIONS.md](PERMISSIONS.md#reacting-to-changes)).
 | GET | `/jobs/{id}` | the user who started it | Status of a space export (V1) |
 
 ### Spaces
