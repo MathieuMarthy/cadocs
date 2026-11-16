@@ -17,7 +17,8 @@ const SELECT_WORKSPACE: &str =
      FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
      WHERE w.id = ?1 AND m.user_id = ?2";
 
-const SELECT_MEMBER: &str = "SELECT u.id, u.email, u.name, m.role, u.disabled_at, m.created_at
+pub(super) const SELECT_MEMBER: &str =
+    "SELECT u.id, u.email, u.name, m.role, u.disabled_at, m.created_at
      FROM workspace_members m JOIN users u ON u.id = m.user_id
      WHERE m.workspace_id = ?1";
 
@@ -48,7 +49,7 @@ fn workspace(row: &SqliteRow) -> Workspace {
     }
 }
 
-fn member(row: &SqliteRow) -> Member {
+pub(super) fn member(row: &SqliteRow) -> Member {
     Member {
         id: row.get("id"),
         email: row.get("email"),

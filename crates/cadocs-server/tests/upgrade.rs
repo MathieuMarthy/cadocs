@@ -116,7 +116,13 @@ async fn check(release: &str) {
     let bob_id = session["user"]["id"].as_str().unwrap().to_owned();
 
     // The space, its default role and Bob's grant.
-    let reply = get(&api, release, &bob, &format!("/workspaces/{workspace}/spaces")).await;
+    let reply = get(
+        &api,
+        release,
+        &bob,
+        &format!("/workspaces/{workspace}/spaces"),
+    )
+    .await;
     let space = find(items(&reply), "name", "Handbook");
     assert_eq!(space["description"], "How we work", "{release}");
     assert_eq!(space["default_role"], "viewer", "{release}");
@@ -140,7 +146,10 @@ async fn check(release: &str) {
     let path = format!("/pages/{welcome}/export?format=md");
     let markdown = String::from_utf8(get(&api, release, &bob, &path).await.bytes).unwrap();
     for part in ["# Welcome", "**quokka**", "- one", "```rust\nfn main() {}"] {
-        assert!(markdown.contains(part), "{release}: no {part} in {markdown}");
+        assert!(
+            markdown.contains(part),
+            "{release}: no {part} in {markdown}"
+        );
     }
     let path = format!("/pages/{onboarding}/export?format=md");
     let markdown = String::from_utf8(get(&api, release, &bob, &path).await.bytes).unwrap();
@@ -161,7 +170,10 @@ async fn check(release: &str) {
     let number = items(&reply)[0]["number"].as_i64().unwrap();
     let path = format!("/pages/{welcome}/revisions/{number}");
     let html = &get(&api, release, &bob, &path).await.body["html"];
-    assert!(html.as_str().unwrap().contains("quokka"), "{release}: {html}");
+    assert!(
+        html.as_str().unwrap().contains("quokka"),
+        "{release}: {html}"
+    );
 
     // The trashed page waits in the trash.
     let reply = get(&api, release, &ada, &format!("/spaces/{space}/trash")).await;
@@ -170,7 +182,12 @@ async fn check(release: &str) {
     // And the upgraded database takes writes.
     let path = format!("/spaces/{space}/pages");
     let reply = api
-        .send("POST", &path, &bob.headers(), json!({ "parent_id": welcome }))
+        .send(
+            "POST",
+            &path,
+            &bob.headers(),
+            json!({ "parent_id": welcome }),
+        )
         .await;
     assert_eq!(reply.status, 201, "{release}: {reply:?}");
 }

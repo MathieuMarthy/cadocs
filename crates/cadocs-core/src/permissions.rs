@@ -123,7 +123,7 @@ pub enum InstanceAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceAction {
-    /// Read the workspace, list members, search.
+    /// Read the workspace, list members and groups, search.
     Read,
     Leave {
         last_owner: bool,

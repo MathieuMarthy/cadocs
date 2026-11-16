@@ -240,8 +240,20 @@ async fn results_only_come_from_readable_spaces() {
     );
 
     let in_closed = format!("q=secret&space={closed}");
-    assert_eq!(wiki.found(&wiki.ada, &in_closed, 1).await, [hidden]);
+    assert_eq!(
+        wiki.found(&wiki.ada, &in_closed, 1).await,
+        std::slice::from_ref(&hidden)
+    );
     assert!(wiki.found(&wiki.bob, &in_closed, 0).await.is_empty());
+
+    // A grant to a group reaches its members.
+    let group = wiki.api.new_group(&wiki.ada, &wiki.workspace, "Team").await;
+    let path = format!("/spaces/{closed}/grants");
+    let body = json!({ "grants": [{ "group_id": group, "role": "viewer" }] });
+    let reply = wiki.api.send("PUT", &path, &wiki.ada.headers(), body).await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    wiki.api.join_group(&wiki.ada, &group, BOB).await;
+    assert_eq!(wiki.found(&wiki.bob, &in_closed, 1).await, [hidden]);
 }
 
 #[tokio::test]

@@ -23,14 +23,14 @@ use cadocs_server::session::{csrf_token, token_hash};
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, CodeAttempt,
-    Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant, IndexTarget, Invitation,
-    InvitationPreview, InvitedUser, Member, Membership, MovedPage, NewAttachment, NewEmailCode,
-    NewGrant, NewInvitation, NewPage, NewPasswordReset, NewRevision, NewSession, NewSpace, NewUser,
-    NewWorkspace, PageCrumb, PageIndex, PageMove, PageRecord, PageSite, PageStore, Revision,
-    RevisionStore, RevisionSummary, SearchHit, SearchStore, SessionStanding, Snapshot, Space,
-    SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, UpdateBasis,
-    UploadTarget, UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach,
-    WorkspaceStore, now_ms,
+    Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant, Group, GroupStore, IndexTarget,
+    Invitation, InvitationPreview, InvitedUser, Member, Membership, MovedPage, NewAttachment,
+    NewEmailCode, NewGrant, NewGroup, NewInvitation, NewPage, NewPasswordReset, NewRevision,
+    NewSession, NewSpace, NewUser, NewWorkspace, PageCrumb, PageIndex, PageMove, PageRecord,
+    PageSite, PageStore, Revision, RevisionStore, RevisionSummary, SearchHit, SearchStore,
+    SessionStanding, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc,
+    StoredUpdate, UpdateBasis, UploadTarget, UserChanges, UserRecord, Workspace, WorkspaceChanges,
+    WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -405,6 +405,69 @@ impl SpaceStore for FlakyStore {
         now: i64,
     ) -> Result<(), StoreError> {
         self.inner.set_grants(space_id, actor, grants, now).await
+    }
+}
+
+impl GroupStore for FlakyStore {
+    async fn create_group(&self, group: &NewGroup) -> Result<Group, StoreError> {
+        self.inner.create_group(group).await
+    }
+
+    async fn list_groups(
+        &self,
+        workspace_id: &str,
+        actor: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Group>, StoreError> {
+        self.inner
+            .list_groups(workspace_id, actor, after, limit)
+            .await
+    }
+
+    async fn rename_group(
+        &self,
+        group_id: &str,
+        actor: &str,
+        name: &str,
+    ) -> Result<Group, StoreError> {
+        self.inner.rename_group(group_id, actor, name).await
+    }
+
+    async fn delete_group(&self, group_id: &str, actor: &str) -> Result<(), StoreError> {
+        self.inner.delete_group(group_id, actor).await
+    }
+
+    async fn list_group_members(
+        &self,
+        group_id: &str,
+        actor: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Member>, StoreError> {
+        self.inner
+            .list_group_members(group_id, actor, after, limit)
+            .await
+    }
+
+    async fn add_group_member(
+        &self,
+        group_id: &str,
+        actor: &str,
+        user_id: &str,
+    ) -> Result<(), StoreError> {
+        self.inner.add_group_member(group_id, actor, user_id).await
+    }
+
+    async fn remove_group_member(
+        &self,
+        group_id: &str,
+        actor: &str,
+        user_id: &str,
+    ) -> Result<(), StoreError> {
+        self.inner
+            .remove_group_member(group_id, actor, user_id)
+            .await
     }
 }
 

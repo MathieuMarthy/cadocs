@@ -3,6 +3,7 @@
 mod admin;
 mod attachments;
 pub mod auth;
+mod groups;
 mod invitations;
 mod markdown;
 mod pages;
@@ -28,8 +29,8 @@ use axum::routing::any;
 use axum::{Json, Router};
 use cadocs_collab::{Authorizer, CollabError};
 use cadocs_store::{
-    AccountStore, AttachmentStore, DocStore, PageStore, RevisionStore, SearchStore, SpaceStore,
-    StoreError, WorkspaceStore,
+    AccountStore, AttachmentStore, DocStore, GroupStore, PageStore, RevisionStore, SearchStore,
+    SpaceStore, StoreError, WorkspaceStore,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -192,6 +193,9 @@ impl From<StoreError> for ApiError {
                 conflict.with_message("This account is the last instance admin")
             }
             StoreError::UserDisabled => conflict.with_message("This account is disabled"),
+            StoreError::GroupNameTaken => conflict
+                .with_message("Another group of this workspace has this name")
+                .with_field("name", "taken"),
             StoreError::AlreadyMember => conflict
                 .with_message("This email belongs to a member")
                 .with_field("email", "member"),
@@ -217,6 +221,7 @@ impl From<StoreError> for ApiError {
             | StoreError::WorkspaceNotFound
             | StoreError::MemberNotFound
             | StoreError::InvitationNotFound
+            | StoreError::GroupNotFound
             | StoreError::SpaceNotFound
             | StoreError::PageNotFound
             | StoreError::AttachmentNotFound
@@ -383,6 +388,7 @@ where
     S: DocStore
         + AccountStore
         + WorkspaceStore
+        + GroupStore
         + SpaceStore
         + PageStore
         + AttachmentStore
@@ -398,6 +404,7 @@ where
         .merge(admin::routes(state))
         .merge(workspaces::routes(state))
         .merge(invitations::routes(state))
+        .merge(groups::routes(state))
         .merge(spaces::routes(state))
         .merge(pages::routes(state))
         .merge(attachments::routes(state))

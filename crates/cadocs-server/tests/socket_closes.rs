@@ -214,6 +214,54 @@ async fn a_lower_workspace_role_recomputes_sockets() {
     assert_eq!(close_code(&mut socket).await, Some(ACCESS_REVOKED));
 }
 
+/// A group with this grant on the space, made by the owner, and its id.
+async fn group_with(wiki: &Wiki, role: &str) -> String {
+    let group = wiki
+        .api
+        .new_group(&wiki.ada, &wiki.workspace, "Writers")
+        .await;
+    wiki.set_grants(json!([{ "group_id": group, "role": role }]))
+        .await;
+    group
+}
+
+#[tokio::test]
+async fn leaving_a_group_closes_with_4403() {
+    let wiki = wiki(Value::Null).await;
+    let bob = wiki.member("member").await;
+    let group = group_with(&wiki, "editor").await;
+    wiki.api.join_group(&wiki.ada, &group, BOB).await;
+    let mut socket = wiki.socket(&bob).await;
+    let reply = wiki
+        .api
+        .group_member(&wiki.ada, "DELETE", &group, BOB)
+        .await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    assert_eq!(close_code(&mut socket).await, Some(ACCESS_REVOKED));
+}
+
+#[tokio::test]
+async fn joining_a_group_with_a_higher_grant_closes_with_4409() {
+    let wiki = wiki(json!("viewer")).await;
+    let bob = wiki.member("member").await;
+    let group = group_with(&wiki, "editor").await;
+    let mut socket = wiki.socket(&bob).await;
+    wiki.api.join_group(&wiki.ada, &group, BOB).await;
+    assert_eq!(close_code(&mut socket).await, Some(MODE_CHANGED));
+}
+
+#[tokio::test]
+async fn deleting_a_group_closes_with_4403() {
+    let wiki = wiki(Value::Null).await;
+    let bob = wiki.member("member").await;
+    let group = group_with(&wiki, "viewer").await;
+    wiki.api.join_group(&wiki.ada, &group, BOB).await;
+    let mut socket = wiki.socket(&bob).await;
+    let reply = wiki.delete(&format!("/groups/{group}")).await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    assert_eq!(close_code(&mut socket).await, Some(ACCESS_REVOKED));
+}
+
 #[tokio::test]
 async fn a_recompute_closes_only_the_sockets_it_concerns() {
     let wiki = wiki(json!("editor")).await;

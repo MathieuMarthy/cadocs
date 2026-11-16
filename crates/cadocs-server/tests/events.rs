@@ -365,6 +365,34 @@ async fn a_lost_grant_is_announced_and_closes_the_space() {
 }
 
 #[tokio::test]
+async fn joining_and_leaving_a_group_are_announced() {
+    let wiki = wiki().await;
+    let bob = wiki.bob().await;
+    let private = wiki.new_space("Private", Value::Null).await;
+    let group = wiki.api.new_group(&wiki.ada, &wiki.workspace, "Team").await;
+    let body = json!({ "grants": [{ "group_id": group, "role": "viewer" }] });
+    let path = format!("/spaces/{private}/grants");
+    assert_eq!(wiki.call("PUT", &path, body).await.status, 204);
+    let mut socket = wiki.socket(&bob).await;
+
+    wiki.api.join_group(&wiki.ada, &group, BOB).await;
+    let access = json!({ "type": "access.changed" });
+    assert_eq!(event(&mut socket).await, access);
+    let page = wiki.new_page_in(&private, &wiki.ada).await;
+    assert_eq!(
+        event(&mut socket).await,
+        page_event("page.created", &private, &page)
+    );
+
+    let reply = wiki
+        .api
+        .group_member(&wiki.ada, "DELETE", &group, BOB)
+        .await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    assert_eq!(event(&mut socket).await, access);
+}
+
+#[tokio::test]
 async fn a_change_that_leaves_a_socket_as_it_is_says_nothing() {
     let wiki = wiki().await;
     let bob = wiki.bob().await;

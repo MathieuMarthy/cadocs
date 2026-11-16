@@ -496,7 +496,10 @@ async fn a_changed_name_or_email_keeps_the_other_sessions() {
 async fn the_interface_language_is_set_and_cleared_without_the_password() {
     let (api, login) = logged_in().await;
     // Unset, the interface follows the browser.
-    assert_eq!(api.session(&login).await.body["user"]["language"], Value::Null);
+    assert_eq!(
+        api.session(&login).await.body["user"]["language"],
+        Value::Null
+    );
 
     let body = json!({ "language": "fr" });
     let reply = api.send("PATCH", "/me", &login.headers(), body).await;
@@ -513,7 +516,10 @@ async fn the_interface_language_is_set_and_cleared_without_the_password() {
     let reply = api.send("PATCH", "/me", &login.headers(), body).await;
     assert_eq!(reply.status, 200, "{reply:?}");
     assert_eq!(reply.body["language"], Value::Null);
-    assert_eq!(api.session(&login).await.body["user"]["language"], Value::Null);
+    assert_eq!(
+        api.session(&login).await.body["user"]["language"],
+        Value::Null
+    );
 }
 
 #[tokio::test]
@@ -530,7 +536,10 @@ async fn only_a_language_of_the_interface_is_accepted() {
             );
         }
     }
-    assert_eq!(api.session(&login).await.body["user"]["language"], Value::Null);
+    assert_eq!(
+        api.session(&login).await.body["user"]["language"],
+        Value::Null
+    );
 }
 
 #[tokio::test]

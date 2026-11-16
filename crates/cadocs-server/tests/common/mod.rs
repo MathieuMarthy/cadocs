@@ -334,6 +334,28 @@ impl Api {
         .await;
         login
     }
+
+    /// A group of the workspace, made over REST, and its id.
+    pub async fn new_group(&self, by: &Login, workspace: &str, name: &str) -> String {
+        let path = format!("/workspaces/{workspace}/groups");
+        let reply = self
+            .send("POST", &path, &by.headers(), json!({ "name": name }))
+            .await;
+        assert_eq!(reply.status, 201, "{reply:?}");
+        reply.body["id"].as_str().unwrap().to_owned()
+    }
+
+    /// `PUT` or `DELETE` of a member of a group.
+    pub async fn group_member(&self, by: &Login, method: &str, group: &str, user: &str) -> Reply {
+        let path = format!("/groups/{group}/members/{user}");
+        self.raw(method, &path, &by.headers(), b"").await
+    }
+
+    /// Puts `user` in the group, which must succeed.
+    pub async fn join_group(&self, by: &Login, group: &str, user: &str) {
+        let reply = self.group_member(by, "PUT", group, user).await;
+        assert_eq!(reply.status, 204, "{reply:?}");
+    }
 }
 
 pub async fn logged_in() -> (Api, Login) {

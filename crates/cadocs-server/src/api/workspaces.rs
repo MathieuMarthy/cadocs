@@ -176,7 +176,7 @@ async fn delete_workspace<S: WorkspaceStore, A>(
 }
 
 #[derive(Serialize)]
-struct MemberBody {
+pub(super) struct MemberBody {
     id: String,
     email: String,
     name: String,
