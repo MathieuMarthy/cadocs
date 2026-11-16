@@ -145,9 +145,9 @@ Steps, one session each, in this order. The rules of the MVP steps apply.
 
 Exit criteria:
 
-- [ ] With `CADOCS_SMTP_HOST` unset, no route or screen of this stage answers, and the MVP tests pass unchanged.
-- [ ] No route tells whether an address has an account.
-- [ ] Idle RSS and active-user thresholds of the MVP still hold.
+- [x] With `CADOCS_SMTP_HOST` unset, no route or screen of this stage answers, and the MVP tests pass unchanged.
+- [ ] No route tells whether an address has an account. Open: with registration open and `CADOCS_WORKSPACE_CREATION=all`, the defaults, anyone registers, creates a workspace, invites an address and reads `has_account` from `GET /invitations/{token}`. Without a relay, `PATCH /me` still answers `409` for a taken address, as in the MVP.
+- [x] Idle RSS and active-user thresholds of the MVP still hold.
 
 ## V1
 
