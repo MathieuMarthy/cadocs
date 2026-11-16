@@ -182,6 +182,8 @@ async fn run(config: Config) -> anyhow::Result<()> {
         let mailer = Arc::new(SmtpMailer::new(smtp)?);
         state.mail = Some(Outbox::start(mailer.clone()));
         tokio::spawn(check_relay(mailer, relay));
+    } else {
+        warn_unasked_factor(state.store.as_ref()).await?;
     }
     tokio::spawn(return_freed_memory(registry));
     start_jobs(&state, config.jobs);
@@ -196,6 +198,20 @@ async fn run(config: Config) -> anyhow::Result<()> {
         tracing::warn!("first-run setup is pending: open {link} to create the first account");
     }
     serve::<_, _, WebAssets>(listener, state, shutdown_signal()).await
+}
+
+/// The second factor needs a relay: without one it is not asked for, which the operator must
+/// know (ADR 0026).
+async fn warn_unasked_factor(store: &SqliteStore) -> anyhow::Result<()> {
+    let count = store.email_2fa_users().await?;
+    if count > 0 {
+        let accounts = if count == 1 { "account" } else { "accounts" };
+        tracing::warn!(
+            "mail is off: {count} {accounts} with the second factor by mail on log in with \
+             their password alone until a relay is set"
+        );
+    }
+    Ok(())
 }
 
 /// glibc keeps what an unloaded room frees, because the free blocks sit below live ones (ADR 0015).

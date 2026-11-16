@@ -319,3 +319,37 @@ fn the_server_says_whether_its_relay_answers_and_starts_either_way() {
     command.env("CADOCS_SMTP_PORT", "1");
     start(command);
 }
+
+/// Reads the log until the server listens, and returns every line before.
+fn lines_until_listening(command: &mut Command) -> (Server, Vec<String>) {
+    let mut server = Server(command.stdout(Stdio::piped()).spawn().unwrap());
+    let stdout = server.0.stdout.take().unwrap();
+    let mut lines = Vec::new();
+    for line in BufReader::new(stdout).lines() {
+        let line = line.unwrap();
+        let done = line.contains("listening");
+        lines.push(line);
+        if done {
+            return (server, lines);
+        }
+    }
+    panic!("the server stopped before it listened: {lines:?}");
+}
+
+#[test]
+fn the_server_says_when_mail_is_off_and_a_second_factor_is_on() {
+    let dir = TempDir::new().unwrap();
+    seed(dir.path());
+    let (_server, lines) = lines_until_listening(&mut cadocs(dir.path()));
+    assert!(!lines.iter().any(|line| line.contains("second factor")));
+    drop(_server);
+
+    run_sql(dir.path(), "UPDATE users SET email_2fa = 1");
+    let (_server, lines) = lines_until_listening(&mut cadocs(dir.path()));
+    let line = lines.iter().find(|line| line.contains("second factor"));
+    let line = line.expect("a line about the second factor");
+    assert!(
+        line.contains("WARN") && line.contains("1 account"),
+        "{line}"
+    );
+}

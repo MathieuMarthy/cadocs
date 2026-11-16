@@ -1,5 +1,5 @@
 //! Accounts and sessions: first run, login, logout, `/session` and `/me`, and what an instance
-//! with a relay adds (ADR 0026): the reset link by mail and registration.
+//! with a relay adds (ADR 0026): the reset link by mail, registration and a second factor.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -9,7 +9,7 @@ use axum::http::header::{CACHE_CONTROL, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Extension, Json, Router};
 use cadocs_collab::Authorizer;
 use cadocs_core::permissions::{InstanceAction, instance_allows, instance_role};
@@ -88,11 +88,26 @@ where
                 );
         }
     }
-    let authenticated = Router::new()
+    let mut authenticated = Router::new()
         .route("/auth/logout", post(logout))
         .route("/session", get(current_session))
-        .route("/me", patch(update_me).delete(delete_me))
-        .route_layer(from_fn_with_state(state.clone(), session::require::<S, A>));
+        .route("/me", patch(update_me).delete(delete_me));
+    if state.mail.is_some() {
+        let sends = from_fn_with_state(
+            (state.mail_requests.clone(), state.http.clone()),
+            rate_limit,
+        );
+        authenticated = authenticated
+            .route(
+                "/me/email-2fa",
+                post(ask_email_2fa)
+                    .route_layer(sends)
+                    .merge(delete(disable_email_2fa)),
+            )
+            .route("/me/email-2fa/confirm", post(enable_email_2fa));
+    }
+    let authenticated =
+        authenticated.route_layer(from_fn_with_state(state.clone(), session::require::<S, A>));
     public
         .merge(authenticated)
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
@@ -104,6 +119,7 @@ pub(super) struct UserBody {
     email: String,
     name: String,
     is_instance_admin: bool,
+    email_2fa: bool,
 }
 
 impl From<User> for UserBody {
@@ -113,6 +129,7 @@ impl From<User> for UserBody {
             email: user.email,
             name: user.name,
             is_instance_admin: user.is_instance_admin,
+            email_2fa: user.email_2fa,
         }
     }
 }
@@ -256,6 +273,7 @@ async fn setup<S: AccountStore, A>(
         email,
         name,
         is_instance_admin: true,
+        email_2fa: false,
     };
     let first = FirstUser {
         id: user.id.clone(),
@@ -283,11 +301,18 @@ async fn setup<S: AccountStore, A>(
 struct LoginRequest {
     email: String,
     password: String,
+    /// The code mailed for the second factor (ADR 0026).
+    #[serde(default)]
+    code: String,
 }
 
 /// An unknown email, a wrong password and a disabled account answer alike, and in the same time.
+/// Past the password, an account with the second factor on needs the code mailed to it: without
+/// one, the answer mails it and names `code` as `required`.
 async fn login<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     JsonBody(body): JsonBody<LoginRequest>,
 ) -> Result<Response, ApiError> {
     let email = normalize_email(&body.email);
@@ -301,7 +326,29 @@ async fn login<S: AccountStore, A>(
     let workspaces = state.store.memberships(&found.user.id).await?;
     let (token, session) = new_session(&state, &found.user.id)?;
     let checked = found.password_hash.as_deref().unwrap_or_default();
-    if !state.store.create_session(&session, checked).await? {
+    let created = if found.needs_code(state.mail.is_some()) {
+        let code = body.code.trim();
+        if code.is_empty() {
+            count_request(&state.mail_requests, &state.http, peer, &headers)?;
+            mail_code(&state, CodePurpose::Login, &found.user).await?;
+            return Err(code_problem("required"));
+        }
+        let purpose = CodePurpose::Login;
+        let hash = code_hash(&state.code_key, purpose, &found.user.email, code);
+        let attempt = CodeAttempt {
+            purpose,
+            email: &found.user.email,
+            code_hash: &hash,
+            now: session.now,
+        };
+        let store = &state.store;
+        store
+            .create_session_with_code(&session, checked, &attempt)
+            .await?
+    } else {
+        state.store.create_session(&session, checked).await?
+    };
+    if !created {
         return Err(wrong_credentials());
     }
     let mut response = session_body(&state, found.user, workspaces, &token);
@@ -313,6 +360,73 @@ async fn login<S: AccountStore, A>(
 
 fn wrong_credentials() -> ApiError {
     ApiError::new(ErrorCode::Unauthenticated).with_message("Wrong email or password")
+}
+
+fn code_problem(problem: &'static str) -> ApiError {
+    let error = ApiError::new(ErrorCode::ValidationFailed).with_field("code", problem);
+    match problem {
+        "required" => error.with_message("Type the code mailed to you"),
+        _ => error,
+    }
+}
+
+/// Mails a code to the address of `user`, in place of the one it had for `purpose`. Silent past
+/// the limit of the address, or with the outbox full: the user asks again.
+async fn mail_code<S: AccountStore, A>(
+    state: &AppState<S, A>,
+    purpose: CodePurpose,
+    user: &User,
+) -> Result<(), ApiError> {
+    let Some(outbox) = &state.mail else {
+        return Err(ApiError::new(ErrorCode::NotFound));
+    };
+    if !state.mail_addresses.check(&user.email) {
+        return Ok(());
+    }
+    // Before the new code replaces the one before, as for a reset link.
+    let Some(place) = outbox.reserve() else {
+        return Ok(());
+    };
+    let code = new_code().map_err(ApiError::internal)?;
+    let now = now_ms();
+    state
+        .store
+        .create_email_code(&NewEmailCode {
+            purpose,
+            code_hash: code_hash(&state.code_key, purpose, &user.email, &code),
+            email: user.email.clone(),
+            user_id: Some(user.id.clone()),
+            now,
+            expires_at: now + CODE_LIFETIME.as_millis() as i64,
+        })
+        .await?;
+    let origin = state.http.public_url.origin();
+    let (subject, what, warning) = match purpose {
+        CodePurpose::Login => (
+            "Your cadocs login code",
+            "log in to",
+            "If you did not just log in, someone knows your password: change\n\
+             it.",
+        ),
+        _ => (
+            "Your cadocs code",
+            "turn on the second factor of your account on",
+            "If you did not ask for it, ignore this message: nothing changes\n\
+             without the code.",
+        ),
+    };
+    place.send(Mail {
+        to: user.email.clone(),
+        subject: subject.to_owned(),
+        text: format!(
+            "Your code to {what}\n\
+             {origin}\n\n\
+             \x20   {code}\n\n\
+             It works for 10 minutes.\n\
+             {warning}\n"
+        ),
+    });
+    Ok(())
 }
 
 async fn logout<S: AccountStore, A>(
@@ -376,17 +490,8 @@ async fn update_me<S: AccountStore, A>(
 
     let mut checked_hash = None;
     if let Some(password) = body.current_password.filter(|_| needs_password) {
-        count_request(&state.password_guesses, &state.http, peer, &headers)?;
-        checked_hash = state.store.password_hash(&current.user.id).await?;
-        if !state
-            .passwords
-            .verify(password, checked_hash.clone())
-            .await?
-        {
-            return Err(ApiError::new(ErrorCode::ValidationFailed)
-                .with_message("Wrong current password")
-                .with_field("current_password", "wrong"));
-        }
+        let client = (peer, &headers);
+        checked_hash = check_current_password(&state, &current, client, password).await?;
     }
     let password_hash = match body.password {
         Some(password) => Some(state.passwords.hash(password).await?),
@@ -397,6 +502,7 @@ async fn update_me<S: AccountStore, A>(
         name,
         email,
         password_hash,
+        email_2fa_off: false,
     };
     let keep = current.token_hash();
     let basis = UpdateBasis {
@@ -416,7 +522,110 @@ async fn update_me<S: AccountStore, A>(
         email: changes.email.unwrap_or(user.email),
         id: user.id,
         is_instance_admin: user.is_instance_admin,
+        email_2fa: user.email_2fa,
     }))
+}
+
+/// Verifies the password of the session's user, as a guess of the client, and returns the hash it
+/// was checked against, for `UpdateBasis`.
+async fn check_current_password<S: AccountStore, A>(
+    state: &AppState<S, A>,
+    current: &CurrentSession,
+    (peer, headers): (SocketAddr, &HeaderMap),
+    password: String,
+) -> Result<Option<String>, ApiError> {
+    count_request(&state.password_guesses, &state.http, peer, headers)?;
+    let checked_hash = state.store.password_hash(&current.user.id).await?;
+    if !state
+        .passwords
+        .verify(password, checked_hash.clone())
+        .await?
+    {
+        return Err(ApiError::new(ErrorCode::ValidationFailed)
+            .with_message("Wrong current password")
+            .with_field("current_password", "wrong"));
+    }
+    Ok(checked_hash)
+}
+
+/// Mails a code to the account's address, which turns the second factor on (ADR 0026): it
+/// proves the address works before a login depends on it.
+async fn ask_email_2fa<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+) -> Result<StatusCode, ApiError> {
+    mail_code(&state, CodePurpose::Email, &current.user).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct EnableRequest {
+    #[serde(default)]
+    code: String,
+}
+
+async fn enable_email_2fa<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    JsonBody(body): JsonBody<EnableRequest>,
+) -> Result<StatusCode, ApiError> {
+    let code = body.code.trim();
+    if code.is_empty() {
+        return Err(code_problem("required"));
+    }
+    // A guess at a code, as at login.
+    count_request(&state.password_guesses, &state.http, peer, &headers)?;
+    let purpose = CodePurpose::Email;
+    let email = &current.user.email;
+    let hash = code_hash(&state.code_key, purpose, email, code);
+    let attempt = CodeAttempt {
+        purpose,
+        email,
+        code_hash: &hash,
+        now: now_ms(),
+    };
+    state
+        .store
+        .enable_email_2fa(&current.user.id, &attempt)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct DisableRequest {
+    current_password: Option<String>,
+}
+
+/// A stolen session must not take the factor off: it needs the password.
+async fn disable_email_2fa<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    JsonBody(body): JsonBody<DisableRequest>,
+) -> Result<StatusCode, ApiError> {
+    let Some(password) = body.current_password else {
+        let mut fields = Fields::default();
+        fields.check::<()>("current_password", Err("required"));
+        return fields.finish().map(|()| StatusCode::NO_CONTENT);
+    };
+    let checked_hash = check_current_password(&state, &current, (peer, &headers), password).await?;
+    let changes = UserChanges {
+        email_2fa_off: true,
+        ..UserChanges::default()
+    };
+    let keep = current.token_hash();
+    let basis = UpdateBasis {
+        session: &keep,
+        checked_hash: checked_hash.as_deref(),
+    };
+    state
+        .store
+        .update_user(&current.user.id, &changes, &basis, now_ms())
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -600,6 +809,7 @@ async fn mail_registration<S: AccountStore>(
             purpose,
             code_hash: code_hash(key, purpose, &email, &code),
             email: email.clone(),
+            user_id: None,
             now,
             expires_at: now + CODE_LIFETIME.as_millis() as i64,
         })
@@ -646,6 +856,7 @@ async fn confirm_registration<S: AccountStore, A>(
         email,
         name,
         is_instance_admin: false,
+        email_2fa: false,
     };
     let new = NewUser {
         id: user.id.clone(),

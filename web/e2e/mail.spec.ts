@@ -2,7 +2,7 @@
 
 import { expect } from "@playwright/test";
 
-import { test } from "./fixtures.ts";
+import { asOwner, test } from "./fixtures.ts";
 import { FakeRelay } from "./relay.ts";
 import { PASSWORD, TestServer } from "./server.ts";
 
@@ -97,6 +97,11 @@ test("without a relay, login offers no link and the screens do not exist", async
   await page.goto(`${server.url}/register`);
   await expect(page.getByRole("heading", { name: "not found" })).toBeVisible();
   await expect(page.getByRole("button", { name: "send code" })).toHaveCount(0);
+
+  await asOwner(page, server);
+  await page.goto(`${server.url}/account`);
+  await expect(page.getByRole("heading", { name: "delete account" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "second factor" })).toHaveCount(0);
 });
 
 withMail("a code read from the mail makes an account with no workspace", async ({
@@ -167,4 +172,45 @@ withMail("a logged-in person is sent home from the registration screen", async (
   await page.context().addCookies([{ name: "session", value: token, url: server.url }]);
   await page.goto(`${server.url}/register`);
   await expect(page).toHaveURL(`${server.url}/w/tests`);
+});
+
+withMail("a second factor turned on in the account makes a login ask for a mailed code", async ({
+  page,
+  server,
+  relay,
+}) => {
+  await asOwner(page, server);
+  await page.goto(`${server.url}/account`);
+  const factor = page.getByRole("region", { name: "second factor" });
+  await factor.getByRole("button", { name: "turn on" }).click();
+  await expect(factor.getByRole("status")).toContainText("a code is on its way");
+  const code = /^ {4}(\d{6})$/m.exec((await relay.message()).text)?.[1];
+  expect(code).toBeTruthy();
+  await factor.getByLabel("code").fill(code!);
+  await factor.getByRole("button", { name: "turn on" }).click();
+  await expect(factor).toContainText("on: each login needs a code");
+
+  await page.getByRole("button", { name: "Ada", exact: true }).click();
+  await page.getByRole("menuitem", { name: "log out" }).click();
+  await expect(page).toHaveURL(`${server.url}/login`);
+  await page.getByLabel("email").fill("ada@example.org");
+  await page.getByLabel("password").fill(PASSWORD);
+  await page.getByRole("button", { name: "log in" }).click();
+  await expect(page.getByRole("status")).toContainText("a code is on its way to ada@example.org");
+  await expect(page).toHaveURL(`${server.url}/login`);
+
+  const login = /^ {4}(\d{6})$/m.exec((await relay.message(2)).text)?.[1];
+  expect(login).toBeTruthy();
+  const wrong = String((Number(login) + 1) % 1_000_000).padStart(6, "0");
+  await page.getByLabel("code").fill(wrong);
+  await page.getByRole("button", { name: "log in" }).click();
+  await expect(page.getByText("wrong")).toBeVisible();
+  await page.getByLabel("code").fill(login!);
+  await page.getByRole("button", { name: "log in" }).click();
+  await expect(page).toHaveURL(`${server.url}/w/tests`);
+
+  await page.goto(`${server.url}/account`);
+  await factor.getByLabel("current password").fill(PASSWORD);
+  await factor.getByRole("button", { name: "turn off" }).click();
+  await expect(factor).toContainText("off: after your password");
 });

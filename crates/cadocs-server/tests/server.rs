@@ -650,6 +650,29 @@ impl AccountStore for FlakyStore {
     ) -> Result<(), StoreError> {
         self.inner.register_user(user, attempt, session).await
     }
+
+    async fn create_session_with_code(
+        &self,
+        session: &NewSession,
+        checked_hash: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<bool, StoreError> {
+        self.inner
+            .create_session_with_code(session, checked_hash, attempt)
+            .await
+    }
+
+    async fn enable_email_2fa(
+        &self,
+        user_id: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<(), StoreError> {
+        self.inner.enable_email_2fa(user_id, attempt).await
+    }
+
+    async fn email_2fa_users(&self) -> Result<u64, StoreError> {
+        self.inner.email_2fa_users().await
+    }
 }
 
 #[derive(Clone, Copy)]

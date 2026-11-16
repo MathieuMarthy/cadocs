@@ -4,7 +4,7 @@
   import Shell from "../components/Shell.svelte";
   import { api, type User } from "../lib/api";
   import { Form } from "../lib/form.svelte";
-  import { app, signOut, updateUser } from "../lib/session.svelte";
+  import { app, mailFeatures, signOut, updateUser } from "../lib/session.svelte";
 
   const user = app.session!.user;
 
@@ -48,6 +48,38 @@
       password = "";
       currentPassword = "";
     });
+  }
+
+  // The second factor by mail (ADR 0026), offered only with a relay.
+  let mail = $state(false);
+  mailFeatures().then((read) => (mail = read.mail));
+  let factorCode = $state("");
+  let factorSent = $state(false);
+  let factorPassword = $state("");
+  const factor = new Form();
+
+  async function sendFactorCode() {
+    factorSent = await factor.run(() => api("POST", "/me/email-2fa"));
+    factorCode = "";
+  }
+
+  async function turnFactorOn(event: SubmitEvent) {
+    event.preventDefault();
+    const done = await factor.run(() => api("POST", "/me/email-2fa/confirm", { code: factorCode }));
+    if (done) {
+      updateUser({ ...app.session!.user, email_2fa: true });
+      factorSent = false;
+    }
+  }
+
+  async function turnFactorOff(event: SubmitEvent) {
+    event.preventDefault();
+    const body = factorPassword ? { current_password: factorPassword } : {};
+    const done = await factor.run(() => api("DELETE", "/me/email-2fa", body));
+    if (done) {
+      updateUser({ ...app.session!.user, email_2fa: false });
+      factorPassword = "";
+    }
   }
 
   const removal = new Form();
@@ -111,6 +143,57 @@
       <button class="button" disabled={login.busy}>save</button>
     </form>
   </section>
+
+  {#if mail}
+    <section aria-labelledby="factor-heading">
+      <h2 id="factor-heading">second factor</h2>
+      {#if app.session!.user.email_2fa}
+        <p class="meta">on: each login needs a code mailed to {app.session!.user.email}</p>
+        <form aria-labelledby="factor-heading" onsubmit={turnFactorOff}>
+          <Field
+            label="current password"
+            type="password"
+            bind:value={factorPassword}
+            autocomplete="current-password"
+            required
+            problem={factor.field("current_password")}
+          />
+          {#if factor.problem}<p class="problem" role="alert">{factor.problem}</p>{/if}
+          <button class="button secondary" disabled={factor.busy}>turn off</button>
+        </form>
+      {:else if factorSent}
+        <p class="notice" role="status">
+          a code is on its way to {app.session!.user.email}. it works for 10 minutes.
+        </p>
+        <form aria-labelledby="factor-heading" onsubmit={turnFactorOn}>
+          <Field
+            label="code"
+            bind:value={factorCode}
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            spellcheck="false"
+            required
+            problem={factor.field("code")}
+          />
+          {#if factor.problem}<p class="problem" role="alert">{factor.problem}</p>{/if}
+          <div class="actions">
+            <button class="button" disabled={factor.busy}>turn on</button>
+            <button class="button secondary" type="button" disabled={factor.busy} onclick={sendFactorCode}>
+              send a new code
+            </button>
+          </div>
+        </form>
+      {:else}
+        <p class="meta">off: after your password, a login can also ask for a code mailed to you</p>
+        {#if factor.problem}<p class="problem" role="alert">{factor.problem}</p>{/if}
+        <div class="actions">
+          <button class="button" type="button" disabled={factor.busy} onclick={sendFactorCode}>
+            turn on
+          </button>
+        </div>
+      {/if}
+    </section>
+  {/if}
 
   <section aria-labelledby="delete-heading">
     <h2 id="delete-heading">delete account</h2>

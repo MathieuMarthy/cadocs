@@ -15,6 +15,10 @@ pub(super) const INSERT_SESSION: &str =
     "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at)
      VALUES (?1, ?2, ?3, ?3, ?4)";
 
+/// A code sent to the address of user `?1`, `?2`, was used at `?3`.
+const VERIFY_ADDRESS: &str = "UPDATE users SET email_verified_at = coalesce(email_verified_at, ?3)
+     WHERE id = ?1 AND email = ?2";
+
 const DELETE_RESETS: &str = "DELETE FROM password_resets WHERE user_id = ?1";
 
 /// The links an admin made outlive neither their role nor their account: each one can take over
@@ -27,7 +31,7 @@ const USABLE_RESET: &str = "SELECT r.user_id FROM password_resets r
      WHERE r.token_hash = ?1 AND r.expires_at > ?2 AND u.disabled_at IS NULL";
 
 const SELECT_RECORD: &str =
-    "SELECT id, email, name, is_instance_admin, disabled_at, created_at FROM users";
+    "SELECT id, email, name, is_instance_admin, email_2fa, disabled_at, created_at FROM users";
 
 fn record(row: &SqliteRow) -> UserRecord {
     UserRecord {
@@ -134,6 +138,7 @@ fn user(row: &SqliteRow) -> User {
         email: row.get("email"),
         name: row.get("name"),
         is_instance_admin: row.get::<i64, _>("is_instance_admin") != 0,
+        email_2fa: row.get::<i64, _>("email_2fa") != 0,
     }
 }
 
@@ -203,7 +208,7 @@ impl AccountStore for SqliteStore {
 
     async fn credentials(&self, email: &str) -> Result<Option<Credentials>, StoreError> {
         let row = sqlx::query(
-            "SELECT id, email, name, is_instance_admin, password_hash, disabled_at
+            "SELECT id, email, name, is_instance_admin, email_2fa, password_hash, disabled_at
              FROM users WHERE email = ?1",
         )
         .bind(email)
@@ -251,7 +256,7 @@ impl AccountStore for SqliteStore {
         now: i64,
     ) -> Result<Option<ActiveSession>, StoreError> {
         let row = sqlx::query(
-            "SELECT u.id, u.email, u.name, u.is_instance_admin, s.last_seen_at
+            "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, s.last_seen_at
              FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_hash = ?1 AND s.expires_at > ?2 AND u.disabled_at IS NULL",
         )
@@ -350,6 +355,7 @@ impl AccountStore for SqliteStore {
                  name = COALESCE(?2, name),
                  email = COALESCE(?3, email),
                  password_hash = COALESCE(?4, password_hash),
+                 email_2fa = CASE WHEN ?6 THEN 0 ELSE email_2fa END,
                  updated_at = ?5
              WHERE id = ?1",
         )
@@ -358,6 +364,7 @@ impl AccountStore for SqliteStore {
         .bind(&changes.email)
         .bind(&changes.password_hash)
         .bind(now)
+        .bind(changes.email_2fa_off)
         .execute(&mut *tx)
         .await
         .map_err(|error| match error.as_database_error() {
@@ -572,10 +579,10 @@ impl AccountStore for SqliteStore {
             .execute(&mut *tx)
             .await?;
         sqlx::query(
-            "INSERT INTO email_codes (purpose, email, code_hash, expires_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO email_codes (purpose, email, code_hash, expires_at, created_at, user_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT (purpose, email) DO UPDATE SET
-                 code_hash = excluded.code_hash, tries = 0,
+                 code_hash = excluded.code_hash, tries = 0, user_id = excluded.user_id,
                  expires_at = excluded.expires_at, created_at = excluded.created_at",
         )
         .bind(code.purpose.as_str())
@@ -583,6 +590,7 @@ impl AccountStore for SqliteStore {
         .bind(&code.code_hash)
         .bind(code.expires_at)
         .bind(code.now)
+        .bind(&code.user_id)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -634,5 +642,86 @@ impl AccountStore for SqliteStore {
             .await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn create_session_with_code(
+        &self,
+        session: &NewSession,
+        checked_hash: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<bool, StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        // What `create_session` checks, and the address the code went to.
+        let still: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM users WHERE id = ?1 AND password_hash = ?2
+                                                  AND disabled_at IS NULL)",
+        )
+        .bind(&session.user_id)
+        .bind(checked_hash)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !still {
+            return Ok(false);
+        }
+        if !use_code(&mut tx, attempt).await? {
+            // The try it counted stays.
+            tx.commit().await?;
+            return Err(StoreError::WrongCode);
+        }
+        sqlx::query(VERIFY_ADDRESS)
+            .bind(&session.user_id)
+            .bind(attempt.email)
+            .bind(session.now)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(INSERT_SESSION)
+            .bind(&session.token_hash)
+            .bind(&session.user_id)
+            .bind(session.now)
+            .bind(session.expires_at)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    async fn enable_email_2fa(
+        &self,
+        user_id: &str,
+        attempt: &CodeAttempt<'_>,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        let right = use_code(&mut tx, attempt).await?;
+        let changed = if right {
+            sqlx::query(
+                "UPDATE users SET email_2fa = 1, updated_at = ?3,
+                     email_verified_at = coalesce(email_verified_at, ?3)
+                 WHERE id = ?1 AND email = ?2",
+            )
+            .bind(user_id)
+            .bind(attempt.email)
+            .bind(attempt.now)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+        } else {
+            0
+        };
+        // A wrong try stays counted, and a right code for an old address stays used.
+        tx.commit().await?;
+        if changed == 1 {
+            Ok(())
+        } else {
+            Err(StoreError::WrongCode)
+        }
+    }
+
+    async fn email_2fa_users(&self) -> Result<u64, StoreError> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM users WHERE email_2fa = 1 AND disabled_at IS NULL",
+        )
+        .fetch_one(&self.reader)
+        .await?;
+        Ok(count as u64)
     }
 }

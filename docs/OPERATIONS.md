@@ -74,6 +74,8 @@ Mail is off unless `CADOCS_SMTP_HOST` is set (ADR 0026). Off, accounts come from
 
 With mail on, the login screen links to a form that mails a reset link to the address of an account, and to registration: anyone gets a 6-digit code at their address, and the code, a name and a password make an account that belongs to no workspace. `CADOCS_WORKSPACE_CREATION=admins` and `CADOCS_WORKSPACE_QUOTA_MB` bound what a stranger can then store. `CADOCS_REGISTRATION=closed` keeps recovery and turns registration off. Codes are hashed with a key new at each start, so a restart kills the codes not used yet: they live 10 minutes anyway. Messages wait in memory, 64 at most, for one of 4 connections to the relay. One that waited two minutes, or arrives when 64 already wait, is logged and dropped. Nothing waits on disk, so a restart loses what was not sent: the person asks again.
 
+Each account can also turn on a second factor in its account screen, once a code mailed to its address proved that address: a login then asks for a code mailed after the password. That ties the account to its mailbox, as recovery already does. Turning mail off later does not lock anyone out: without a relay the factor is not asked for, and the server logs at start how many accounts have it on. `cadocs reset-password` does not turn it off.
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `CADOCS_SMTP_HOST` | unset | The relay: a host name or an address, with no scheme or port. Unset or empty turns mail off, whatever the others say. An empty value of any setting below counts as unset |
