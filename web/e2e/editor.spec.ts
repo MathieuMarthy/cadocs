@@ -313,6 +313,24 @@ test("a block this tab does not know stays intact for the others", async ({
   }
 });
 
+test("a page stopped on content it cannot show still learns it was deleted", async ({
+  left,
+  server,
+}) => {
+  await expect(status(left)).toContainText("synced");
+  const writer = await writeFutureBlock(server);
+  try {
+    await expect(left.getByRole("alert")).toContainText("cannot show");
+    // The stopped editor has no socket left to say why the page went: its read says so.
+    const id = new URL(left.url()).searchParams.get("page");
+    await server.call("DELETE", `/pages/${id}`);
+    await expect(left.getByRole("heading", { name: "page not found" })).toBeVisible();
+  } finally {
+    writer.provider.destroy();
+    writer.doc.destroy();
+  }
+});
+
 test("a plugin block shows its text and stays intact", async ({ left, right, server }) => {
   // No plugin runs before V2: every plugin block is one whose plugin is missing (ADR 0016).
   await bothOnline(left, right);

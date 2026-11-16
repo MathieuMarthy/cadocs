@@ -116,13 +116,19 @@
     const first = seen === null;
     seen = { nav, space: spaceId, version };
     // The first sight of a version only learns it: the page was just read.
-    if (!first) void check();
+    if (!first) void check({ socketTells: true });
   });
 
-  /** A socket cannot read the status of a failed upgrade, so REST says what went wrong. */
-  /** Reads can overlap, and an older one answering last would bring back an older role. */
+  /**
+   * A socket cannot read the status of a failed upgrade, so REST says what went wrong.
+   * Reads can overlap, and an older one answering last would bring back an older role.
+   *
+   * REST answers `404` alike for a page in the trash and one the reader lost, while the socket
+   * closes with `4404` or `4403`. A read made while the socket is open (`socketTells`) leaves a
+   * `404` to it, and no read replaces what the socket said.
+   */
   let reads = 0;
-  async function check() {
+  async function check({ socketTells = false } = {}) {
     const read = ++reads;
     try {
       const answer = await api<PageView>("GET", `/pages/${id}`);
@@ -133,6 +139,9 @@
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) return false;
       if (error instanceof ApiError && error.status === 404) {
+        if (gone) return false;
+        // An editor stopped on content it cannot show has no socket left to tell.
+        if (socketTells && page && !stale) return true;
         gone = "page not found";
         return false;
       }
@@ -186,6 +195,7 @@
       };
       page = openPage(id, { editor, title, status, presence }, options, {
         onName: (text) => (name = text),
+        // A `4409` closed the socket: no close code will follow, so a `404` here is the answer.
         onRoleChanged: () => void check(),
         onContentError: () => (stale = true),
         onFinalClose(code) {

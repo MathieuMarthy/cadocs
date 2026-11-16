@@ -431,7 +431,13 @@ test("a page trashed elsewhere offers its parent", async ({ page, server }) => {
   await page.goto(`${server.url}/?page=${deploy}`);
   await expect(page.getByRole("banner").getByRole("status")).toContainText("synced");
 
+  // The tree event that follows makes the page read itself again, and that read answers 404:
+  // it must not turn the deletion the socket reported into a page not found.
+  const reread = page.waitForResponse(
+    (response) => response.url().endsWith(`/api/v1/pages/${deploy}`) && response.status() === 404,
+  );
   await server.call("DELETE", `/pages/${deploy}`);
+  await reread;
   await expect(page.getByRole("heading", { name: "page deleted" })).toBeVisible();
   await page.getByRole("link", { name: "open the parent page" }).click();
   await expect(page).toHaveURL(`${server.url}/?page=${runbooks}`);

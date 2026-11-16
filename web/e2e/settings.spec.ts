@@ -107,6 +107,9 @@ test("a grant lowers one member below the default, and the open page follows", a
   // Back to the default, which is none here: the page is gone for her.
   await access.getByLabel("access of Grace").selectOption("");
   await expect(guest.getByRole("main")).toContainText("access revoked");
+  // A read of the page that answers after the socket closed does not change what it says.
+  await guest.waitForTimeout(1_500);
+  await expect(guest.getByRole("main")).toContainText("access revoked");
 });
 
 test("a workspace admin renames the workspace, revokes an invitation, and a member only reads", async ({
