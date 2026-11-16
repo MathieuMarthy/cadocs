@@ -1,1 +1,3 @@
 graphify-out/graph.json merge=graphify
+*.db binary
+crates/cadocs-server/tests/upgrade/** binary

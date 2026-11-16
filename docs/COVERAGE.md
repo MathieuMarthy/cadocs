@@ -1,6 +1,6 @@
 # Coverage
 
-Where the MVP scope of [ROADMAP.md](ROADMAP.md#mvp) and the matrix of [PERMISSIONS.md](PERMISSIONS.md) are tested. A new feature adds its line here with the tests that cover it.
+Where the MVP and V1 scopes of [ROADMAP.md](ROADMAP.md#mvp) and the matrix of [PERMISSIONS.md](PERMISSIONS.md) are tested. A new feature adds its line here with the tests that cover it.
 
 Paths are short: `server/auth.rs` is `crates/cadocs-server/tests/auth.rs`, `e2e/shell` is `web/e2e/shell.spec.ts`.
 
@@ -47,5 +47,12 @@ Comments, public shares, groups and plugins have no route before V1 or V2: their
 | Docker image, binaries | `scripts/check-image.sh`: serve, setup, backup, restore in the image, then a folder of root and a folder of the caller, each served without root (ADR 0025), with `server/privileges.rs`. CI runs it on `amd64` after each push to main, and `release.yml` on each architecture before pushing |
 | Backup and restore | `server/backup.rs`, `scripts/check-image.sh` |
 | `OPERATIONS.md` complete | A document, checked by reading |
+
+## V1 scope
+
+| Item | Tests |
+| --- | --- |
+| Upgrade from every earlier release | `server/upgrade.rs`: the data folder each release left (`tests/upgrade/<tag>`, from `scripts/make-upgrade-fixture.sh`), restored, migrated and served: logins, roles, grants, tree, content, attachment, search, revisions, trash, a write |
+| Binary under 30 MB, no S3 code in a default build | `scripts/check-build.sh`: the dependency graph of each flavor in CI's `rust` job on every pull request; the size and S3 code of the release binary in the `e2e` job after each push to main, and of each binary in `release.yml` |
 
 Not automated: the RAM targets (`bench/rss.sh`), except that a hash's memory goes back with no trim (`server/hash_memory.rs`, ADR 0023), and the release workflow as a whole, which runs on a tag.

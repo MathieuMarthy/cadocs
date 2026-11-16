@@ -109,6 +109,11 @@ pub async fn start_in(dir: TempDir) -> Api {
     start_custom_in(dir, ORIGIN, "", &[], None).await
 }
 
+/// `start_in`, with more environment variables.
+pub async fn start_in_tuned(dir: TempDir, settings: &[(&str, &str)]) -> Api {
+    start_custom_in(dir, ORIGIN, "", settings, None).await
+}
+
 async fn start_custom(
     public_url: &str,
     proxies: &str,
