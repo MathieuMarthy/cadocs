@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../lib/i18n";
   import { appear } from "../lib/motion";
   import { hold, notices, release, undo } from "../lib/notice.svelte";
 
@@ -30,7 +31,7 @@
       <span>{notice.text}</span>
       {#if notice.undo}
         <button bind:this={button} class="button secondary" type="button" onclick={() => undo(notice)}>
-          undo
+          {t("notice.undo")}
         </button>
       {/if}
     </div>

@@ -4,6 +4,7 @@
   import { api, ApiError, type Session } from "../lib/api";
   import { describe, Form } from "../lib/form.svelte";
   import { boot, signIn } from "../lib/session.svelte";
+  import { t } from "../lib/i18n";
 
   let { code: linked }: { code: string } = $props();
 
@@ -36,13 +37,13 @@
   }
 </script>
 
-<Solo title="first run">
-  <p class="meta">create the first account. it owns the first workspace and runs this instance.</p>
+<Solo title={t("setup.title")}>
+  <p class="meta">{t("setup.intro")}</p>
   <form onsubmit={submit}>
     {#if askCode}
-      <p class="meta">the server log shows a link with the setup code each time the server starts.</p>
+      <p class="meta">{t("setup.codeHint")}</p>
       <Field
-        label="setup code"
+        label={t("setup.code")}
         bind:value={code}
         autocomplete="off"
         spellcheck="false"
@@ -50,9 +51,9 @@
         problem={form.field("code")}
       />
     {/if}
-    <Field label="name" bind:value={name} autocomplete="name" required problem={form.field("name")} />
+    <Field label={t("form.name")} bind:value={name} autocomplete="name" required problem={form.field("name")} />
     <Field
-      label="email"
+      label={t("form.email")}
       type="email"
       bind:value={email}
       autocomplete="email"
@@ -60,7 +61,7 @@
       problem={form.field("email")}
     />
     <Field
-      label="password"
+      label={t("form.password")}
       type="password"
       bind:value={password}
       autocomplete="new-password"
@@ -68,12 +69,12 @@
       problem={form.field("password")}
     />
     <Field
-      label="workspace name"
+      label={t("workspace.name")}
       bind:value={workspace}
       required
       problem={form.field("workspace_name")}
     />
     {#if form.problem}<p class="problem" role="alert">{form.problem}</p>{/if}
-    <button class="button" disabled={form.busy}>create workspace</button>
+    <button class="button" disabled={form.busy}>{t("workspace.create")}</button>
   </form>
 </Solo>

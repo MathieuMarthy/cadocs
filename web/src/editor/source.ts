@@ -80,6 +80,7 @@ function sourceOf(role: Role) {
     case "heading":
       return `${"#".repeat(role.level)} `;
     case "item":
+      // i18n-ignore: Markdown
       if (role.list === "taskList") return role.checked ? "[x] " : "[ ] ";
       return role.list === "orderedList" ? `${role.number}. ` : "- ";
     case "quote":

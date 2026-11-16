@@ -10,6 +10,8 @@ export default defineConfig({
   expect: { timeout: 30_000 },
   use: {
     browserName: "chromium",
+    // The interface follows the browser's language (step 34): tests read it in English.
+    locale: "en-US",
     launchOptions: { executablePath: process.env.CHROMIUM_PATH || undefined },
   },
 });

@@ -2,6 +2,7 @@
   import Field from "./Field.svelte";
   import { api, type Workspace } from "../lib/api";
   import { Form } from "../lib/form.svelte";
+  import { t } from "../lib/i18n";
   import { navigate } from "../lib/router.svelte";
   import { refreshSession } from "../lib/session.svelte";
 
@@ -30,7 +31,7 @@
 
 <form class="new-workspace" onsubmit={submit} {@attach focus}>
   <Field
-    label="workspace name"
+    label={t("workspace.name")}
     bind:value={name}
     problem={creating.field("name")}
     required
@@ -43,9 +44,9 @@
   />
   {#if creating.problem}<p class="problem" role="alert">{creating.problem}</p>{/if}
   <div class="actions">
-    <button class="button" type="submit" disabled={creating.busy}>create workspace</button>
+    <button class="button" type="submit" disabled={creating.busy}>{t("workspace.create")}</button>
     {#if onclose}
-      <button class="button secondary" type="button" onclick={onclose}>cancel</button>
+      <button class="button secondary" type="button" onclick={onclose}>{t("common.cancel")}</button>
     {/if}
   </div>
 </form>

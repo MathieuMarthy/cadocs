@@ -1,12 +1,14 @@
 import { ApiError } from "./api";
+import { type Key, t } from "./i18n";
+import { en } from "./i18n/en";
 
 /** What a refusal says to a person. */
 export function describe(error: unknown) {
-  if (!(error instanceof ApiError)) return "something went wrong";
+  if (!(error instanceof ApiError)) return t("error.unknown");
   if (error.status === 429) {
     return error.retryAfter
-      ? `too many attempts, retry in ${error.retryAfter}s`
-      : "too many attempts, retry later";
+      ? t("error.tooManyIn", { seconds: error.retryAfter })
+      : t("error.tooMany");
   }
   return error.message.toLowerCase();
 }
@@ -17,9 +19,12 @@ export class Form {
   problem = $state<string | null>(null);
   fields = $state<Record<string, string>>({});
 
-  /** `too_short` reads as `too short`. */
+  /** The server's code for a field, as the catalogue words it: `too_short` reads `too short`. */
   field(name: string) {
-    return this.fields[name]?.replaceAll("_", " ") ?? null;
+    const code = this.fields[name];
+    if (code === undefined) return null;
+    const key = `field.${code}`;
+    return key in en ? t(key as Key) : code.replaceAll("_", " ");
   }
 
   /** Runs `action`. It returns whether it worked, and `explain` can word a refusal. */

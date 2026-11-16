@@ -5,6 +5,7 @@
 import { mergeAttributes, Node } from "@tiptap/core";
 
 import { attachmentUrl } from "../lib/api";
+import { t } from "../lib/i18n";
 
 /** The types the server shows in the page. Anything else, SVG included, is a file to download. */
 export const IMAGE_TYPES = ["image/avif", "image/gif", "image/jpeg", "image/png", "image/webp"];
@@ -58,7 +59,7 @@ export const ImageBlock = Node.create({
       // A file deleted since, or one this reader cannot open, shows as a placeholder.
       image.addEventListener("error", () => {
         dom.classList.add("attachment-missing");
-        dom.textContent = "image not found";
+        dom.textContent = t("editor.imageMissing");
       });
       dom.append(image);
       return { dom, ignoreMutation: () => true };
@@ -93,7 +94,7 @@ export const FileBlock = Node.create({
     return [
       "a",
       mergeAttributes(HTMLAttributes, { "data-type": "file", href, download: "" }),
-      String(node.attrs.name ?? "file"),
+      String(node.attrs.name ?? t("editor.fileLabel")),
     ];
   },
 
@@ -109,10 +110,10 @@ export const FileBlock = Node.create({
       // A label, not an icon: icons stand for verbs (`docs/DESIGN_SYSTEM.md`).
       const label = document.createElement("span");
       label.className = "file-label";
-      label.textContent = "file";
+      label.textContent = t("editor.fileLabel");
       const name = document.createElement("span");
       name.className = "file-name";
-      name.textContent = String(node.attrs.name || "file");
+      name.textContent = String(node.attrs.name || t("editor.fileLabel"));
       // Not stored in the document: the server knows it, so it is read with a `HEAD`.
       const size = document.createElement("span");
       size.className = "file-size";
@@ -121,7 +122,7 @@ export const FileBlock = Node.create({
       void fileSize(link.href).then((bytes) => {
         if (!live) return;
         if (bytes === null) dom.classList.add("attachment-missing");
-        size.textContent = bytes === null ? "not found" : formatSize(bytes);
+        size.textContent = bytes === null ? t("editor.fileMissing") : formatSize(bytes);
       });
       dom.append(link);
       return {

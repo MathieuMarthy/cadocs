@@ -7,7 +7,7 @@ type Theme = (typeof ORDER)[number];
 
 function stored(): Theme {
   const value = document.documentElement.dataset.theme;
-  return value === "light" || value === "dark" ? value : "auto";
+  return value === "light" || value === "dark" ? value : "auto"; // i18n-ignore
 }
 
 export const theme = $state({ current: stored() });

@@ -9,6 +9,7 @@
 <script lang="ts">
   import Field from "./Field.svelte";
   import { api } from "../lib/api";
+  import { t } from "../lib/i18n";
   import { Form } from "../lib/form.svelte";
   import type { Nav, Space } from "../lib/nav.svelte";
 
@@ -33,7 +34,7 @@
 
 <form class="new-space" onsubmit={submit} {@attach focus}>
   <Field
-    label="space name"
+    label={t("space.name")}
     bind:value={name}
     problem={creating.field("name")}
     required
@@ -46,7 +47,7 @@
   />
   {#if creating.problem}<p class="problem" role="alert">{creating.problem}</p>{/if}
   <div class="actions">
-    <button class="button" type="submit" disabled={creating.busy}>create space</button>
-    <button class="button secondary" type="button" onclick={onclose}>cancel</button>
+    <button class="button" type="submit" disabled={creating.busy}>{t("space.create")}</button>
+    <button class="button secondary" type="button" onclick={onclose}>{t("common.cancel")}</button>
   </div>
 </form>

@@ -24,6 +24,8 @@ pub struct User {
     pub is_instance_admin: bool,
     /// Whether a login needs a code by mail after the password (ADR 0026).
     pub email_2fa: bool,
+    /// The language of the interface, `None` to follow the browser's.
+    pub language: Option<String>,
 }
 
 /// An account as an instance admin sees it.
@@ -91,6 +93,8 @@ pub struct UserChanges {
     pub password_hash: Option<String>,
     /// Only to turn the factor off: turning it on needs a code (`enable_email_2fa`).
     pub email_2fa_off: bool,
+    /// `Some(None)` clears it.
+    pub language: Option<Option<String>>,
 }
 
 /// Fields left to `None` keep their value.

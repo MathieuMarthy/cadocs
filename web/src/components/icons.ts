@@ -30,4 +30,5 @@ export type IconName = keyof typeof icons;
 
 /** The same drawing as markup, for the editor's menus, which are built without Svelte. */
 export const iconMarkup = (name: IconName) =>
+  // i18n-ignore
   `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true" focusable="false">${icons[name]}</svg>`;

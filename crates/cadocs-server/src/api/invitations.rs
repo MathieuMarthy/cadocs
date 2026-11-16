@@ -239,6 +239,7 @@ async fn accept<S: AccountStore + WorkspaceStore, A>(
         name: invited.name,
         is_instance_admin: false,
         email_2fa: false,
+        language: None,
     };
     Ok(new_account_body(&state, user, workspaces, &session_token))
 }

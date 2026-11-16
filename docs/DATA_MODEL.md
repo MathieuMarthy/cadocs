@@ -23,6 +23,7 @@ CREATE TABLE users (
     disabled_at    BIGINT,
     email_verified_at BIGINT,                -- ADR 0026: NULL until a code sent to it is used
     email_2fa      SMALLINT NOT NULL DEFAULT 0 CHECK (email_2fa IN (0, 1)), -- ADR 0026: a login needs a mailed code
+    language       TEXT,                     -- the interface's (`en`, `fr`), NULL follows the browser's
     created_at     BIGINT NOT NULL,
     updated_at     BIGINT NOT NULL,
     UNIQUE (email)

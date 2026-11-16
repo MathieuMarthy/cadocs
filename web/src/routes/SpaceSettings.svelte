@@ -9,14 +9,16 @@
   import { acquireNav, collect, type Space } from "../lib/nav.svelte";
   import { notify } from "../lib/notice.svelte";
   import {
-    DEFAULT_ROLES,
+    defaultRoles,
     managesWorkspace,
     MAX_MEMBERS,
     type Member,
+    roleName,
     SPACE_ROLES,
   } from "../lib/roles";
   import { navigate } from "../lib/router.svelte";
   import { app } from "../lib/session.svelte";
+  import { t } from "../lib/i18n";
 
   /** A row of `GET /spaces/{space}/grants`: groups come in V1, and are kept as they are. */
   interface Grant {
@@ -65,10 +67,13 @@
     const done = await general.run(() => api<Space>("PATCH", `/spaces/${id}`, body));
     if (!done) return;
     await nav.loadSpaces();
-    notify("saved");
+    notify(t("account.saved"));
   }
 
-  const roleName = (role: string | null) => role ?? "no access";
+  const accessName = (role: string | null) => (role ? roleName(role) : t("space.noAccess"));
+  const defaultAccess = (role: string | null) => t("space.default", { role: accessName(role) });
+  /** The fields a refusal of the grants can name. */
+  const GRANT_FIELDS = { grants: "space.grants", role: "space.role" } as const;
 
   // Access: every member, with their grant, and the workspace admins who need none.
   let members = $state<Member[] | null>(null);
@@ -100,8 +105,8 @@
     grants.find((grant) => grant.user_id === member.id)?.role ?? "";
 
   const accessOptions = $derived([
-    { value: "", label: `default: ${roleName(space?.default_role ?? null)}` },
-    ...SPACE_ROLES.map((role) => ({ value: role, label: role })),
+    { value: "", label: defaultAccess(space?.default_role ?? null) },
+    ...SPACE_ROLES.map((role) => ({ value: role, label: roleName(role) })),
   ]);
 
   /** `PUT` replaces every grant: the others go back as they were, this one changes. */
@@ -129,7 +134,7 @@
     // Outside the form, so its refusal stays on screen.
     await fetchAccess(id).catch(() => {});
     if (!done) return;
-    notify("access changed");
+    notify(t("space.accessChanged"));
     // This user's own role may be the one that changed.
     if (member.id === app.session?.user.id) await nav.loadSpaces();
   }
@@ -144,78 +149,78 @@
     if (!done) return;
     await nav.loadSpaces();
     navigate(`/w/${workspace.slug}`);
-    notify("moved to trash", async () => {
+    notify(t("page.trashed"), async () => {
       await api("POST", `/spaces/${moved.id}/restore`);
       await nav.loadSpaces();
     });
   }
 </script>
 
-<Shell title="settings" {workspace} {crumbs}>
+<Shell title={t("shell.settings")} {workspace} {crumbs}>
   {#if !nav.spacesLoaded}
-    <h1>settings</h1>
-    <p class="meta" role="status">loading…</p>
+    <h1>{t("shell.settings")}</h1>
+    <p class="meta" role="status">{t("common.loading")}</p>
   {:else if !space}
-    <h1>settings</h1>
-    <p class="notice">no such space</p>
+    <h1>{t("shell.settings")}</h1>
+    <p class="notice">{t("trash.noSpace")}</p>
   {:else}
-    <h1>{space.name} settings</h1>
+    <h1>{t("space.settingsOf", { name: space.name })}</h1>
 
     <section aria-labelledby="space-heading">
-      <h2 id="space-heading">space</h2>
+      <h2 id="space-heading">{t("space.section")}</h2>
       {#if admin}
         <form onsubmit={save}>
-          <Field label="name" bind:value={name} required problem={general.field("name")} />
+          <Field label={t("form.name")} bind:value={name} required problem={general.field("name")} />
           <Field
-            label="description"
+            label={t("space.description")}
             bind:value={description}
             maxlength={1000}
             autocomplete="off"
             problem={general.field("description")}
           />
           <Select
-            label="default role"
+            label={t("space.defaultRole")}
             bind:value={defaultRole}
-            options={DEFAULT_ROLES}
+            options={defaultRoles()}
             problem={general.field("default_role")}
           />
-          <p class="meta">what a workspace member without a grant gets.</p>
+          <p class="meta">{t("space.defaultRoleHint")}</p>
           {#if general.problem}<p class="problem" role="alert">{general.problem}</p>{/if}
-          <button class="button" disabled={general.busy}>save</button>
+          <button class="button" disabled={general.busy}>{t("account.save")}</button>
         </form>
       {:else}
         {#if space.description}<p class="notice">{space.description}</p>{/if}
-        <p class="notice">default role: {roleName(space.default_role)}</p>
-        <p class="meta">only space admins change these settings.</p>
+        <p class="notice">{t("space.defaultRoleIs", { role: accessName(space.default_role) })}</p>
+        <p class="meta">{t("space.adminsOnly")}</p>
       {/if}
     </section>
 
     <section aria-labelledby="access-heading">
-      <h2 id="access-heading">access</h2>
-      <p class="meta">a grant replaces the default role, even when it is lower.</p>
+      <h2 id="access-heading">{t("space.access")}</h2>
+      <p class="meta">{t("space.accessHint")}</p>
       {#if access.problem}<p class="problem" role="alert">{access.problem}</p>{/if}
-      {#each ["grants", "role"] as field (field)}
+      {#each Object.entries(GRANT_FIELDS) as [field, key] (field)}
         {#if access.field(field)}
-          <p class="problem" role="alert">{field}: {access.field(field)}</p>
+          <p class="problem" role="alert">{t("space.fieldProblem", { field: t(key), problem: access.field(field) ?? "" })}</p>
         {/if}
       {/each}
       {#if members === null}
-        {#if !access.problem}<p class="meta" role="status">loading…</p>{/if}
+        {#if !access.problem}<p class="meta" role="status">{t("common.loading")}</p>{/if}
       {:else}
         <ul class="records">
           {#each members as member (member.id)}
             <li class="record">
               <div class="record-who">
-                {member.name}{#if member.id === app.session?.user.id}&nbsp;<span class="you">(you)</span
+                {member.name}{#if member.id === app.session?.user.id}&nbsp;<span class="you">{t("admin.you")}</span
                   >{/if}
                 <span>{member.email}</span>
               </div>
               {#if managesWorkspace(member.role)}
-                <span class="badges"><span class="badge">workspace admin</span></span>
+                <span class="badges"><span class="badge">{t("space.workspaceAdmin")}</span></span>
               {:else if admin}
                 <select
                   class="select"
-                  aria-label="access of {member.name}"
+                  aria-label={t("space.accessOf", { name: member.name })}
                   value={grantOf(member)}
                   disabled={access.busy}
                   onchange={(event) => void setGrant(member, event.currentTarget)}
@@ -226,7 +231,7 @@
                 </select>
               {:else}
                 <span class="badges">
-                  <span class="badge">{grantOf(member) || `default: ${roleName(space.default_role)}`}</span>
+                  <span class="badge">{grantOf(member) ? roleName(grantOf(member)) : defaultAccess(space.default_role)}</span>
                 </span>
               {/if}
             </li>
@@ -237,11 +242,11 @@
 
     {#if admin}
       <section aria-labelledby="trash-heading">
-        <h2 id="trash-heading">trash</h2>
-        <p class="meta">its pages leave the tree for everyone until a space admin restores it.</p>
+        <h2 id="trash-heading">{t("trash.title")}</h2>
+        <p class="meta">{t("space.trashHint")}</p>
         {#if trashing.problem}<p class="problem" role="alert">{trashing.problem}</p>{/if}
         <button class="button" type="button" disabled={trashing.busy} onclick={() => void trash()}>
-          move to trash
+          {t("page.trash")}
         </button>
       </section>
     {/if}

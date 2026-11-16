@@ -3,16 +3,17 @@
 import type { Nav, PageRow } from "./nav.svelte";
 import { notify } from "./notice.svelte";
 import { navigate, reopened, shownPage } from "./router.svelte";
+import { t } from "./i18n";
 
 export const pageLink = (id: string) => new URL(`/?page=${id}`, location.origin).href;
 
-/** Copies `text` and says so in the notice. */
-export async function copy(text: string, what = "link") {
+/** Copies `text` and says so in the notice, by default as a link. */
+export async function copy(text: string, copied = t("copy.link"), failed = t("copy.linkFailed")) {
   try {
     await navigator.clipboard.writeText(text);
-    notify(`${what} copied`);
+    notify(copied);
   } catch {
-    notify(`could not copy the ${what}`);
+    notify(failed);
   }
 }
 
@@ -40,7 +41,7 @@ export async function trashPage(nav: Nav, page: PageRow) {
   await nav.trash(page);
   const left = away ? (page.parent_id ? `/?page=${page.parent_id}` : `/w/${nav.workspace.slug}`) : null;
   if (left) navigate(left);
-  notify("moved to trash", async () => {
+  notify(t("page.trashed"), async () => {
     await nav.restore(page);
     if (left && shown && location.pathname + location.search === left) {
       // Still where the trash sent us: go back to the page that showed.

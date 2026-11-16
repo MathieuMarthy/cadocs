@@ -9,6 +9,7 @@
   import { describe } from "../lib/form.svelte";
   import { acquireNav, canEdit, type PageRow } from "../lib/nav.svelte";
   import { app } from "../lib/session.svelte";
+  import { t } from "../lib/i18n";
 
   let { workspace, slug }: { workspace: Workspace; slug: string } = $props();
 
@@ -64,34 +65,34 @@
   const purge = (page: PageRow) => act(() => api("DELETE", `/pages/${page.id}/purge`));
 </script>
 
-<Shell title="trash" {workspace} {crumbs}>
-  <h1>trash</h1>
+<Shell title={t("trash.title")} {workspace} {crumbs}>
+  <h1>{t("trash.title")}</h1>
   {#if !nav.spacesLoaded}
-    <p class="meta" role="status">loading…</p>
+    <p class="meta" role="status">{t("common.loading")}</p>
   {:else if !space}
-    <p class="notice">no such space</p>
+    <p class="notice">{t("trash.noSpace")}</p>
   {:else}
-    <p class="meta">restoring a page also restores its subpages</p>
+    <p class="meta">{t("trash.hint")}</p>
     {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
     {#if items === null}
-      {#if !problem}<p class="meta" role="status">loading…</p>{/if}
+      {#if !problem}<p class="meta" role="status">{t("common.loading")}</p>{/if}
     {:else if items.length === 0}
-      <p class="notice">the trash is empty</p>
+      <p class="notice">{t("trash.empty")}</p>
     {:else}
       <ul class="records">
         {#each items as page (page.id)}
           <li class="record">
             <span class="record-who">
-              {page.title || "untitled"}
-              <span>moved to trash <Time value={page.deleted_at ?? page.updated_at} /></span>
+              {page.title || t("page.untitled")}
+              <span>{t("page.trashed")} <Time value={page.deleted_at ?? page.updated_at} /></span>
             </span>
             {#if canEdit(page.role)}
-              <IconButton icon="rotate-ccw" verb="restore" onclick={() => restore(page)} />
+              <IconButton icon="rotate-ccw" verb={t("trash.restore")} onclick={() => restore(page)} />
             {/if}
             {#if page.role === "admin"}
               <Confirm
-                label="delete forever"
-                confirm="delete forever"
+                label={t("trash.purge")}
+                confirm={t("trash.purge")}
                 icon="x"
                 danger
                 onconfirm={() => purge(page)}
@@ -102,7 +103,7 @@
       </ul>
       {#if next}
         <button class="button secondary" type="button" onclick={() => load(space.id, next)}>
-          more
+          {t("common.more")}
         </button>
       {/if}
     {/if}

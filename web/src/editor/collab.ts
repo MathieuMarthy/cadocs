@@ -12,6 +12,7 @@ import { commandsOf, entries, extensionsOf } from "./registry";
 import { SlashMenu } from "./slash";
 import { bindTitle } from "./title";
 import { Uploads } from "./uploads";
+import { t } from "../lib/i18n";
 
 const CLOSE_MALFORMED = 1002;
 const CLOSE_TOO_LARGE = 1009;
@@ -77,7 +78,7 @@ export function openPage(page: string, elements: Elements, options: Options, cal
     onContentError: ({ disableCollaboration }) => {
       if (stopped) return;
       stopped = true;
-      problem = "stopped";
+      problem = t("editor.stopped");
       provider.destroy();
       disableCollaboration();
       applyMode();
@@ -97,11 +98,11 @@ export function openPage(page: string, elements: Elements, options: Options, cal
         selectionRender: renderSelection,
       }),
     ],
-    editorProps: { attributes: { "aria-label": "page content" } },
+    editorProps: { attributes: { "aria-label": t("editor.content") } },
   });
 
   const unbindTitle = bindTitle(title, ydoc.getText("title"), (text) => {
-    document.title = text ? `${text} · cadocs` : "cadocs";
+    document.title = text ? t("document.title", { title: text }) : "cadocs";
     callbacks.onName(text);
   });
   function applyMode() {
@@ -124,11 +125,11 @@ export function openPage(page: string, elements: Elements, options: Options, cal
       status.textContent = problem;
     } else if (provider.synced) {
       status.dataset.state = "synced";
-      const mode = editable ? "" : " · read only";
-      status.textContent = `synced · ${awareness.getStates().size} online${mode}`;
+      const count = awareness.getStates().size;
+      status.textContent = t(editable ? "editor.synced" : "editor.syncedReadOnly", { count });
     } else {
       status.dataset.state = "pending";
-      status.textContent = provider.wsconnected ? "syncing…" : "connecting…";
+      status.textContent = t(provider.wsconnected ? "editor.syncing" : "editor.connecting");
     }
   }
 
@@ -143,7 +144,7 @@ export function openPage(page: string, elements: Elements, options: Options, cal
       // The provider reconnects in the new mode, and the role read turns writing back on.
       editable = false;
       applyMode();
-      problem = "role changed, reconnecting";
+      problem = t("editor.roleChanged");
       renderStatus();
       callbacks.onRoleChanged();
       return;
@@ -151,13 +152,13 @@ export function openPage(page: string, elements: Elements, options: Options, cal
     switch (event?.code) {
       case CLOSE_MALFORMED:
       case CLOSE_TOO_LARGE:
-        problem = "rejected by the server";
+        problem = t("editor.rejected");
         break;
       case CLOSE_STORAGE_FAILING:
-        problem = "storage failing, retrying";
+        problem = t("editor.storageFailing");
         break;
       default:
-        problem = "offline, retrying";
+        problem = t("editor.offline");
     }
     renderStatus();
     failures += 1;

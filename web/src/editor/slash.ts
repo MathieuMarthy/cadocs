@@ -7,6 +7,7 @@ import Suggestion, { type SuggestionProps } from "@tiptap/suggestion";
 
 import { CommandMenu } from "./menu";
 import { findCommands, type SlashCommand } from "./registry";
+import { t } from "../lib/i18n";
 
 type Props = SuggestionProps<SlashCommand, SlashCommand>;
 
@@ -53,7 +54,7 @@ export const SlashMenu = Extension.create<{ commands: SlashCommand[] }>({
           let unmount: (() => void) | null = null;
           return {
             onStart(props) {
-              menu = new CommandMenu(props, "commands");
+              menu = new CommandMenu(props, t("editor.commands"));
               unmount = props.mount(menu.element);
             },
             onUpdate(props) {

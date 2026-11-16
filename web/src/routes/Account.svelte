@@ -5,6 +5,7 @@
   import { api, type User } from "../lib/api";
   import { Form } from "../lib/form.svelte";
   import { app, mailFeatures, signOut, updateUser } from "../lib/session.svelte";
+  import { t } from "../lib/i18n";
 
   const user = app.session!.user;
 
@@ -43,7 +44,7 @@
     if (email !== app.session!.user.email) changes.email = email;
     if (password) changes.password = password;
     if (Object.keys(changes).length === 0) {
-      login.problem = "nothing to save: type a new email or password";
+      login.problem = t("account.nothing");
       return;
     }
     if (currentPassword) changes.current_password = currentPassword;
@@ -64,7 +65,7 @@
     });
     if (done) {
       const waits = asked !== undefined && pending;
-      loginSaved = waits ? `a code is on its way to ${pending}. it works for 10 minutes.` : "saved";
+      loginSaved = waits ? t("login.codeSent", { email: pending }) : t("account.saved");
     }
   }
 
@@ -77,7 +78,7 @@
     });
     if (done) {
       pending = "";
-      loginSaved = "email changed";
+      loginSaved = t("account.emailChanged");
     }
   }
 
@@ -121,14 +122,14 @@
   }
 </script>
 
-<Shell title="account" crumbWorkspace={false}>
-  <h1>account</h1>
+<Shell title={t("shell.account")} crumbWorkspace={false}>
+  <h1>{t("shell.account")}</h1>
 
   <section aria-labelledby="profile-heading">
-    <h2 id="profile-heading">profile</h2>
+    <h2 id="profile-heading">{t("account.profile")}</h2>
     <form aria-labelledby="profile-heading" onsubmit={saveProfile}>
       <Field
-        label="name"
+        label={t("form.name")}
         bind:value={name}
         autocomplete="name"
         required
@@ -136,16 +137,16 @@
         oninput={() => (profileSaved = false)}
       />
       {#if profile.problem}<p class="problem" role="alert">{profile.problem}</p>{/if}
-      {#if profileSaved}<p class="notice" role="status">saved</p>{/if}
-      <button class="button" disabled={profile.busy}>save</button>
+      {#if profileSaved}<p class="notice" role="status">{t("account.saved")}</p>{/if}
+      <button class="button" disabled={profile.busy}>{t("account.save")}</button>
     </form>
   </section>
 
   <section aria-labelledby="login-heading">
-    <h2 id="login-heading">email and password</h2>
+    <h2 id="login-heading">{t("account.login")}</h2>
     <form aria-labelledby="login-heading" onsubmit={saveLogin}>
       <Field
-        label="email"
+        label={t("form.email")}
         type="email"
         bind:value={email}
         autocomplete="email"
@@ -154,7 +155,7 @@
         oninput={() => (loginSaved = "")}
       />
       <Field
-        label="new password"
+        label={t("form.newPassword")}
         type="password"
         bind:value={password}
         autocomplete="new-password"
@@ -162,21 +163,21 @@
         oninput={() => (loginSaved = "")}
       />
       <Field
-        label="current password"
+        label={t("form.currentPassword")}
         type="password"
         bind:value={currentPassword}
         autocomplete="current-password"
         problem={login.field("current_password")}
       />
-      <p class="meta">a new email or password needs the current one</p>
+      <p class="meta">{t("account.needsCurrent")}</p>
       {#if login.problem}<p class="problem" role="alert">{login.problem}</p>{/if}
       {#if loginSaved}<p class="notice" role="status">{loginSaved}</p>{/if}
-      <button class="button" disabled={login.busy}>save</button>
+      <button class="button" disabled={login.busy}>{t("account.save")}</button>
     </form>
     {#if pending}
-      <form aria-label="new email" onsubmit={proveEmail}>
+      <form aria-label={t("account.newEmail")} onsubmit={proveEmail}>
         <Field
-          label="code"
+          label={t("form.code")}
           bind:value={proofCode}
           inputmode="numeric"
           autocomplete="one-time-code"
@@ -185,20 +186,20 @@
           problem={proof.field("code")}
         />
         {#if proof.problem}<p class="problem" role="alert">{proof.problem}</p>{/if}
-        {#if proof.field("email")}<p class="problem" role="alert">another account took this email</p>{/if}
-        <button class="button" disabled={proof.busy}>change email</button>
+        {#if proof.field("email")}<p class="problem" role="alert">{t("account.emailTaken")}</p>{/if}
+        <button class="button" disabled={proof.busy}>{t("account.changeEmail")}</button>
       </form>
     {/if}
   </section>
 
   {#if mail}
     <section aria-labelledby="factor-heading">
-      <h2 id="factor-heading">second factor</h2>
+      <h2 id="factor-heading">{t("account.factor")}</h2>
       {#if app.session!.user.email_2fa}
-        <p class="meta">on: each login needs a code mailed to {app.session!.user.email}</p>
+        <p class="meta">{t("account.factorOn", { email: app.session!.user.email })}</p>
         <form aria-labelledby="factor-heading" onsubmit={turnFactorOff}>
           <Field
-            label="current password"
+            label={t("form.currentPassword")}
             type="password"
             bind:value={factorPassword}
             autocomplete="current-password"
@@ -206,15 +207,15 @@
             problem={factor.field("current_password")}
           />
           {#if factor.problem}<p class="problem" role="alert">{factor.problem}</p>{/if}
-          <button class="button secondary" disabled={factor.busy}>turn off</button>
+          <button class="button secondary" disabled={factor.busy}>{t("account.turnOff")}</button>
         </form>
       {:else if factorSent}
         <p class="notice" role="status">
-          a code is on its way to {app.session!.user.email}. it works for 10 minutes.
+          {t("login.codeSent", { email: app.session!.user.email })}
         </p>
         <form aria-labelledby="factor-heading" onsubmit={turnFactorOn}>
           <Field
-            label="code"
+            label={t("form.code")}
             bind:value={factorCode}
             inputmode="numeric"
             autocomplete="one-time-code"
@@ -224,18 +225,18 @@
           />
           {#if factor.problem}<p class="problem" role="alert">{factor.problem}</p>{/if}
           <div class="actions">
-            <button class="button" disabled={factor.busy}>turn on</button>
+            <button class="button" disabled={factor.busy}>{t("account.turnOn")}</button>
             <button class="button secondary" type="button" disabled={factor.busy} onclick={sendFactorCode}>
-              send a new code
+              {t("login.resend")}
             </button>
           </div>
         </form>
       {:else}
-        <p class="meta">off: after your password, a login can also ask for a code mailed to you</p>
+        <p class="meta">{t("account.factorOff")}</p>
         {#if factor.problem}<p class="problem" role="alert">{factor.problem}</p>{/if}
         <div class="actions">
           <button class="button" type="button" disabled={factor.busy} onclick={sendFactorCode}>
-            turn on
+            {t("account.turnOn")}
           </button>
         </div>
       {/if}
@@ -243,13 +244,13 @@
   {/if}
 
   <section aria-labelledby="delete-heading">
-    <h2 id="delete-heading">delete account</h2>
-    <p class="meta">this removes the account for good</p>
+    <h2 id="delete-heading">{t("account.delete")}</h2>
+    <p class="meta">{t("account.deleteHint")}</p>
     {#if removal.problem}<p class="problem" role="alert">{removal.problem}</p>{/if}
     <div class="actions">
       <Confirm
-        label="delete account"
-        confirm="delete account"
+        label={t("account.delete")}
+        confirm={t("account.delete")}
         danger
         disabled={removal.busy}
         onconfirm={remove}

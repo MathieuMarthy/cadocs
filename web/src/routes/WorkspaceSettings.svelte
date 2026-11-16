@@ -12,9 +12,17 @@
   import { Form } from "../lib/form.svelte";
   import { acquireNav, collect, type Space } from "../lib/nav.svelte";
   import { notify } from "../lib/notice.svelte";
-  import { LANGUAGES, managesWorkspace, MAX_MEMBERS, type Member } from "../lib/roles";
+  import {
+    languageName,
+    managesWorkspace,
+    MAX_MEMBERS,
+    type Member,
+    roleName,
+    stemmingLanguages,
+  } from "../lib/roles";
   import { navigate } from "../lib/router.svelte";
   import { app, refreshSession } from "../lib/session.svelte";
+  import { t } from "../lib/i18n";
 
   interface Invitation {
     id: string;
@@ -68,11 +76,8 @@
     );
     if (!done) return;
     await refreshSession();
-    notify("saved");
+    notify(t("account.saved"));
   }
-
-  const languageName = (code: string) =>
-    LANGUAGES.find((item) => item.value === code)?.label ?? code;
 
   // Members.
   let members = $state<Member[] | null>(null);
@@ -98,7 +103,7 @@
   const roleOptions = $derived(
     (owner ? ["member", "admin", "owner"] : ["member", "admin"]).map((role) => ({
       value: role,
-      label: role,
+      label: roleName(role),
     })),
   );
 
@@ -111,7 +116,7 @@
       members = (members ?? []).map((item) => (item.id === updated.id ? updated : item));
     });
     if (done) {
-      notify("role changed");
+      notify(t("workspace.roleChanged"));
       return;
     }
     // The select keeps what was picked, and Svelte does not write back an unchanged role.
@@ -215,53 +220,53 @@
   }
 </script>
 
-<Shell title="settings" {workspace}>
-  <h1>{workspace.name} settings</h1>
+<Shell title={t("shell.settings")} {workspace}>
+  <h1>{t("space.settingsOf", { name: workspace.name })}</h1>
 
   <section aria-labelledby="general-heading">
-    <h2 id="general-heading">workspace</h2>
+    <h2 id="general-heading">{t("shell.workspace")}</h2>
     {#if !generalLoaded}
       {#if general.problem}
         <p class="problem" role="alert">{general.problem}</p>
       {:else}
-        <p class="meta" role="status">loading…</p>
+        <p class="meta" role="status">{t("common.loading")}</p>
       {/if}
     {:else if manages}
       <form onsubmit={save}>
-        <Field label="name" bind:value={name} required problem={general.field("name")} />
+        <Field label={t("form.name")} bind:value={name} required problem={general.field("name")} />
         <Select
-          label="language"
+          label={t("workspace.language")}
           bind:value={language}
-          options={LANGUAGES}
+          options={stemmingLanguages()}
           problem={general.field("language")}
         />
-        <p class="meta">search stems words in this language.</p>
+        <p class="meta">{t("workspace.languageHint")}</p>
         {#if general.problem}<p class="problem" role="alert">{general.problem}</p>{/if}
-        <button class="button" disabled={general.busy}>save</button>
+        <button class="button" disabled={general.busy}>{t("account.save")}</button>
       </form>
     {:else}
-      <p class="notice">language: {languageName(language)}</p>
-      <p class="meta">only workspace admins change these settings.</p>
+      <p class="notice">{t("workspace.languageIs", { language: languageName(language) })}</p>
+      <p class="meta">{t("workspace.adminsOnly")}</p>
     {/if}
   </section>
 
   <section aria-labelledby="members-heading">
-    <h2 id="members-heading">members</h2>
+    <h2 id="members-heading">{t("workspace.members")}</h2>
     {#if memberForm.problem}<p class="problem" role="alert">{memberForm.problem}</p>{/if}
     {#if members === null}
-      {#if !memberForm.problem}<p class="meta" role="status">loading…</p>{/if}
+      {#if !memberForm.problem}<p class="meta" role="status">{t("common.loading")}</p>{/if}
     {:else}
       <ul class="records">
         {#each members as member (member.id)}
           <li class="record">
             <div class="record-who">
-              {member.name}{#if member.id === me}&nbsp;<span class="you">(you)</span>{/if}
+              {member.name}{#if member.id === me}&nbsp;<span class="you">{t("admin.you")}</span>{/if}
               <span>{member.email}</span>
             </div>
             {#if editable(member)}
               <select
                 class="select"
-                aria-label="role of {member.name}"
+                aria-label={t("workspace.roleOf", { name: member.name })}
                 value={member.role}
                 disabled={memberForm.busy}
                 onchange={(event) => void changeRole(member, event.currentTarget)}
@@ -270,17 +275,17 @@
                   <option value={option.value}>{option.label}</option>
                 {/each}
               </select>
-              {#if member.disabled}<span class="badges"><span class="badge">disabled</span></span>{/if}
+              {#if member.disabled}<span class="badges"><span class="badge">{t("admin.disabled")}</span></span>{/if}
               <Confirm
-                label="remove"
-                confirm="remove {member.name}"
+                label={t("workspace.remove")}
+                confirm={t("workspace.removeConfirm", { name: member.name })}
                 disabled={memberForm.busy}
                 onconfirm={() => void remove(member)}
               />
             {:else}
               <span class="badges">
-                <span class="badge">{member.role}</span>
-                {#if member.disabled}<span class="badge">disabled</span>{/if}
+                <span class="badge">{roleName(member.role)}</span>
+                {#if member.disabled}<span class="badge">{t("admin.disabled")}</span>{/if}
               </span>
             {/if}
           </li>
@@ -291,11 +296,11 @@
 
   {#if manages}
     <section aria-labelledby="invitations-heading">
-      <h2 id="invitations-heading">invitations</h2>
-      <p class="meta">a link works once, for 7 days. send it to the person yourself.</p>
+      <h2 id="invitations-heading">{t("workspace.invitations")}</h2>
+      <p class="meta">{t("workspace.invitationsHint")}</p>
       <form onsubmit={invite}>
         <Field
-          label="email"
+          label={t("form.email")}
           type="email"
           bind:value={email}
           required
@@ -303,30 +308,27 @@
           problem={invitationForm.field("email")}
         />
         <Select
-          label="role"
+          label={t("workspace.role")}
           bind:value={invitedRole}
-          options={[
-            { value: "member", label: "member" },
-            { value: "admin", label: "admin" },
-          ]}
+          options={["member", "admin"].map((value) => ({ value, label: roleName(value) }))}
           problem={invitationForm.field("role")}
         />
         {#if invitationForm.problem}
           <p class="problem" role="alert">{invitationForm.problem}</p>
         {/if}
-        <button class="button" disabled={invitationForm.busy}>invite</button>
+        <button class="button" disabled={invitationForm.busy}>{t("workspace.invite")}</button>
       </form>
       {#if invited}
         <div class="reset-link">
-          <Field label="invitation link" value={invited.link} readonly />
+          <Field label={t("workspace.invitationLink")} value={invited.link} readonly />
           <IconButton
             icon="copy"
-            verb="copy"
-            label="copy the invitation link"
+            verb={t("admin.copy")}
+            label={t("workspace.copyInvitation")}
             onclick={() => invited && void copy(invited.link)}
           />
         </div>
-        <p class="meta">for {invited.email}. it shows only once.</p>
+        <p class="meta">{t("workspace.invitedFor", { email: invited.email })}</p>
       {/if}
       {#if invitationList.problem}<p class="problem" role="alert">{invitationList.problem}</p>{/if}
       {#if invitations && invitations.length > 0}
@@ -335,13 +337,13 @@
             <li class="record">
               <div class="record-who">
                 {invitation.email}
-                <span>expires <Time value={invitation.expires_at} /></span>
+                <span>{t("workspace.expires")} <Time value={invitation.expires_at} /></span>
               </div>
-              <span class="badges"><span class="badge">{invitation.role}</span></span>
+              <span class="badges"><span class="badge">{roleName(invitation.role)}</span></span>
               <IconButton
                 icon="x"
-                verb="revoke"
-                label="revoke the invitation of {invitation.email}"
+                verb={t("workspace.revoke")}
+                label={t("workspace.revokeOf", { email: invitation.email })}
                 disabled={invitationList.busy}
                 onclick={() => void revoke(invitation)}
               />
@@ -349,26 +351,26 @@
           {/each}
         </ul>
       {:else if invitations}
-        <p class="meta">no pending invitations</p>
+        <p class="meta">{t("workspace.noInvitations")}</p>
       {/if}
     </section>
   {/if}
 
   {#if trashed.length > 0 || trashForm.problem}
     <section aria-labelledby="trashed-heading">
-      <h2 id="trashed-heading">trashed spaces</h2>
+      <h2 id="trashed-heading">{t("workspace.trashed")}</h2>
       {#if trashForm.problem}<p class="problem" role="alert">{trashForm.problem}</p>{/if}
       <ul class="records">
         {#each trashed as space (space.id)}
           <li class="record">
             <span class="record-who">
               {space.name}
-              <span>moved to trash <Time value={space.deleted_at ?? space.updated_at} /></span>
+              <span>{t("page.trashed")} <Time value={space.deleted_at ?? space.updated_at} /></span>
             </span>
             <IconButton
               icon="rotate-ccw"
-              verb="restore"
-              label="restore {space.name}"
+              verb={t("trash.restore")}
+              label={t("workspace.restoreSpace", { name: space.name })}
               disabled={trashForm.busy}
               onclick={() => void restore(space)}
             />
@@ -379,13 +381,13 @@
   {/if}
 
   <section aria-labelledby="leave-heading">
-    <h2 id="leave-heading">leave</h2>
-    <p class="meta">you lose access to its spaces until someone invites you again.</p>
+    <h2 id="leave-heading">{t("workspace.leave")}</h2>
+    <p class="meta">{t("workspace.leaveHint")}</p>
     {#if leaving.problem}<p class="problem" role="alert">{leaving.problem}</p>{/if}
     <div class="actions">
       <Confirm
-        label="leave the workspace"
-        confirm="leave"
+        label={t("workspace.leaveLabel")}
+        confirm={t("workspace.leave")}
         disabled={leaving.busy}
         onconfirm={() => void leave()}
       />
@@ -394,18 +396,18 @@
 
   {#if owner}
     <section aria-labelledby="delete-heading">
-      <h2 id="delete-heading">delete</h2>
-      <p class="meta">this deletes its spaces, pages and invitations, for everyone, for good.</p>
+      <h2 id="delete-heading">{t("admin.delete")}</h2>
+      <p class="meta">{t("workspace.deleteHint")}</p>
       <form onsubmit={deleteWorkspace}>
         <Field
-          label="type the workspace name to confirm"
+          label={t("workspace.deleteField")}
           bind:value={typed}
           autocomplete="off"
           problem={deleting.field("name")}
         />
         {#if deleting.problem}<p class="problem" role="alert">{deleting.problem}</p>{/if}
         <button class="button danger" disabled={deleting.busy || typed !== workspace.name}>
-          delete the workspace
+          {t("workspace.delete")}
         </button>
       </form>
     </section>

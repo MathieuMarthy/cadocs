@@ -31,7 +31,8 @@ const USABLE_RESET: &str = "SELECT r.user_id FROM password_resets r
      WHERE r.token_hash = ?1 AND r.expires_at > ?2 AND u.disabled_at IS NULL";
 
 const SELECT_RECORD: &str =
-    "SELECT id, email, name, is_instance_admin, email_2fa, disabled_at, created_at FROM users";
+    "SELECT id, email, name, is_instance_admin, email_2fa, language, disabled_at, created_at
+     FROM users";
 
 fn record(row: &SqliteRow) -> UserRecord {
     UserRecord {
@@ -139,6 +140,7 @@ fn user(row: &SqliteRow) -> User {
         name: row.get("name"),
         is_instance_admin: row.get::<i64, _>("is_instance_admin") != 0,
         email_2fa: row.get::<i64, _>("email_2fa") != 0,
+        language: row.get("language"),
     }
 }
 
@@ -208,7 +210,7 @@ impl AccountStore for SqliteStore {
 
     async fn credentials(&self, email: &str) -> Result<Option<Credentials>, StoreError> {
         let row = sqlx::query(
-            "SELECT id, email, name, is_instance_admin, email_2fa, password_hash, disabled_at
+            "SELECT id, email, name, is_instance_admin, email_2fa, language, password_hash, disabled_at
              FROM users WHERE email = ?1",
         )
         .bind(email)
@@ -256,7 +258,8 @@ impl AccountStore for SqliteStore {
         now: i64,
     ) -> Result<Option<ActiveSession>, StoreError> {
         let row = sqlx::query(
-            "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, s.last_seen_at
+            "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.language,
+                    s.last_seen_at
              FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_hash = ?1 AND s.expires_at > ?2 AND u.disabled_at IS NULL",
         )
@@ -359,6 +362,7 @@ impl AccountStore for SqliteStore {
                  email_2fa = CASE WHEN ?6 OR ?3 <> email THEN 0 ELSE email_2fa END,
                  email_verified_at = CASE WHEN ?3 <> email THEN NULL
                                           ELSE email_verified_at END,
+                 language = CASE WHEN ?7 THEN ?8 ELSE language END,
                  updated_at = ?5
              WHERE id = ?1",
         )
@@ -368,6 +372,8 @@ impl AccountStore for SqliteStore {
         .bind(&changes.password_hash)
         .bind(now)
         .bind(changes.email_2fa_off)
+        .bind(changes.language.is_some())
+        .bind(changes.language.clone().flatten())
         .execute(&mut *tx)
         .await
         .map_err(|error| match error.as_database_error() {

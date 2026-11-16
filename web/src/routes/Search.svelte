@@ -7,6 +7,7 @@
   import { acquireNav } from "../lib/nav.svelte";
   import { navigate, route } from "../lib/router.svelte";
   import { app } from "../lib/session.svelte";
+  import { t } from "../lib/i18n";
 
   interface Piece {
     text: string;
@@ -91,14 +92,14 @@
   }
 </script>
 
-<Shell title="search" {workspace}>
-  <h1>search</h1>
+<Shell title={t("search.title")} {workspace}>
+  <h1>{t("search.title")}</h1>
   <form class="search-form" role="search" onsubmit={(event) => {
     event.preventDefault();
     show({ q: typed.trimStart() });
   }}>
     <label class="field search-query">
-      <span class="label">words</span>
+      <span class="label">{t("search.words")}</span>
       <input
         type="search"
         name="q"
@@ -110,9 +111,9 @@
       />
     </label>
     <label class="field search-space">
-      <span class="label">space</span>
+      <span class="label">{t("search.space")}</span>
       <select value={space} onchange={(event) => show({ space: event.currentTarget.value })}>
-        <option value="">all spaces</option>
+        <option value="">{t("search.allSpaces")}</option>
         {#each nav.spaces as item (item.id)}
           <option value={item.id}>{item.name}</option>
         {/each}
@@ -122,17 +123,17 @@
 
   {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
   {#if !q.trim()}
-    <p class="meta">words are matched with their other forms: deploy finds deployment.</p>
+    <p class="meta">{t("search.hint")}</p>
   {:else if hits === null}
-    {#if !problem}<p class="meta" role="status">searching…</p>{/if}
+    {#if !problem}<p class="meta" role="status">{t("search.searching")}</p>{/if}
   {:else if hits.length === 0}
-    <p class="notice" role="status">no page matches</p>
+    <p class="notice" role="status">{t("search.none")}</p>
   {:else}
-    <ul class="records search-results" aria-label="results">
+    <ul class="records search-results" aria-label={t("search.results")}>
       {#each hits as hit (hit.id)}
         <li class="record">
           <span class="record-who">
-            <a href="/?page={hit.id}">{hit.title || "untitled"}</a>
+            <a href="/?page={hit.id}">{hit.title || t("page.untitled")}</a>
             <span>{spaceName(hit.space_id)}</span>
           </span>
           {#if hit.excerpt.length}

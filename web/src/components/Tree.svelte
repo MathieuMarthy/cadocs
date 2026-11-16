@@ -4,6 +4,7 @@
   import NewSpace, { managesSpaces } from "./NewSpace.svelte";
   import TreeLevel, { type Drag, fromTree } from "./TreeLevel.svelte";
   import { describe } from "../lib/form.svelte";
+  import { t } from "../lib/i18n";
   import { canEdit, type Nav, type PageRow, type Place, type Space } from "../lib/nav.svelte";
   import { trashPage } from "../lib/actions";
   import { importPage } from "../lib/api";
@@ -66,11 +67,15 @@
   /** Every reader reaches the settings, which show the grants; editors also import and reach the trash. */
   function spaceItems(space: Space): MenuItem[] {
     const base = `/w/${nav.workspace.slug}`;
-    const settings: MenuItem = { icon: "settings", label: "settings", href: `${base}/settings/${space.slug}` };
+    const settings: MenuItem = {
+      icon: "settings",
+      label: t("tree.spaceSettings"),
+      href: `${base}/settings/${space.slug}`,
+    };
     if (!canEdit(space.role)) return [settings];
     return [
-      { icon: "upload", label: "import markdown", select: () => pick(space) },
-      { icon: "trash-2", label: "open the trash", href: `${base}/trash/${space.slug}` },
+      { icon: "upload", label: t("tree.import"), select: () => pick(space) },
+      { icon: "trash-2", label: t("tree.openTrash"), href: `${base}/trash/${space.slug}` },
       settings,
     ];
   }
@@ -92,25 +97,25 @@
   }
 </script>
 
-<nav class="tree" aria-label="spaces">
+<nav class="tree" aria-label={t("tree.spaces")}>
   <div class="tree-head">
-    <span class="label">spaces</span>
+    <span class="label">{t("tree.spaces")}</span>
     {#if managesSpaces(nav.workspace) && !adding}
       <IconButton
         bind:element={plus}
         icon="plus"
-        verb="new space"
+        verb={t("space.new")}
         onclick={() => (adding = true)}
       />
     {/if}
   </div>
   {#if adding}<NewSpace {nav} onclose={closeAdding} />{/if}
   {#if !nav.spacesLoaded}
-    <p class="meta" role="status">loading…</p>
+    <p class="meta" role="status">{t("common.loading")}</p>
   {:else if nav.problem}
     <p class="problem" role="alert">{nav.problem}</p>
   {:else if nav.spaces.length === 0}
-    <p class="meta">no spaces</p>
+    <p class="meta">{t("tree.noSpaces")}</p>
   {/if}
   <ul class="rows">
     {#each nav.spaces as space (space.id)}
@@ -138,18 +143,18 @@
               <IconButton
                 class="tree-plus"
                 icon="plus"
-                verb="new page"
-                label="new page in {label(space)}"
+                verb={t("page.new")}
+                label={t("page.newIn", { parent: label(space) })}
                 onclick={() => create(space.id, null)}
               />
             {/if}
-            <Menu label="more actions for {label(space)}" items={spaceItems(space)} />
+            <Menu label={t("menu.moreFor", { name: label(space) })} items={spaceItems(space)} />
           </span>
         </div>
         <!-- Once loaded, so the level unfolds to the height of its rows. -->
         {#if open && root?.loaded}
           {#if root.items.length === 0 && !root.problem}
-            <p class="tree-row meta"><span class="tree-prefix">└─ </span>no pages</p>
+            <p class="tree-row meta"><span class="tree-prefix">└─ </span>{t("tree.noPages")}</p>
           {/if}
           <TreeLevel
             {nav}
@@ -170,7 +175,7 @@
     hidden
     type="file"
     accept=".md,.markdown,.zip,text/markdown,application/zip"
-    aria-label="markdown file to import"
+    aria-label={t("tree.importFile")}
     tabindex="-1"
     onchange={imported}
   />

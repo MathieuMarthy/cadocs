@@ -5,6 +5,8 @@
   import { describe, Form } from "../lib/form.svelte";
   import { navigate } from "../lib/router.svelte";
   import { app, signIn, signOut } from "../lib/session.svelte";
+  import { t } from "../lib/i18n";
+  import { roleName } from "../lib/roles";
 
   interface Invitation {
     workspace_id: string;
@@ -40,11 +42,11 @@
 </script>
 
 {#await api<Invitation>("GET", path)}
-  <Solo title="invitation"><p class="meta" role="status">loading…</p></Solo>
+  <Solo title={t("invite.title")}><p class="meta" role="status">{t("common.loading")}</p></Solo>
 {:then invitation}
-  <Solo title="join {invitation.workspace_name}">
+  <Solo title={t("invite.join", { workspace: invitation.workspace_name })}>
     <p class="meta">
-      invitation for {invitation.email}, as {invitation.role}.
+      {t("invite.for", { email: invitation.email, role: roleName(invitation.role) })}
     </p>
     {#if form.problem}<p class="problem" role="alert">{form.problem}</p>{/if}
 
@@ -54,16 +56,16 @@
         disabled={form.busy}
         onclick={() => accept({}, invitation.workspace_id)}
       >
-        join {invitation.workspace_name}
+        {t("invite.join", { workspace: invitation.workspace_name })}
       </button>
     {:else if app.session}
       <p class="notice">
-        logged in as {app.session.user.email}. this invitation is for another account.
+        {t("invite.otherAccount", { email: app.session.user.email })}
       </p>
-      <button class="button" type="button" disabled={form.busy} onclick={logOut}>log out</button>
+      <button class="button" type="button" disabled={form.busy} onclick={logOut}>{t("shell.logOut")}</button>
     {:else if invitation.has_account}
-      <p class="notice">this email has an account.</p>
-      <a class="button" href="/login?next={encodeURIComponent(`/invite/${token}`)}">log in</a>
+      <p class="notice">{t("invite.hasAccount")}</p>
+      <a class="button" href="/login?next={encodeURIComponent(`/invite/${token}`)}">{t("login.title")}</a>
     {:else}
       <form
         onsubmit={(event) => {
@@ -72,14 +74,14 @@
         }}
       >
         <Field
-          label="name"
+          label={t("form.name")}
           bind:value={name}
           autocomplete="name"
           required
           problem={form.field("name")}
         />
         <Field
-          label="password"
+          label={t("form.password")}
           type="password"
           bind:value={password}
           autocomplete="new-password"
@@ -87,21 +89,21 @@
           problem={form.field("password")}
         />
         {#if form.field("email")}
-          <p class="problem" role="alert">email {form.field("email")}</p>
+          <p class="problem" role="alert">{t("invite.emailProblem", { problem: form.field("email") ?? "" })}</p>
         {/if}
         <button class="button" disabled={form.busy}>
-          join {invitation.workspace_name}
+          {t("invite.join", { workspace: invitation.workspace_name })}
         </button>
       </form>
     {/if}
   </Solo>
 {:catch error}
-  <Solo title="invitation">
+  <Solo title={t("invite.title")}>
     <p class="notice">
       {error instanceof ApiError && error.status === 404
-        ? "this link is no longer valid."
+        ? t("reset.expired")
         : describe(error)}
     </p>
-    <a class="button" href="/">go to cadocs</a>
+    <a class="button" href="/">{t("app.home")}</a>
   </Solo>
 {/await}

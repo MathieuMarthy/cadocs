@@ -5,6 +5,7 @@
   import { Form } from "../lib/form.svelte";
   import { mailFeatures, signIn } from "../lib/session.svelte";
   import Message from "./Message.svelte";
+  import { t } from "../lib/i18n";
 
   let email = $state("");
   let code = $state("");
@@ -37,16 +38,16 @@
 </script>
 
 {#if open === false}
-  <Message title="not found" />
+  <Message title={t("app.notFound")} />
 {:else if open}
-<Solo title="create an account">
+<Solo title={t("register.title")}>
   {#if sent}
     <p class="notice" role="status">
-      if {email} can make an account, a code is on its way. it works for 10 minutes.
+      {t("register.codeSent", { email })}
     </p>
     <form onsubmit={confirm}>
       <Field
-        label="code"
+        label={t("form.code")}
         bind:value={code}
         inputmode="numeric"
         autocomplete="one-time-code"
@@ -54,9 +55,9 @@
         required
         problem={confirmation.field("code")}
       />
-      <Field label="name" bind:value={name} autocomplete="name" required problem={confirmation.field("name")} />
+      <Field label={t("form.name")} bind:value={name} autocomplete="name" required problem={confirmation.field("name")} />
       <Field
-        label="password"
+        label={t("form.password")}
         type="password"
         bind:value={password}
         autocomplete="new-password"
@@ -64,22 +65,22 @@
         problem={confirmation.field("password")}
       />
       {#if confirmation.field("email")}
-        <p class="problem" role="alert">this address has an account now. log in instead.</p>
+        <p class="problem" role="alert">{t("register.taken")}</p>
       {/if}
       {#if confirmation.problem}<p class="problem" role="alert">{confirmation.problem}</p>{/if}
-      <button class="button" disabled={confirmation.busy}>create account</button>
+      <button class="button" disabled={confirmation.busy}>{t("register.submit")}</button>
     </form>
     <p class="meta" style="margin-top: var(--space-6)">
-      no code?
+      {t("login.noCode")}
       <button class="button secondary" type="button" onclick={() => (sent = false)}>
-        send a new code
+        {t("login.resend")}
       </button>
     </p>
   {:else}
-    <p class="meta">a code sent to your address proves it is yours.</p>
+    <p class="meta">{t("register.intro")}</p>
     <form onsubmit={send}>
       <Field
-        label="email"
+        label={t("form.email")}
         type="email"
         bind:value={email}
         autocomplete="email"
@@ -87,10 +88,10 @@
         problem={request.field("email")}
       />
       {#if request.problem}<p class="problem" role="alert">{request.problem}</p>{/if}
-      <button class="button" disabled={request.busy}>send code</button>
+      <button class="button" disabled={request.busy}>{t("register.send")}</button>
     </form>
     <p class="meta" style="margin-top: var(--space-6)">
-      already an account? <a href="/login">log in</a>
+      {t("register.haveAccount")} <a href="/login">{t("login.title")}</a>
     </p>
   {/if}
 </Solo>

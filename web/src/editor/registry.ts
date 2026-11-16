@@ -20,9 +20,10 @@ import { lowlight } from "./code";
 import { PageLink } from "./pagelink";
 import { TableMenuOnRightClick, TableWithControls } from "./table";
 import { MarkdownSource, quietInSource } from "./source";
+import { type Key, t } from "../lib/i18n";
 
 export interface SlashCommand {
-  /** What the menu shows, in lowercase interface words. */
+  /** What the menu shows, in lowercase interface words: a getter, so it reads the language. */
   label: string;
   /** The Markdown shortcut that makes the same block, shown on the right. */
   hint?: string;
@@ -63,13 +64,22 @@ const inTable = (editor: Editor) => editor.isActive("table");
 
 /** A command that changes the table under the caret. */
 const tableCommand = (
-  label: string,
+  key: Key,
   keywords: string[],
   apply: SlashCommand["apply"],
-): SlashCommand => ({ label, keywords, apply, when: inTable });
+): SlashCommand => ({
+  get label() {
+    return t(key);
+  },
+  keywords,
+  apply,
+  when: inTable,
+});
 
 const heading = (level: 1 | 2 | 3): SlashCommand => ({
-  label: `heading ${level}`,
+  get label() {
+    return t("slash.heading", { level });
+  },
   hint: "#".repeat(level),
   keywords: [`h${level}`, "title"],
   apply: (chain) => chain.clearNodes().setHeading({ level }),
@@ -94,7 +104,9 @@ export const entries: Entry[] = [
     ],
     commands: [
       {
-        label: "text",
+        get label() {
+          return t("slash.text");
+        },
         keywords: ["paragraph", "plain"],
         apply: (chain) => chain.clearNodes().setParagraph(),
       },
@@ -110,13 +122,17 @@ export const entries: Entry[] = [
     extensions: [quietInSource(BulletList), quietInSource(OrderedList), ListItem],
     commands: [
       {
-        label: "bullet list",
+        get label() {
+          return t("slash.bulletList");
+        },
         hint: "-",
         keywords: ["unordered", "ul"],
         apply: (chain) => chain.clearNodes().toggleBulletList(),
       },
       {
-        label: "numbered list",
+        get label() {
+          return t("slash.numberedList");
+        },
         hint: "1.",
         keywords: ["ordered", "ol"],
         apply: (chain) => chain.clearNodes().toggleOrderedList(),
@@ -129,12 +145,16 @@ export const entries: Entry[] = [
       TaskList,
       quietInSource(TaskItem).configure({
         nested: true,
-        a11y: { checkboxLabel: (node) => `task: ${node.textContent || "empty"}` },
+        a11y: {
+          checkboxLabel: (node) => t("editor.taskCheckbox", { text: node.textContent || t("editor.taskEmpty") }),
+        },
       }),
     ],
     commands: [
       {
-        label: "task list",
+        get label() {
+          return t("slash.taskList");
+        },
         hint: "[ ]",
         keywords: ["todo", "checkbox", "checklist"],
         apply: (chain) => chain.clearNodes().toggleTaskList(),
@@ -146,7 +166,9 @@ export const entries: Entry[] = [
     extensions: [quietInSource(CodeBlockLowlight).configure({ lowlight, defaultLanguage: null })],
     commands: [
       {
-        label: "code",
+        get label() {
+          return t("slash.code");
+        },
         hint: "```",
         keywords: ["snippet", "pre"],
         apply: (chain) => chain.clearNodes().setCodeBlock(),
@@ -158,7 +180,9 @@ export const entries: Entry[] = [
     extensions: [quietInSource(Blockquote)],
     commands: [
       {
-        label: "quote",
+        get label() {
+          return t("slash.quote");
+        },
         hint: ">",
         keywords: ["blockquote", "citation"],
         apply: (chain) => chain.clearNodes().toggleBlockquote(),
@@ -170,7 +194,9 @@ export const entries: Entry[] = [
     extensions: [quietInSource(HorizontalRule)],
     commands: [
       {
-        label: "divider",
+        get label() {
+          return t("slash.divider");
+        },
         hint: "---",
         keywords: ["rule", "hr", "separator"],
         apply: (chain) => chain.setHorizontalRule(),
@@ -182,7 +208,9 @@ export const entries: Entry[] = [
     extensions: [Callout],
     commands: [
       {
-        label: "callout",
+        get label() {
+          return t("slash.callout");
+        },
         keywords: ["note", "warning", "danger", "admonition", "alert"],
         apply: (chain) => chain.clearNodes().wrapIn("callout"),
       },
@@ -194,7 +222,9 @@ export const entries: Entry[] = [
     extensions: [Toggle, DetailsSummary, DetailsContent],
     commands: [
       {
-        label: "toggle",
+        get label() {
+          return t("slash.toggle");
+        },
         keywords: ["details", "collapse", "fold"],
         apply: (chain) => chain.clearNodes().setDetails(),
       },
@@ -210,17 +240,19 @@ export const entries: Entry[] = [
     ],
     commands: [
       {
-        label: "table",
+        get label() {
+          return t("slash.table");
+        },
         keywords: ["grid"],
         apply: (chain) => chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }),
       },
-      tableCommand("add row below", ["insert"], (chain) => chain.addRowAfter()),
-      tableCommand("add row above", ["insert"], (chain) => chain.addRowBefore()),
-      tableCommand("add column right", ["insert"], (chain) => chain.addColumnAfter()),
-      tableCommand("add column left", ["insert"], (chain) => chain.addColumnBefore()),
-      tableCommand("delete row", ["remove"], (chain) => chain.deleteRow()),
-      tableCommand("delete column", ["remove"], (chain) => chain.deleteColumn()),
-      tableCommand("delete table", ["remove"], (chain) => chain.deleteTable()),
+      tableCommand("table.addRowBelow", ["insert"], (chain) => chain.addRowAfter()),
+      tableCommand("table.addRowAbove", ["insert"], (chain) => chain.addRowBefore()),
+      tableCommand("table.addColumnRight", ["insert"], (chain) => chain.addColumnAfter()),
+      tableCommand("table.addColumnLeft", ["insert"], (chain) => chain.addColumnBefore()),
+      tableCommand("table.deleteRow", ["remove"], (chain) => chain.deleteRow()),
+      tableCommand("table.deleteColumn", ["remove"], (chain) => chain.deleteColumn()),
+      tableCommand("table.deleteTable", ["remove"], (chain) => chain.deleteTable()),
     ],
   },
   {
@@ -229,7 +261,9 @@ export const entries: Entry[] = [
     extensions: [PageLink],
     commands: [
       {
-        label: "link to page",
+        get label() {
+          return t("slash.pageLink");
+        },
         hint: "[[",
         keywords: ["page", "mention", "wiki"],
         apply: (chain) => chain.insertContent("[["),
@@ -241,7 +275,9 @@ export const entries: Entry[] = [
     extensions: [TableOfContents],
     commands: [
       {
-        label: "table of contents",
+        get label() {
+          return t("slash.contents");
+        },
         keywords: ["toc", "contents", "outline"],
         apply: (chain) => chain.insertContent({ type: "tableOfContents" }),
       },
@@ -253,7 +289,9 @@ export const entries: Entry[] = [
     extensions: [ImageBlock],
     commands: [
       {
-        label: "image",
+        get label() {
+          return t("slash.image");
+        },
         keywords: ["picture", "photo", "upload"],
         apply: (chain) => chain.pickAttachment("image"),
       },
@@ -264,7 +302,9 @@ export const entries: Entry[] = [
     extensions: [FileBlock],
     commands: [
       {
-        label: "file",
+        get label() {
+          return t("slash.file");
+        },
         keywords: ["attachment", "upload", "pdf", "document"],
         apply: (chain) => chain.pickAttachment("file"),
       },

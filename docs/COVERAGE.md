@@ -53,6 +53,7 @@ Comments, public shares, groups and plugins have no route before V1 or V2: their
 | Item | Tests |
 | --- | --- |
 | Upgrade from every earlier release | `server/upgrade.rs`: the data folder each release left (`tests/upgrade/<tag>`, from `scripts/make-upgrade-fixture.sh`), restored, migrated and served: logins, roles, grants, tree, content, attachment, search, revisions, trash, a write |
+| Interface in English, language per user (step 34) | `scripts/strings.ts`, run by `npm run build`, fails on words outside the catalogue, and `scripts/strings.test.ts` plants each kind of leftover; `scripts/i18n.test.ts` (the choice, then the browser, then English); `server/auth.rs` `the_interface_language_is_set_and_cleared_without_the_password`, `only_a_language_of_the_interface_is_accepted`; the unchanged end-to-end suite and `e2e/screens` for the English look |
 | Binary under 30 MB, no S3 code in a default build | `scripts/check-build.sh`: the dependency graph of each flavor in CI's `rust` job on every pull request; the size and S3 code of the release binary in the `e2e` job after each push to main, and of each binary in `release.yml` |
 
 Not automated: the RAM targets (`bench/rss.sh`), except that a hash's memory goes back with no trim (`server/hash_memory.rs`, ADR 0023), and the release workflow as a whole, which runs on a tag.

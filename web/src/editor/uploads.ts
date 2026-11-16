@@ -8,6 +8,7 @@ import { uploadAttachment } from "../lib/api";
 import { describe } from "../lib/form.svelte";
 import { notify } from "../lib/notice.svelte";
 import { IMAGE_TYPES } from "./attachments";
+import { t } from "../lib/i18n";
 
 interface UploadOptions {
   /** The page that uploads belong to. */
@@ -19,10 +20,10 @@ async function insertUploads(view: EditorView, page: string, files: File[]) {
   for (const file of files) {
     let uploaded;
     try {
-      notify(`uploading ${file.name || "file"}…`);
+      notify(t("upload.started", { name: file.name || t("editor.fileLabel") }));
       uploaded = await uploadAttachment(page, file);
     } catch (error) {
-      notify(`${file.name || "file"}: ${describe(error)}`);
+      notify(t("upload.failed", { name: file.name || t("editor.fileLabel"), problem: describe(error) }));
       continue;
     }
     if (view.isDestroyed || !view.editable) return;
@@ -40,7 +41,7 @@ async function insertUploads(view: EditorView, page: string, files: File[]) {
       tr.replaceSelectionWith(node);
     }
     view.dispatch(tr.scrollIntoView());
-    notify(`uploaded ${uploaded.file_name}`);
+    notify(t("upload.done", { name: uploaded.file_name }));
   }
 }
 

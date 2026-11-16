@@ -9,6 +9,7 @@
   import { acquireNav, canEdit, type PageRow, type Space } from "../lib/nav.svelte";
   import { navigate } from "../lib/router.svelte";
   import { app } from "../lib/session.svelte";
+  import { t } from "../lib/i18n";
 
   let { workspace }: { workspace: Workspace } = $props();
 
@@ -79,26 +80,26 @@
   <h1>{workspace.name}</h1>
 
   <section aria-labelledby="recent-heading">
-    <h2 id="recent-heading">recent pages</h2>
+    <h2 id="recent-heading">{t("home.recent")}</h2>
     {#if recentProblem}
       <p class="problem" role="alert">{recentProblem}</p>
     {:else if !recent || !nav.spacesLoaded}
-      <p class="meta" role="status">loading…</p>
+      <p class="meta" role="status">{t("common.loading")}</p>
     {:else if nav.spaces.length === 0}
-      <p class="notice">no spaces yet</p>
+      <p class="notice">{t("home.noSpaces")}</p>
       {#if !manages}
-        <p class="meta">a workspace admin can add one, or give you access to one.</p>
+        <p class="meta">{t("home.noSpacesAsk")}</p>
       {:else if adding}
         <NewSpace {nav} onclose={closeAdding} />
       {:else}
         <div class="actions">
           <button bind:this={addButton} class="button" type="button" onclick={() => (adding = true)}>
-            new space
+            {t("space.new")}
           </button>
         </div>
       {/if}
     {:else if recent.length === 0}
-      <p class="notice">no pages yet</p>
+      <p class="notice">{t("home.noPages")}</p>
       {#if writable}
         {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
         <div class="actions">
@@ -106,18 +107,18 @@
             class="button"
             type="button"
             disabled={creating}
-            onclick={() => firstPage(writable)}>new page</button
+            onclick={() => firstPage(writable)}>{t("page.new")}</button
           >
         </div>
       {:else}
-        <p class="meta">pages show here once someone writes one.</p>
+        <p class="meta">{t("home.noPagesRead")}</p>
       {/if}
     {:else}
       <ul class="records">
         {#each recent as page (page.id)}
           <li class="record">
             <span class="record-who">
-              <a href="/?page={page.id}">{page.title || "untitled"}</a>
+              <a href="/?page={page.id}">{page.title || t("page.untitled")}</a>
               <span>{spaceName(page.space_id)} · <Time value={page.updated_at} /></span>
             </span>
           </li>

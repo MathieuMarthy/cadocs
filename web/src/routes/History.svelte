@@ -11,6 +11,7 @@
   import { navigate } from "../lib/router.svelte";
   import { app } from "../lib/session.svelte";
   import Message from "./Message.svelte";
+  import { t } from "../lib/i18n";
 
   /** `selected` is the revision in the address, or the most recent one when it holds none. */
   let { id, selected = null }: { id: string; selected?: number | null } = $props();
@@ -43,11 +44,14 @@
     return () => held.release();
   });
 
-  const pageTitle = $derived(row?.title || "untitled");
+  const pageTitle = $derived(row?.title || t("page.untitled"));
   const spaceName = $derived((row && nav?.space(row.space_id)?.name) ?? "");
   const crumbs = $derived([
     ...(spaceName ? [{ label: spaceName }] : []),
-    ...(row?.ancestors ?? []).map((crumb) => ({ label: crumb.title || "untitled", href: `/?page=${crumb.id}` })),
+    ...(row?.ancestors ?? []).map((crumb) => ({
+      label: crumb.title || t("page.untitled"),
+      href: `/?page=${crumb.id}`,
+    })),
     ...(row ? [{ label: pageTitle, href: `/?page=${id}` }] : []),
   ]);
 
@@ -84,7 +88,7 @@
     void api<PageView>("GET", `/pages/${id}`).then(
       (answer) => (row = answer),
       (error) => {
-        if (error instanceof ApiError && error.status === 404) gone = "page not found";
+        if (error instanceof ApiError && error.status === 404) gone = t("page.notFound");
         else problem = describe(error);
       },
     );
@@ -96,7 +100,7 @@
     problem = null;
     try {
       await api("POST", `/pages/${id}/revisions/${number}/restore`);
-      notify(`revision ${number} restored`);
+      notify(t("history.restored", { number }));
       navigate(`/?page=${id}`);
     } catch (error) {
       problem = describe(error);
@@ -109,17 +113,17 @@
 {#if gone}
   <Message title={gone} />
 {:else}
-  <Shell title="history" {workspace} guess={false} {crumbs}>
-    <h1>history</h1>
-    <p class="meta">a revision is kept after each pause in editing. restoring one keeps the current content as a revision too.</p>
+  <Shell title={t("history.title")} {workspace} guess={false} {crumbs}>
+    <h1>{t("history.title")}</h1>
+    <p class="meta">{t("history.hint")}</p>
     {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
     {#if items === null}
-      {#if !problem}<p class="meta" role="status">loading…</p>{/if}
+      {#if !problem}<p class="meta" role="status">{t("common.loading")}</p>{/if}
     {:else if items.length === 0}
-      <p class="notice">no revision yet. one is kept once editing pauses.</p>
+      <p class="notice">{t("history.none")}</p>
     {:else}
       <div class="history">
-        <nav class="history-list" aria-label="revisions">
+        <nav class="history-list" aria-label={t("history.list")}>
           <ul class="records">
             {#each items as revision (revision.number)}
               <li class="record">
@@ -128,7 +132,7 @@
                     href="/?page={id}&history={revision.number}"
                     aria-current={revision.number === current ? "page" : undefined}
                   >
-                    #{revision.number} {revision.title || "untitled"}
+                    #{revision.number} {revision.title || t("page.untitled")}
                   </a>
                   <span><Time value={revision.created_at} />{#if revision.authors.length} · {authors(revision)}{/if}</span>
                 </span>
@@ -136,29 +140,29 @@
             {/each}
           </ul>
           {#if next}
-            <button class="button secondary" type="button" onclick={() => load(next)}>more</button>
+            <button class="button secondary" type="button" onclick={() => load(next)}>{t("common.more")}</button>
           {/if}
         </nav>
         {#if shown && shown.number === current}
-          <section class="history-view" aria-label="revision {shown.number}">
+          <section class="history-view" aria-label={t("history.revision", { number: shown.number })}>
             <div class="history-bar">
-              <span class="meta">revision {shown.number} · <Time value={shown.created_at} /></span>
+              <span class="meta">{t("history.revision", { number: shown.number })} · <Time value={shown.created_at} /></span>
               {#if row && canEdit(row.role)}
                 <Confirm
-                  label="restore"
-                  confirm="restore revision {shown.number}"
+                  label={t("history.restore")}
+                  confirm={t("history.restoreConfirm", { number: shown.number })}
                   icon="rotate-ccw"
                   disabled={restoring}
                   onconfirm={() => restore(shown!.number)}
                 />
               {/if}
             </div>
-            <h2 class="history-title">{shown.title || "untitled"}</h2>
+            <h2 class="history-title">{shown.title || t("page.untitled")}</h2>
             <!-- The server escapes every text and attribute of this HTML (cadocs-content). -->
             <div class="tiptap revision-content">{@html shown.html}</div>
           </section>
         {:else}
-          <p class="meta" role="status">loading…</p>
+          <p class="meta" role="status">{t("common.loading")}</p>
         {/if}
       </div>
     {/if}
