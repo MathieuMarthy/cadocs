@@ -36,8 +36,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
-      # High and critical fail the build. Lower ones show in the log.
-      - run: npm --prefix web audit --audit-level=high
+      # High and critical fail the build, except the advisories web/scripts/audit.ts lists with their
+      # reason (npm has no ignore flag). Lower ones show in the log.
+      - run: npm --prefix web audit || true
+      - run: node web/scripts/audit.ts
 
   secrets:
     name: Secrets in history
