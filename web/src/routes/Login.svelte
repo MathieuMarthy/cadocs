@@ -11,6 +11,9 @@
   /** The second factor (ADR 0026): once the server mailed a code, the form takes it. */
   let code = $state("");
   let codeAsked = $state(false);
+  /** The authenticator app, which takes the place of the code by mail when both are on. */
+  let totp = $state("");
+  let totpAsked = $state(false);
   const form = new Form();
 
   /** Unknown at first, and nothing shows until then. */
@@ -19,12 +22,15 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    await logIn(codeAsked ? code : "");
+    if (totpAsked) await logIn("", totp);
+    else await logIn(codeAsked ? code : "");
   }
 
   /** Without a code, an account with the second factor gets one by mail. */
-  async function logIn(withCode: string) {
-    const body = withCode ? { email, password, code: withCode } : { email, password };
+  async function logIn(withCode: string, withTotp = "") {
+    const body: Record<string, string> = { email, password };
+    if (withCode) body.code = withCode;
+    if (withTotp) body.totp = withTotp;
     await form.run(
       async () => signIn(await api<Session>("POST", "/auth/login", body)),
       (error) =>
@@ -37,11 +43,18 @@
       codeAsked = true;
       code = "";
     }
+    if (form.fields.totp === "required") {
+      form.fields = {};
+      totpAsked = true;
+      totp = "";
+    }
   }
 
   function startOver() {
     codeAsked = false;
     code = "";
+    totpAsked = false;
+    totp = "";
     password = "";
     form.fields = {};
     form.problem = null;
@@ -50,7 +63,24 @@
 
 <Solo title={t("login.title")}>
   {#if app.notice}<p class="notice" role="status">{app.notice}</p>{/if}
-  {#if codeAsked}
+  {#if totpAsked}
+    <p class="notice" role="status">{t("login.totpAsked")}</p>
+    <form onsubmit={submit}>
+      <Field
+        label={t("login.totpCode")}
+        bind:value={totp}
+        autocomplete="one-time-code"
+        spellcheck="false"
+        required
+        problem={form.field("totp")}
+      />
+      {#if form.problem}<p class="problem" role="alert">{form.problem}</p>{/if}
+      <button class="button" disabled={form.busy}>{t("login.submit")}</button>
+    </form>
+    <p class="meta" style="margin-top: var(--space-6)">
+      <button class="button secondary" type="button" onclick={startOver}>{t("login.startOver")}</button>
+    </p>
+  {:else if codeAsked}
     <p class="notice" role="status">{t("login.codeSent", { email })}</p>
     <form onsubmit={submit}>
       <Field

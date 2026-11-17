@@ -95,11 +95,12 @@ A Postfix on the same Docker network that relays for it needs only `CADOCS_SMTP_
 | --- | --- |
 | `cadocs` or `cadocs serve` | Run the server |
 | `cadocs reset-password <email>` | Print a one-time reset link (ADR 0013) |
+| `cadocs reset-totp <email>` | Turn off the authenticator app of an account, and its recovery codes |
 | `cadocs test-mail <email>` | Send one message through the mail relay and print what it answered. Opens no database |
 | `cadocs backup <dir>` | Write a consistent backup, on a running or stopped server |
 | `cadocs restore <dir>` | Restore a backup into an empty data folder, on a stopped server |
 
-Every command reads the same settings as the server, including `CADOCS_PUBLIC_URL`, so it runs with the server's environment: `docker exec` in a container, or the service's environment file. `reset-password` refuses a disabled account. It never creates or migrates the database, and refuses one of another version, so after an upgrade the server must have started once. `reset-password` and `backup` can run beside a live server, because they only open the database as an ordinary SQLite client. The exclusive lock of ADR 0006 is taken by `serve` and `restore`. [Backup and restore](#backup-and-restore) describes the last two.
+Every command reads the same settings as the server, including `CADOCS_PUBLIC_URL`, so it runs with the server's environment: `docker exec` in a container, or the service's environment file. `reset-password` refuses a disabled account. It never creates or migrates the database, and refuses one of another version, so after an upgrade the server must have started once. `reset-password`, `reset-totp` and `backup` can run beside a live server, because they only open the database as an ordinary SQLite client. The exclusive lock of ADR 0006 is taken by `serve` and `restore`. [Backup and restore](#backup-and-restore) describes the last two.
 
 ## Data folder
 
@@ -218,6 +219,7 @@ In `redirect` mode, only safe images (AVIF, GIF, JPEG, PNG, WebP) are redirected
 
 - **First run:** until the first account exists, `cadocs serve` logs `first-run setup is pending: open <public url>/setup/<code> to create the first account` at each start. Setup needs that code, so whoever reaches the instance first cannot claim it (ADR 0021). Read it with `docker logs cadocs` or `journalctl -u cadocs`. The code changes at each start, and a log filter above `warn` hides it.
 - **Writers are trusted:** anyone with write access to a page can crash the server with a crafted update, which loses unflushed edits (ADR 0014). Give write access to known people only. Public shares stay read-only.
+- **Authenticator app:** any account can turn on TOTP in its account screen, with or without mail. A login then asks for a code from the app, or one of ten recovery codes shown when the app was set up, and no longer mails a code. Each account gets 5 guesses at the code at once, then one a minute, counted only after a right password. Someone who lost both the app and the codes gets back in through `cadocs reset-totp <email>`, which turns the app off and leaves the password alone: `reset-password` is the other half when that is lost too. Neither a reset link nor an admin can turn the app off. The app's secret is stored readable, since the server computes the codes from it, so a backup of the database deserves the care of the server itself (ADR 0027).
 - **TLS:** the session cookie is `__Host-session` over HTTPS, so no other host of the domain can set or replace it. Let the proxy send `Strict-Transport-Security`, which cadocs leaves to it (with Caddy: `header Strict-Transport-Security "max-age=31536000"`).
 - **Accepted by the review of step 24:**
   - Password guesses are limited per client (a burst of 10, then one every 15 seconds), not per account, and hashes run one at a time. Many addresses can guess in parallel, and a flood of logins makes others wait, then answer `503`. On an instance open to the internet, a limit at the proxy helps.

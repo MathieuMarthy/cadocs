@@ -14,6 +14,7 @@ pub mod public;
 pub mod rate_limit;
 pub mod security;
 pub mod session;
+pub mod totp;
 mod ws;
 
 use std::future::{Future, IntoFuture};
@@ -43,7 +44,7 @@ use tokio::time::{MissedTickBehavior, interval, timeout};
 
 use crate::config::{AttachmentLimits, HttpConfig, Registration, SocketConfig};
 use crate::password::Passwords;
-use crate::rate_limit::{AddressLimiter, RateLimiter};
+use crate::rate_limit::{AccountLimiter, AddressLimiter, RateLimiter};
 
 /// How long shutdown waits for HTTP requests in progress.
 const HTTP_GRACE: Duration = Duration::from_secs(2);
@@ -79,6 +80,8 @@ pub struct AppState<S, A> {
     pub mail_addresses: Arc<AddressLimiter>,
     /// Shared by the public pages of shares and their files.
     pub public_requests: Arc<RateLimiter>,
+    /// Guesses at the code of an authenticator app, per account.
+    pub totp_guesses: Arc<AccountLimiter>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
     sockets: watch::Sender<()>,
     /// Wakes the recheck of every socket.
@@ -105,6 +108,7 @@ impl<S, A> Clone for AppState<S, A> {
             mail_requests: self.mail_requests.clone(),
             mail_addresses: self.mail_addresses.clone(),
             public_requests: self.public_requests.clone(),
+            totp_guesses: self.totp_guesses.clone(),
             sockets: self.sockets.clone(),
             access: self.access.clone(),
         }
@@ -153,6 +157,10 @@ impl<S, A> AppState<S, A> {
             public_requests: Arc::new(RateLimiter::new(
                 public::PUBLIC_BURST,
                 public::PUBLIC_REFILL,
+            )),
+            totp_guesses: Arc::new(AccountLimiter::new(
+                api::auth::TOTP_BURST,
+                api::auth::TOTP_REFILL,
             )),
             sockets: watch::Sender::new(()),
             access: Arc::default(),

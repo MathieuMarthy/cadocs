@@ -62,7 +62,7 @@ Steps. The rules of the MVP steps apply, and every new screen takes its strings 
 - [ ] Step 44: revision diff. Compare a revision with the current page or another revision, on the screen of revisions.
 - [x] Step 45: public shares, server. `page_shares`, its routes, `/s/{token}` rendered by the bounded reader, descendants, files, `ETag`, the strict CSP, `X-Robots-Tag` unless indexable, a rate limit. Done when a test shows a script in content cannot run there.
 - [ ] Step 46: public shares, screens. A share dialog on the page: children, indexing, expiry, revoke.
-- [ ] Step 47: TOTP. `user_totp`, recovery codes, login asking for the code, the account screen. Mail codes (ADR 0026) keep working beside it.
+- [x] Step 47: TOTP. `user_totp`, recovery codes, login asking for the code, the account screen. Mail codes (ADR 0026) keep working beside it.
 - [ ] Step 48: OIDC, server. Providers in `CADOCS_OIDC_*`, code flow with PKCE, `user_identities`, how an identity meets an existing account, tests against a fake provider. An ADR for the HTTP client and its RAM and binary cost.
 - [ ] Step 49: OIDC, screens and providers. Login buttons, linking on the account screen, a manual check with Authentik and Keycloak written into `OPERATIONS.md`.
 - [ ] Step 50: duplication. `POST /pages/{page}/duplicate`, with descendants and attachments, into the same space or another, through a room.

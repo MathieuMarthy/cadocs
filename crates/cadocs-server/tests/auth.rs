@@ -718,13 +718,18 @@ async fn a_login_checked_against_an_old_password_opens_no_session() {
     let (id, hash) = stored_user(&api).await;
     let late = session_of(id);
 
-    assert!(!api.store.create_session(&late, "old hash").await.unwrap());
+    assert!(
+        !api.store
+            .create_session(&late, "old hash", false)
+            .await
+            .unwrap()
+    );
     api.sql("UPDATE users SET disabled_at = 1").await;
-    assert!(!api.store.create_session(&late, &hash).await.unwrap());
+    assert!(!api.store.create_session(&late, &hash, false).await.unwrap());
     assert_eq!(api.number("SELECT count(*) FROM sessions").await, 1);
 
     api.sql("UPDATE users SET disabled_at = NULL").await;
-    assert!(api.store.create_session(&late, &hash).await.unwrap());
+    assert!(api.store.create_session(&late, &hash, false).await.unwrap());
     assert_eq!(api.number("SELECT count(*) FROM sessions").await, 2);
 }
 

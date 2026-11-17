@@ -157,6 +157,13 @@ impl PublicUrl {
         &self.origin
     }
 
+    /// The host, with its port when not the default one: what names the instance in an app.
+    pub fn host(&self) -> &str {
+        self.origin
+            .split_once("://")
+            .map_or(self.origin.as_str(), |(_, host)| host)
+    }
+
     /// Whether cookies must carry the `Secure` flag.
     pub fn secure(&self) -> bool {
         self.secure
