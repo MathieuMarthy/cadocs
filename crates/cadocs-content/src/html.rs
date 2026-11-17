@@ -8,12 +8,20 @@ use std::fmt::Write;
 use crate::ast::*;
 use crate::headings::numbered;
 use crate::url::allowed;
-use crate::{ATTACHMENT_PATH, PageTitles};
+use crate::{ATTACHMENT_PATH, Links, PAGE_PATH, PageTitles};
 
+/// HTML whose links point to the application's own addresses.
 pub fn to_html(document: &Document, titles: &dyn PageTitles) -> String {
+    to_html_with(document, titles, &Encoded)
+}
+
+/// HTML whose links to attachments and pages are those `links` gives, escaped as attributes. A
+/// public share points them under its own path.
+pub fn to_html_with(document: &Document, titles: &dyn PageTitles, links: &dyn Links) -> String {
     let mut out = String::new();
     let mut context = Context {
         titles,
+        links,
         headings: numbered(&document.blocks)
             .into_iter()
             .map(|h| h.label)
@@ -61,8 +69,22 @@ fn keyword(value: &str) -> Option<&str> {
     ok.then_some(value)
 }
 
+/// The application's addresses, with the id percent-encoded.
+struct Encoded;
+
+impl Links for Encoded {
+    fn attachment(&self, id: &str) -> String {
+        format!("{ATTACHMENT_PATH}{}", encode_component(id))
+    }
+
+    fn page(&self, id: &str) -> String {
+        format!("{PAGE_PATH}{}", encode_component(id))
+    }
+}
+
 struct Context<'a> {
     titles: &'a dyn PageTitles,
+    links: &'a dyn Links,
     /// The labels of the headings, in document order.
     headings: Vec<String>,
     toc: &'a [Block],
@@ -201,20 +223,16 @@ fn block(context: &mut Context, block: &Block, out: &mut String) {
         }
         Block::TableOfContents => toc(context, out),
         Block::Image { id, alt } => {
-            let _ = write!(
-                out,
-                r#"<figure class="image"><img src="{ATTACHMENT_PATH}{}" alt=""#,
-                encode_component(id)
-            );
+            out.push_str(r#"<figure class="image"><img src=""#);
+            escape(&context.links.attachment(id), out);
+            out.push_str(r#"" alt=""#);
             escape(alt.as_deref().unwrap_or_default(), out);
             out.push_str(r#""></figure>"#);
         }
         Block::File { id, name } => {
-            let _ = write!(
-                out,
-                r#"<p class="file"><a class="file" href="{ATTACHMENT_PATH}{}" download>"#,
-                encode_component(id)
-            );
+            out.push_str(r#"<p class="file"><a class="file" href=""#);
+            escape(&context.links.attachment(id), out);
+            out.push_str(r#"" download>"#);
             escape(name, out);
             out.push_str("</a></p>");
         }
@@ -292,11 +310,9 @@ fn inlines(context: &Context, content: &[Inline], out: &mut String) {
             Inline::HardBreak => out.push_str("<br>"),
             Inline::PageLink { id } => match context.titles.title(id) {
                 Some(title) => {
-                    let _ = write!(
-                        out,
-                        r#"<a class="page-link" href="/?page={}">"#,
-                        encode_component(id)
-                    );
+                    out.push_str(r#"<a class="page-link" href=""#);
+                    escape(&context.links.page(id), out);
+                    out.push_str(r#"">"#);
                     escape(&title, out);
                     out.push_str("</a>");
                 }

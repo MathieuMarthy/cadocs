@@ -46,7 +46,7 @@ pub async fn serve<E: RustEmbed>(uri: Uri) -> Response {
 fn is_front_end_route(path: &str) -> bool {
     let first = path.split('/').next().unwrap_or_default();
     let last = path.rsplit('/').next().unwrap_or_default();
-    !matches!(first, "api" | "assets" | "licenses" | "ws") && !last.contains('.')
+    !matches!(first, "api" | "assets" | "licenses" | "s" | "ws") && !last.contains('.')
 }
 
 /// The few types the build produces, which does not justify a MIME table in the binary.

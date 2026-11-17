@@ -1,7 +1,7 @@
 //! The REST API under `/api/v1`: its error shape and what every route shares (`docs/API.md`).
 
 mod admin;
-mod attachments;
+pub(crate) mod attachments;
 pub mod auth;
 mod comments;
 mod groups;
@@ -10,6 +10,7 @@ mod markdown;
 mod pages;
 mod revisions;
 mod search;
+mod shares;
 mod spaces;
 mod workspaces;
 
@@ -31,7 +32,7 @@ use axum::{Json, Router};
 use cadocs_collab::{Authorizer, CollabError};
 use cadocs_store::{
     AccountStore, AttachmentStore, CommentStore, DocStore, GroupStore, PageStore, RevisionStore,
-    SearchStore, SpaceStore, StoreError, WorkspaceStore,
+    SearchStore, ShareStore, SpaceStore, StoreError, WorkspaceStore,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -230,6 +231,7 @@ impl From<StoreError> for ApiError {
             | StoreError::AttachmentNotFound
             | StoreError::RevisionNotFound
             | StoreError::CommentNotFound => ApiError::new(ErrorCode::NotFound),
+            StoreError::ShareNotFound => ApiError::new(ErrorCode::NotFound),
             error => {
                 tracing::error!(%error, "storage failed");
                 ApiError::new(ErrorCode::Unavailable)
@@ -398,7 +400,8 @@ where
         + AttachmentStore
         + SearchStore
         + RevisionStore
-        + CommentStore,
+        + CommentStore
+        + ShareStore,
     A: Authorizer,
 {
     // A nested fallback only sees paths below the root of the nest. `router` in `lib.rs` also
@@ -416,7 +419,8 @@ where
         .merge(markdown::routes(state))
         .merge(search::routes(state))
         .merge(revisions::routes(state))
-        .merge(comments::routes(state));
+        .merge(comments::routes(state))
+        .merge(shares::routes(state));
     finish(routes, state.http.clone())
 }
 

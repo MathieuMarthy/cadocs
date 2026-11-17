@@ -10,7 +10,7 @@ const SELECT_ATTACHMENT: &str = "SELECT id, workspace_id, file_name, content_typ
                                         uploaded_by, created_at
                                  FROM attachments WHERE id = ?1";
 
-fn attachment(row: &SqliteRow) -> Attachment {
+pub(super) fn attachment(row: &SqliteRow) -> Attachment {
     Attachment {
         id: row.get("id"),
         workspace_id: row.get("workspace_id"),

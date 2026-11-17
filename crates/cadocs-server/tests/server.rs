@@ -26,11 +26,12 @@ use cadocs_store::{
     CommentChange, CommentStore, Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant,
     Group, GroupStore, IndexTarget, Invitation, InvitationPreview, InvitedUser, Member, Membership,
     MovedPage, NewAttachment, NewComment, NewEmailCode, NewGrant, NewGroup, NewInvitation, NewPage,
-    NewPasswordReset, NewRevision, NewSession, NewSpace, NewUser, NewWorkspace, PageCrumb,
-    PageIndex, PageMove, PageRecord, PageSite, PageStore, Revision, RevisionStore, RevisionSummary,
-    SearchHit, SearchStore, SessionStanding, Snapshot, Space, SpaceChanges, SpaceStore,
-    SqliteStore, StoreError, StoredDoc, StoredUpdate, Thread, UpdateBasis, UploadTarget,
-    UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
+    NewPasswordReset, NewRevision, NewSession, NewShare, NewSpace, NewUser, NewWorkspace,
+    PageCrumb, PageIndex, PageMove, PageRecord, PageSite, PageStore, Revision, RevisionStore,
+    RevisionSummary, SearchHit, SearchStore, SessionStanding, Share, ShareStore, SharedPage,
+    SharedView, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc,
+    StoredUpdate, Thread, UpdateBasis, UploadTarget, UserChanges, UserRecord, Workspace,
+    WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -405,6 +406,58 @@ impl SpaceStore for FlakyStore {
         now: i64,
     ) -> Result<(), StoreError> {
         self.inner.set_grants(space_id, actor, grants, now).await
+    }
+}
+
+impl ShareStore for FlakyStore {
+    async fn create_share(&self, new: &NewShare) -> Result<Share, StoreError> {
+        self.inner.create_share(new).await
+    }
+
+    async fn list_shares(
+        &self,
+        page_id: &str,
+        actor: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Share>, StoreError> {
+        self.inner.list_shares(page_id, actor, after, limit).await
+    }
+
+    async fn delete_share(&self, share_id: &str, actor: &str) -> Result<(), StoreError> {
+        self.inner.delete_share(share_id, actor).await
+    }
+
+    async fn shared_view(
+        &self,
+        token: &str,
+        slug: Option<&str>,
+        now: i64,
+        children_limit: u32,
+    ) -> Result<Option<SharedView>, StoreError> {
+        self.inner
+            .shared_view(token, slug, now, children_limit)
+            .await
+    }
+
+    async fn shared_pages(
+        &self,
+        token: &str,
+        ids: &[String],
+        now: i64,
+    ) -> Result<Vec<SharedPage>, StoreError> {
+        self.inner.shared_pages(token, ids, now).await
+    }
+
+    async fn shared_attachment(
+        &self,
+        token: &str,
+        attachment_id: &str,
+        now: i64,
+    ) -> Result<Option<Attachment>, StoreError> {
+        self.inner
+            .shared_attachment(token, attachment_id, now)
+            .await
     }
 }
 

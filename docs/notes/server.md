@@ -66,8 +66,18 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 
 ## Tests
 
-- `tests/common` holds the REST test client, and `tests/common/mail.rs` the relay helpers (`with_mail`, `with_relay_and`, `before_setup`, `messages`, `settle`, `body`).
+- `tests/common` holds the REST test client (`outside` for paths beyond `/api/v1`, such as `/s/`), and `tests/common/mail.rs` the relay helpers (`with_mail`, `with_relay_and`, `before_setup`, `messages`, `settle`, `body`).
 - `tests/matrix.rs` tries every space action with each role and gathers the wrong cells before failing. A new space route adds its row there and its line in [COVERAGE.md](../COVERAGE.md). A denial is `404` when the caller cannot read the target, `403` when they can.
+
+## Public shares (step 45)
+
+- `public.rs` serves `/s/{token}`, `/s/{token}/p/{slug}` and `/s/{token}/files/{id}` outside `/api`, with no session and no origin check, behind their own limiter (`public_requests`, 120 at once then one per 100 ms per client). The asset fallback and the front end's router leave `/s/` to the server (`assets.rs`, `SERVER_PATHS`).
+- Order per request: limiter, `shared_view` (two to four queries), `registry.read`, render, then the `ETag` and `304`. A bad token never takes a turn of `CADOCS_DOC_READS`; a revalidation does.
+- The `ETag` is the SHA-256 of the body served (and `indexable`). An `ETag` from `pages.updated_at` was tried first and gave `304` for edits still in the room, since `registry.read` sees them and a flush has not moved the date yet: a `304` could keep a paragraph an editor had removed. The cost is a read and a render per revalidation; the `304` only saves the body.
+- Files open only when `page_attachments` lists them for a covered page (see [store notes](store.md#shares)), so a file removed from the content closes a few seconds later, once the indexing job has run (`REINDEX_DELAY` after the flush).
+- The public policy is `default-src 'none'; script-src 'none'` with the one inline style sheet allowed by its SHA-256 (`STYLE`): a change to `STYLE` changes the hash by itself, and `a_script_in_content_cannot_run_on_a_public_page` checks the two match. `img-src` adds the file store's origin, since `api::attachments::send`, which public files share with downloads, redirects safe images there.
+- A share reaches no socket, so its routes call no `access_changed()`: each public request checks the share again, and a revoke closes it at once.
+- Left open: a share stays open when its creator loses the editor role or leaves (ADR 0009 makes it a capability), and an expired share stays listed until revoked. Public answers are HTML for `404` only: a `429` or `503` keeps the JSON error shape.
 
 ## Mail (ADR 0026)
 

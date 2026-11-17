@@ -8,6 +8,7 @@ mod jobs;
 mod pages;
 mod revisions;
 mod search;
+mod shares;
 mod spaces;
 mod sqlite;
 mod workspaces;
@@ -33,6 +34,7 @@ pub use revisions::{
     RevisionTiming, THIN_REVISIONS,
 };
 pub use search::{IndexTarget, PageIndex, REINDEX_PAGE, SearchHit, SearchStore};
+pub use shares::{NewShare, Share, ShareStore, SharedPage, SharedView};
 pub use spaces::{
     Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore, WorkspaceReach,
 };
@@ -125,6 +127,8 @@ pub enum StoreError {
     AlreadyMember,
     #[error("no such attachment")]
     AttachmentNotFound,
+    #[error("no such share")]
+    ShareNotFound,
     #[error("no such revision")]
     RevisionNotFound,
     #[error("no such comment")]

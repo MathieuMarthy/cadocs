@@ -7,6 +7,7 @@ mod jobs;
 mod pages;
 mod revisions;
 mod search;
+mod shares;
 mod spaces;
 mod workspaces;
 

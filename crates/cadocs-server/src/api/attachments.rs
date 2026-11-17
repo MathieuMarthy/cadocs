@@ -16,7 +16,7 @@ use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
-use cadocs_files::{Download, FileError};
+use cadocs_files::{Download, FileError, FileStore};
 use cadocs_store::{AccountStore, Attachment, AttachmentStore, NewAttachment, StoreError, now_ms};
 use futures_util::TryStreamExt;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
@@ -169,12 +169,25 @@ async fn download<S: AttachmentStore, A>(
 ) -> Result<Response, ApiError> {
     let found = state.store.attachment(&id, &current.user.id).await?;
     let found = found.ok_or(ApiError::new(ErrorCode::NotFound))?;
+    send(&*state.files, &found, &headers, "private, no-cache").await
+}
+
+/// The file of an attachment the caller may read, with `cache` as its `Cache-Control`: a `304`
+/// while the client has it, a redirect to the file store for a safe image when it gives one,
+/// else the bytes under a sandbox policy. A public share sends its files this way too.
+pub(crate) async fn send(
+    files: &dyn FileStore,
+    found: &Attachment,
+    headers: &HeaderMap,
+    cache: &'static str,
+) -> Result<Response, ApiError> {
+    let id = found.id.as_str();
     let etag = format!("\"{}\"", found.sha256);
     let cached = [
         (ETAG, header(&etag)),
-        (CACHE_CONTROL, HeaderValue::from_static("private, no-cache")),
+        (CACHE_CONTROL, HeaderValue::from_static(cache)),
     ];
-    if matches_etag(&headers, &etag) {
+    if matches_etag(headers, &etag) {
         return Ok((StatusCode::NOT_MODIFIED, cached).into_response());
     }
 
@@ -187,9 +200,7 @@ async fn download<S: AttachmentStore, A>(
     // The access check above runs on each view: the redirect is never cached, while the link it
     // gives stays the same for a while, so the browser keeps the file (ADR 0020). Only safe
     // images go there: the storage sends no sandbox or `nosniff`, and its origin may be shared.
-    let link = inline
-        .then(|| state.files.download_url(&id, &download))
-        .flatten();
+    let link = inline.then(|| files.download_url(id, &download)).flatten();
     if let Some(url) = link {
         let location = HeaderValue::try_from(url).map_err(ApiError::internal)?;
         let headers = [
@@ -199,7 +210,7 @@ async fn download<S: AttachmentStore, A>(
         return Ok((StatusCode::FOUND, headers).into_response());
     }
 
-    let file = match state.files.get(&id).await {
+    let file = match files.get(id).await {
         Ok(file) => file,
         Err(FileError::NotFound) => {
             tracing::warn!(id, "an attachment has a row and no file");
@@ -253,7 +264,9 @@ pub(super) fn header(value: &str) -> HeaderValue {
     HeaderValue::from_str(value).unwrap_or(HeaderValue::from_static(UNKNOWN_TYPE))
 }
 
-fn matches_etag(headers: &HeaderMap, etag: &str) -> bool {
+/// Whether `If-None-Match` names `etag`, weakly: a `W/` on either side is left out.
+pub(crate) fn matches_etag(headers: &HeaderMap, etag: &str) -> bool {
+    let etag = etag.strip_prefix("W/").unwrap_or(etag);
     let Some(value) = headers.get(IF_NONE_MATCH).and_then(|v| v.to_str().ok()) else {
         return false;
     };

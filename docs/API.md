@@ -240,7 +240,15 @@ Bodies and answers:
 | GET | `/s/{token}/p/{slug}` (outside `/api`) | none | A descendant, if the share includes children |
 | GET | `/s/{token}/files/{id}` (outside `/api`) | none | An attachment referenced by a page the share covers |
 
-Public routes are rate limited, send an `ETag` based on `updated_at`, and render through the bounded reader described in [ARCHITECTURE.md](ARCHITECTURE.md#reading-a-document-outside-a-room).
+Public routes are rate limited, send an `ETag` of what they serve, and render through the bounded reader described in [ARCHITECTURE.md](ARCHITECTURE.md#reading-a-document-outside-a-room).
+
+- A share is `{ id, page_id, token, include_children, indexable, created_by, expires_at, created_at }`. `token` is 128 random bits in hex (32 characters), and the public address is `/s/{token}`. Editors see the tokens of the page's shares again, since the share dialog lists them.
+- `POST /pages/{page}/shares` takes `{ include_children?, indexable?, expires_at? }`, both booleans `false` by default, `expires_at` in milliseconds or `null` for none, and answers `201` with the share. An `expires_at` not in the future is a `400` with `expires_at: past`, and an unknown field a `400`. A page can have several shares, each with its own token.
+- `GET /pages/{page}/shares` answers `{ items, next_cursor }`, oldest first, expired shares included. `DELETE /shares/{id}` answers `204`, and the address answers `404` at once. Each needs `editor` on the page: a reader gets `403`, anyone else `404`.
+- `GET /s/{token}` answers the shared page as HTML; with `include_children`, `GET /s/{token}/p/{slug}` answers a live page under it by its `slug`, and the shared page by its own. Links in content to a covered page point under the share, with its title; links to any other page show `page not found` and no title. A page with children lists up to 200 of them below its content, and one below the shared page leads back through its ancestors.
+- `GET /s/{token}/files/{id}` answers an attachment that the content of a live page the share covers shows, as a download does, with `Cache-Control: no-cache` and `X-Robots-Tag: noindex`.
+- An unknown token, a revoked or expired share, a page or space in the trash, a page or file the share does not cover: each is the same `404` page.
+- Pages answer `Cache-Control: no-cache`, an `ETag` that hashes the body and `304` while it matches, edits not yet flushed included, `X-Robots-Tag: noindex` unless the share is `indexable`, and `Content-Security-Policy: default-src 'none'; script-src 'none'; img-src 'self'; style-src 'sha256-…'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`, the one inline style sheet allowed by its hash. With `CADOCS_S3_DOWNLOADS=redirect`, `img-src` adds the endpoint's origin. Each client may make 120 requests to `/s/` at once, then one every 100 ms; past it the answer is `429` with `Retry-After`.
 
 ### Operations
 

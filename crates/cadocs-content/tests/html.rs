@@ -1,7 +1,8 @@
 mod common;
 
+use cadocs_content::Links;
 use cadocs_content::ast::*;
-use cadocs_content::html::to_html;
+use cadocs_content::html::{to_html, to_html_with};
 use common::*;
 
 fn titles(id: &str) -> Option<String> {
@@ -174,6 +175,50 @@ fn page_link_ids_are_encoded() {
         &|_: &str| Some("t".to_string()),
     );
     assert!(out.contains(r#"href="/?page=a%22%26b%2Fc""#), "{out}");
+}
+
+/// Addresses as a public share gives them, one of them unsafe as is.
+struct Shared;
+
+impl Links for Shared {
+    fn attachment(&self, id: &str) -> String {
+        format!("/s/token/files/{id}")
+    }
+
+    fn page(&self, id: &str) -> String {
+        format!(r#"/s/token/p/{id}"><script>"#)
+    }
+}
+
+#[test]
+fn addresses_come_from_the_links_given_and_are_escaped() {
+    let document = Document {
+        blocks: vec![
+            Block::Paragraph(vec![Inline::PageLink { id: "p1".into() }]),
+            Block::Image {
+                id: "a1".into(),
+                alt: None,
+            },
+            Block::File {
+                id: "a2".into(),
+                name: "report.pdf".into(),
+            },
+        ],
+    };
+    let out = to_html_with(&document, &|_: &str| Some("t".to_string()), &Shared);
+    assert!(
+        out.contains(r#"<a class="page-link" href="/s/token/p/p1&quot;&gt;&lt;script&gt;">t</a>"#),
+        "{out}"
+    );
+    assert!(
+        out.contains(r#"<img src="/s/token/files/a1" alt="">"#),
+        "{out}"
+    );
+    assert!(
+        out.contains(r#"href="/s/token/files/a2" download>"#),
+        "{out}"
+    );
+    assert!(!out.contains("/api/"), "{out}");
 }
 
 #[test]
