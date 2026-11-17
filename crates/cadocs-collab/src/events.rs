@@ -76,6 +76,15 @@ impl Event {
         }
     }
 
+    /// The comments of a page changed: one was written, edited, resolved, reopened or deleted.
+    pub fn comment(space: &str, page: &str) -> Self {
+        let frame = json!({ "type": "comment", "space": space, "page": page });
+        Self {
+            space: space.to_owned(),
+            frame: frame.to_string(),
+        }
+    }
+
     pub fn space(kind: SpaceEvent, space: &str) -> Self {
         let frame = json!({ "type": kind.wire_name(), "space": space });
         Self {

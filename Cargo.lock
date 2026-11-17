@@ -379,6 +379,7 @@ dependencies = [
  "argon2",
  "async_zip",
  "axum",
+ "base64 0.22.1",
  "bytes",
  "cadocs-collab",
  "cadocs-content",

@@ -32,8 +32,8 @@ use cadocs_files::FileStore;
 use cadocs_jobs::{Cleanup, Index, JobConfig, JobQueue, Revisions, ServerJobs, Worker};
 use cadocs_mail::Outbox;
 use cadocs_store::{
-    AccountStore, AttachmentStore, DocStore, GroupStore, JobStore, PageStore, RevisionStore,
-    SearchStore, SpaceStore, WorkspaceStore,
+    AccountStore, AttachmentStore, CommentStore, DocStore, GroupStore, JobStore, PageStore,
+    RevisionStore, SearchStore, SpaceStore, WorkspaceStore,
 };
 use rust_embed::RustEmbed;
 use tokio::net::TcpListener;
@@ -218,7 +218,8 @@ where
         + PageStore
         + AttachmentStore
         + SearchStore
-        + RevisionStore,
+        + RevisionStore
+        + CommentStore,
     A: Authorizer,
     E: RustEmbed + 'static,
 {
@@ -266,7 +267,8 @@ pub async fn serve<
         + PageStore
         + AttachmentStore
         + SearchStore
-        + RevisionStore,
+        + RevisionStore
+        + CommentStore,
     A: Authorizer,
     E: RustEmbed + 'static,
 >(

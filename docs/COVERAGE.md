@@ -9,7 +9,7 @@ Paths are short: `server/auth.rs` is `crates/cadocs-server/tests/auth.rs`, `e2e/
 | Part | In the rules | Over REST and sockets |
 | --- | --- | --- |
 | Resolution order | `cadocs-core/tests/permissions.rs`, one test per rule | `server/spaces.rs` (grants, default role, workspace admins), `server/matrix.rs` |
-| Space actions, each role | `space_matrix` | `server/matrix.rs` `each_space_action_follows_the_matrix_over_rest`: every MVP row, five roles, success or the `403` and `404` of API.md |
+| Space actions, each role | `space_matrix` | `server/matrix.rs` `each_space_action_follows_the_matrix_over_rest`: every MVP row and the comment rows, five roles, success or the `403` and `404` of API.md |
 | Page socket mode | `socket_mode_follows_the_role` | `server/matrix.rs` `the_page_socket_mode_follows_the_matrix`, `server/page_socket.rs` |
 | Trashed space and page | `trashed_space_denies_everything_but_its_restoration`, `trashed_page_is_absent_…` | `server/matrix.rs` `a_trashed_space_denies_everything_but_its_restoration`, `server/pages.rs` |
 | Move across spaces | `move_needs_editor_on_both_spaces_of_one_workspace` | `server/pages.rs`, `server/events.rs` |
@@ -20,7 +20,7 @@ Paths are short: `server/auth.rs` is `crates/cadocs-server/tests/auth.rs`, `e2e/
 | Reacting to changes, page sockets | `recompute_keeps_or_closes_the_socket` and the two after it | `server/socket_closes.rs`, one test per trigger and outcome, group membership and group deletion included |
 | Reacting to changes, events sockets | | `server/events.rs` (`access.changed`, from grants and groups, `4401`, `4403`, `4404`, trash leaves it open) |
 
-Comments, public shares and plugins have no route before V1 or V2: their rows are tested in the rules only, and their REST rows come with their routes.
+Public shares and plugins have no route yet: their rows are tested in the rules only, and their REST rows come with their routes.
 
 ## MVP scope
 
@@ -56,6 +56,7 @@ Comments, public shares and plugins have no route before V1 or V2: their rows ar
 | Interface in English, language per user (step 34) | `scripts/strings.ts`, run by `npm run build`, fails on words outside the catalogue, and `scripts/strings.test.ts` plants each kind of leftover; `scripts/i18n.test.ts` (the choice, then the browser, then English); `server/auth.rs` `the_interface_language_is_set_and_cleared_without_the_password`, `only_a_language_of_the_interface_is_accepted`; the unchanged end-to-end suite and `e2e/screens` for the English look |
 | Groups and group grants, server (step 35) | `server/groups.rs` (create, rename, delete, members, names, pages, other workspaces, a group grant over REST), `server/matrix.rs` `group_actions_follow_the_matrix_over_rest`, `server/socket_closes.rs` and `server/events.rs` (joining, leaving, deleting), `server/search.rs` `results_only_come_from_readable_spaces` |
 | Groups and group grants, screens (step 36) | `e2e/settings` `an admin makes a group, fills it, renames it and deletes it, and a member only reads it` (create, `taken`, add, rename, a member's read-only view, remove, a member who leaves the workspace leaves the count, delete), `a group opened while another loads shows its own members, and a group made meanwhile shows`, `a group does not say everyone is in it while the workspace's members are unknown`, `a group whose members fail to load says so, until another group opens`, `a group grant raises its members above their own grant, and the open page follows`; `server/socket_closes.rs` `losing_a_group_grant_above_ones_own_closes_with_4409` |
+| Comments, server (step 37) | `server/comments.rs` (threads with replies in pages, anchors stored as sent, body and anchor limits, one level of replies on the same page, edit and delete by the author or a space admin, an author demoted to viewer, a thread deleted with its replies, a deleted author, resolve and reopen, a reply not resolvable, trashed page and stranger get `404`), `server/matrix.rs` (the comment rows, and a trashed space), `server/events.rs` `each_change_to_a_comment_has_its_event` |
 | Binary under 30 MB, no S3 code in a default build | `scripts/check-build.sh`: the dependency graph of each flavor in CI's `rust` job on every pull request; the size and S3 code of the release binary in the `e2e` job after each push to main, and of each binary in `release.yml` |
 
 Not automated: the RAM targets (`bench/rss.sh`), except that a hash's memory goes back with no trim (`server/hash_memory.rs`, ADR 0023), and the release workflow as a whole, which runs on a tag.
