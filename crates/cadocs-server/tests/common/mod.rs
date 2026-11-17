@@ -210,8 +210,24 @@ impl Api {
         headers: &[(&str, &str)],
         body: &[u8],
     ) -> Reply {
+        self.request(method, &format!("/api/v1{path}"), headers, body)
+            .await
+    }
+
+    /// A request outside `/api/v1`, such as a public page under `/s/`.
+    pub async fn outside(&self, method: &str, path: &str, headers: &[(&str, &str)]) -> Reply {
+        self.request(method, path, headers, b"").await
+    }
+
+    async fn request(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> Reply {
         let mut request = format!(
-            "{method} /api/v1{path} HTTP/1.1\r\nhost: test\r\nconnection: close\r\n\
+            "{method} {path} HTTP/1.1\r\nhost: test\r\nconnection: close\r\n\
              content-length: {}\r\n",
             body.len()
         );

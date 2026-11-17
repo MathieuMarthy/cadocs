@@ -77,19 +77,30 @@ impl SearchStore for SqliteStore {
             .bind(index.body)
             .execute(&mut *tx)
             .await?;
+        // What the content shows now replaces what it showed, for public shares. The references
+        // only grow, since a revision may still show a file.
+        sqlx::query("DELETE FROM page_attachments WHERE page_id = ?1")
+            .bind(index.page_id)
+            .execute(&mut *tx)
+            .await?;
         // One statement each, on the writer: `forget_orphan` either deleted the attachment first,
         // and nothing is found, or finds this reference and keeps it.
         for attachment in index.attachments {
-            sqlx::query(
+            for statement in [
                 "INSERT INTO attachment_refs (attachment_id, page_id)
                  SELECT id, ?2 FROM attachments WHERE id = ?1 AND workspace_id = ?3
                  ON CONFLICT DO NOTHING",
-            )
-            .bind(attachment)
-            .bind(index.page_id)
-            .bind(&workspace)
-            .execute(&mut *tx)
-            .await?;
+                "INSERT INTO page_attachments (attachment_id, page_id)
+                 SELECT id, ?2 FROM attachments WHERE id = ?1 AND workspace_id = ?3
+                 ON CONFLICT DO NOTHING",
+            ] {
+                sqlx::query(statement)
+                    .bind(attachment)
+                    .bind(index.page_id)
+                    .bind(&workspace)
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
         tx.commit().await?;
         Ok(true)

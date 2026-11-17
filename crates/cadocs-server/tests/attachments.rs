@@ -728,6 +728,61 @@ async fn a_store_that_links_gets_a_redirect_after_the_access_check() {
 }
 
 #[tokio::test]
+async fn a_public_share_redirects_its_images_to_a_store_that_links() {
+    let api = start_with_files(Arc::new(Redirecting::new()), &[]).await;
+    let ada = setup(&api).await;
+    let wiki = wiki_on(api, ada).await;
+    let space = wiki.space(json!("viewer")).await;
+    let page = wiki.page(&space).await;
+    let image = wiki.attach(&page, "a.png", "image/png", b"png").await;
+    // A share opens the files its pages show, so the image goes in a page's content.
+    let path = format!("/spaces/{space}/import?name=a.md");
+    let mut headers = wiki.ada.headers().to_vec();
+    headers.push(("content-type", "text/markdown"));
+    let markdown = format!("# A\n\n![a](/api/v1/attachments/{image})\n");
+    let reply = wiki
+        .api
+        .raw("POST", &path, &headers, markdown.as_bytes())
+        .await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let shown = id(&reply);
+    let path = format!("/pages/{shown}/shares");
+    let reply = wiki
+        .api
+        .send("POST", &path, &wiki.ada.headers(), json!({}))
+        .await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let token = reply.body["token"].as_str().unwrap();
+
+    // The indexing job finds the image a moment after the edit.
+    let file = format!("/s/{token}/files/{image}");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let reply = loop {
+        let reply = wiki.api.outside("GET", &file, &[]).await;
+        if reply.status != 404 || tokio::time::Instant::now() > deadline {
+            break reply;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(reply.status, 302, "{reply:?}");
+    assert!(
+        reply
+            .header("location")
+            .unwrap()
+            .starts_with(&format!("{FILES_ORIGIN}/{image}?")),
+        "{reply:?}"
+    );
+    assert_eq!(reply.header("cache-control"), Some("private, no-store"));
+    let reply = wiki.api.outside("GET", &format!("/s/{token}"), &[]).await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    let policy = reply.header("content-security-policy").unwrap();
+    assert!(
+        policy.contains(&format!("img-src 'self' {FILES_ORIGIN};")),
+        "{policy}"
+    );
+}
+
+#[tokio::test]
 async fn images_may_come_from_the_origin_of_the_links() {
     let api = start_with_files(Arc::new(Redirecting::new()), &[]).await;
     let reply = api.raw("GET", "/health", &[], b"").await;

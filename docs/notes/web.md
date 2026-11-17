@@ -103,6 +103,7 @@ What a change to the front end or its tests must know.
 - An open client resends its whole document when it reconnects, so a test about the disk has no client left when the server comes back.
 - Do not `goto("about:blank")` before another `goto`: the second navigation can abort.
 - `e2e/relay.ts` is a plain text SMTP relay in Node; `relay.message(n)` waits for the n-th. Codes match `/^ {4}(\d{6})$/m`.
+- `e2e/shares.spec.ts` proves the public policy with `page.route`: it serves the real answer with scripts added, once with its headers and once without the policy, so the control shows the injection would run. `page.evaluate` still works under `script-src 'none'`.
 - `e2e/revisions.spec.ts` overrides the `server` fixture with a 1-second revision pause.
 - `screens.spec.ts` saves a screenshot of each screen in both themes in `test-results`.
 - `e2e/comments.spec.ts` selects through a DOM range (`select`): a mouse drag in Chrome widens to whole words and trailing spaces.

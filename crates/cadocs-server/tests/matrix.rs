@@ -1,7 +1,6 @@
 //! The space actions of PERMISSIONS.md, cell by cell, over REST and the page socket: one
 //! server per role, and each action of the matrix tried by a member holding that role.
-//! Public shares come later in V1, so their rows wait for their routes. The workspace
-//! rows that have their own routes, reads and groups, are at the end.
+//! The workspace rows that have their own routes, reads and groups, are at the end.
 
 mod common;
 
@@ -398,6 +397,19 @@ async fn each_space_action_follows_the_matrix_over_rest() {
         let path = format!("/attachments/{}", wiki.attachment);
         let got = wiki.call(bob, "DELETE", &path).await;
         check(&mut cells, "delete an attachment", &got, Needs::Editor, 204);
+
+        // List, create or revoke public shares.
+        let path = format!("/pages/{page}/shares");
+        let got = wiki.call(bob, "GET", &path).await;
+        check(&mut cells, "list shares", &got, Needs::Editor, 200);
+        let got = wiki.send(bob, "POST", &path, json!({})).await;
+        check(&mut cells, "create a share", &got, Needs::Editor, 201);
+        let reply = wiki.send(&wiki.ada, "POST", &path, json!({})).await;
+        assert_eq!(reply.status, 201, "{reply:?}");
+        let got = wiki
+            .call(bob, "DELETE", &format!("/shares/{}", id(&reply)))
+            .await;
+        check(&mut cells, "revoke a share", &got, Needs::Editor, 204);
 
         // Purge a page from the trash.
         let trashed = wiki.trashed_page().await;

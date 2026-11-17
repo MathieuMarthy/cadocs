@@ -10,6 +10,7 @@ pub mod data_dir;
 pub mod memory;
 pub mod password;
 pub mod privileges;
+pub mod public;
 pub mod rate_limit;
 pub mod security;
 pub mod session;
@@ -33,7 +34,7 @@ use cadocs_jobs::{Cleanup, Index, JobConfig, JobQueue, Revisions, ServerJobs, Wo
 use cadocs_mail::Outbox;
 use cadocs_store::{
     AccountStore, AttachmentStore, CommentStore, DocStore, GroupStore, JobStore, PageStore,
-    RevisionStore, SearchStore, SpaceStore, WorkspaceStore,
+    RevisionStore, SearchStore, ShareStore, SpaceStore, WorkspaceStore,
 };
 use rust_embed::RustEmbed;
 use tokio::net::TcpListener;
@@ -76,6 +77,8 @@ pub struct AppState<S, A> {
     pub mail_requests: Arc<RateLimiter>,
     /// Shared by the routes that send mail: what one address may get, whoever asks.
     pub mail_addresses: Arc<AddressLimiter>,
+    /// Shared by the public pages of shares and their files.
+    pub public_requests: Arc<RateLimiter>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
     sockets: watch::Sender<()>,
     /// Wakes the recheck of every socket.
@@ -101,6 +104,7 @@ impl<S, A> Clone for AppState<S, A> {
             code_key: self.code_key.clone(),
             mail_requests: self.mail_requests.clone(),
             mail_addresses: self.mail_addresses.clone(),
+            public_requests: self.public_requests.clone(),
             sockets: self.sockets.clone(),
             access: self.access.clone(),
         }
@@ -145,6 +149,10 @@ impl<S, A> AppState<S, A> {
             mail_addresses: Arc::new(AddressLimiter::new(
                 api::auth::ADDRESS_BURST,
                 api::auth::ADDRESS_REFILL,
+            )),
+            public_requests: Arc::new(RateLimiter::new(
+                public::PUBLIC_BURST,
+                public::PUBLIC_REFILL,
             )),
             sockets: watch::Sender::new(()),
             access: Arc::default(),
@@ -219,7 +227,8 @@ where
         + AttachmentStore
         + SearchStore
         + RevisionStore
-        + CommentStore,
+        + CommentStore
+        + ShareStore,
     A: Authorizer,
     E: RustEmbed + 'static,
 {
@@ -239,6 +248,7 @@ where
         )
         .nest("/api/v1", api::router(&state))
         .route("/api/v1/", any(api::not_found))
+        .merge(public::routes(&state))
         .fallback_service(get(assets::serve::<E>))
         .layer(map_response_with_state(
             Arc::new(security::SecurityHeaders::new(
@@ -268,7 +278,8 @@ pub async fn serve<
         + AttachmentStore
         + SearchStore
         + RevisionStore
-        + CommentStore,
+        + CommentStore
+        + ShareStore,
     A: Authorizer,
     E: RustEmbed + 'static,
 >(

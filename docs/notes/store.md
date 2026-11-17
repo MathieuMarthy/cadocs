@@ -44,6 +44,11 @@ What a change to the stores, roles or the workspace, space and page routes must 
 - `CommentStore` (step 37) checks on the page row: `authorize_comment` in `sqlite/comments.rs` finds the page from the comment, picks `EditOwnComment` or `EditOtherComment` by author, and turns `PageNotFound` into `CommentNotFound`. Resolving is `WriteComment` on any thread. Every write answers a `CommentChange` with the `PageSite`, so the handler publishes `Event::comment`.
 - The body and the anchor are stored as given: nothing parses the Markdown or the Yjs positions. The `mentions` table waits for step 39.
 - Left open: a thread's replies all come with it, with no cap, so a thread of thousands of replies makes one large answer.
+## Shares
+
+- `ShareStore` (`sqlite/shares.rs`): create, list and revoke check `ManageShares` on the page; a revoke that cannot read the page is `ShareNotFound`. The public lookups take a token and check no role, answering `None` alike for every closed case. Tokens are stored as is, since editors list them again.
+- `attachment_refs` only grows: a revision may still show a file, downloads by readers and the orphan cleanup rely on that, so it cannot say what a page shows now. `page_attachments` does: `index_page` replaces a page's rows with what its content holds, beside the references, and only public files read it. An upload adds a reference, not a row there, so a file uploaded to a shared page and never placed stays closed. Migration 0016 queues a reindex of every page to fill it.
+- Coverage climbs `parent_id` from a page until it meets the shared page (`COVERED_BY_CLIMB`), which needs no trash check: a live page never sits under a trashed one. Code that breaks that rule (a restore that keeps a trashed parent) must keep the climb right.
 
 ## Search
 

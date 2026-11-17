@@ -323,6 +323,14 @@ CREATE TABLE attachment_refs (
     PRIMARY KEY (attachment_id, page_id)
 );
 CREATE INDEX attachment_refs_page ON attachment_refs(page_id);
+
+-- What each page's content shows now, as its last index found it.
+CREATE TABLE page_attachments (
+    page_id       TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    attachment_id TEXT NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+    PRIMARY KEY (page_id, attachment_id)
+);
+CREATE INDEX page_attachments_attachment ON page_attachments(attachment_id);
 ```
 
 An upload creates the first reference. The indexing job adds one for each attachment it finds in a page's content, so an image pasted into another page is readable there, after a short delay.
@@ -331,7 +339,7 @@ Editing never removes a reference, because a revision may still show the file. R
 
 The `purge_orphan_files` job runs at start and every hour. It deletes each orphan's row, then its file, then any file with no row that is over an hour old: a crash between an upload's rename and its record, a deleted workspace, a failed delete, or a backup's files newer than its database leave such files. A younger one may be an upload about to record its row. The quota sums `size` over the workspace's rows, so a file with no row counts against nothing.
 
-A download needs read access to at least one referencing page. A public share serves a file only if a page covered by the share references it.
+A download needs read access to at least one referencing page. A public share serves a file only if the content of a page the share covers shows it now: references keep files a page once showed, so shares read `page_attachments`, which the indexing job replaces for a page each time it runs. A file removed from a shared page closes on the share after that job, a few seconds after the edit, and a file uploaded but never placed in the content never opens there.
 
 ## Jobs
 

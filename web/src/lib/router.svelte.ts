@@ -33,7 +33,7 @@ export function safeNext(next: string | null) {
 }
 
 /** First segments the server answers itself, as `is_front_end_route` in `assets.rs` lists them. */
-const SERVER_PATHS = ["api", "assets", "licenses", "ws"];
+const SERVER_PATHS = ["api", "assets", "licenses", "s", "ws"];
 
 function followLink(event: MouseEvent) {
   const modified = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
