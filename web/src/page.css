@@ -661,6 +661,235 @@
   font-size: 13px;
 }
 
+/* Comments (ADR 0012): passages in `mark` with their `[n]` in the margin, threads in a panel. */
+
+.page-layout {
+  display: flex;
+  align-items: flex-start;
+}
+
+.page-layout > .page {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The counters of comments sit in the right gutter, on the line where their passage ends. */
+.tiptap {
+  position: relative;
+}
+
+.comment-mark {
+  background: var(--mark);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.comment-mark[data-active="true"] {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* Empty in the document: its text comes from CSS, so it never joins the page's text. */
+.comment-count {
+  position: absolute;
+  right: calc(-1 * var(--space-8) + var(--space-1));
+  color: var(--accent-text);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  user-select: none;
+}
+
+.comment-count::after {
+  content: "[" attr(data-count) "]";
+}
+
+.comments-toggle.icon-button {
+  width: auto;
+  min-width: var(--control-height);
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+}
+
+.comments-count {
+  color: var(--accent-text);
+  font-size: 12px;
+}
+
+.comments-count::before {
+  content: "[";
+}
+
+.comments-count::after {
+  content: "]";
+}
+
+.comments-panel {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex: 0 0 320px;
+  flex-direction: column;
+  gap: var(--space-3);
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  padding: var(--space-3);
+  border-left: 1px solid var(--line);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.comments-panel .meta,
+.comments-panel .problem {
+  margin: 0;
+}
+
+.comments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.comments-head h2 {
+  margin: 0;
+  font-weight: 400;
+}
+
+.comments-filter,
+.comment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.comments-filter .button[aria-pressed="true"] {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.comment-start {
+  align-self: flex-start;
+}
+
+.comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.comment-field {
+  display: block;
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  caret-color: var(--accent);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.comment-field:focus {
+  border-color: var(--ink);
+}
+
+.threads {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+}
+
+.thread[aria-current="true"] {
+  border-color: var(--ink);
+}
+
+.comment-quote {
+  display: block;
+  margin: 0;
+  padding: 0 0 0 var(--space-2);
+  border: 0;
+  border-left: 3px solid var(--accent);
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+/* A passage no longer in the page: its quote stays, struck, with nothing to show. */
+.comment-quote.lost {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border-left-color: var(--line);
+  cursor: default;
+}
+
+.comment-quote.lost .quote-text {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.comment {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.comment.reply {
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--line);
+}
+
+.comment-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.comment-head .meta {
+  flex: 1 1 auto;
+}
+
+.comment-author {
+  font-weight: 600;
+}
+
+.comment-body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Without room beside the page, the panel covers its right side. */
+@media (max-width: 1180px) {
+  .comments-panel {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    width: min(320px, 100vw);
+    border-left-color: var(--ink);
+  }
+}
+
 @media (max-width: 840px) {
   .page {
     padding: var(--space-8) var(--space-4);
@@ -668,5 +897,24 @@
 
   .title {
     font-size: 28px;
+  }
+
+  .comment-count {
+    position: static;
+    margin-left: 2px;
+    font-size: 10px;
+    vertical-align: super;
+  }
+}
+
+@media print {
+  .comments-panel,
+  .comments-toggle,
+  .comment-count {
+    display: none !important;
+  }
+
+  .comment-mark {
+    background: none;
   }
 }

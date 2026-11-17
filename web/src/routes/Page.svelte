@@ -1,11 +1,19 @@
+<script lang="ts" module>
+  /** The comments panel stays open from one page to the next, as the person left it. */
+  let panelWasOpen = false;
+</script>
+
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
 
+  import Comments from "../components/Comments.svelte";
+  import Icon from "../components/Icon.svelte";
   import Menu, { type MenuItem } from "../components/Menu.svelte";
   import Shell from "../components/Shell.svelte";
   import { openPage } from "../editor/collab";
   import { copy, pageLink, showPage, trashPage } from "../lib/actions";
   import { api, ApiError, exportUrl } from "../lib/api";
+  import { PageComments } from "../lib/comments.svelte";
   import { describe } from "../lib/form.svelte";
   import { acquireNav, canEdit, lastWorkspace, type Nav, type PageView } from "../lib/nav.svelte";
   import { notify } from "../lib/notice.svelte";
@@ -121,6 +129,15 @@
     if (!first) void check({ socketTells: true });
   });
 
+  // A role change that keeps the socket's mode, as from viewer to commenter, closes nothing:
+  // the space list says it, and the page reads its role again for the comments panel.
+  const spaceRole = $derived((spaceId && nav?.space(spaceId)?.role) || null);
+  $effect(() => {
+    const role = spaceRole;
+    const read = untrack(() => row);
+    if (role && read && read.role !== role) void check({ socketTells: true });
+  });
+
   /**
    * A socket cannot read the status of a failed upgrade, so REST says what went wrong.
    * Reads can overlap, and an older one answering last would bring back an older role.
@@ -154,6 +171,26 @@
 
   /** The open editor and its socket. */
   let page: ReturnType<typeof openPage> | null = null;
+
+  /** The threads of this page, drawn by the editor and listed by the panel. */
+  const comments = new PageComments(untrack(() => id));
+  let panelOpen = $state(panelWasOpen);
+  $effect(() => {
+    panelWasOpen = panelOpen;
+  });
+  const panelId = $props.id();
+
+  /** The last comment change heard, so that only a new one reads the threads again. */
+  let heard: { nav: Nav; version: number; reloads: number } | null = null;
+  $effect(() => {
+    if (!nav) return;
+    const now = { nav, version: nav.comments.get(id) ?? 0, reloads: nav.reloads };
+    const before = heard;
+    heard = now;
+    if (before?.nav === nav && (before.version !== now.version || before.reloads !== now.reloads)) {
+      comments.reload();
+    }
+  });
 
   // A page found gone by any read closes its socket, whether or not the server closed it first.
   $effect(() => {
@@ -200,6 +237,13 @@
         // A `4409` closed the socket: no close code will follow, so a `404` here is the answer.
         onRoleChanged: () => void check(),
         onContentError: () => (stale = true),
+        onSynced: () => comments.editorSynced(),
+        onCommentsFound: (found) => comments.foundChanged(found),
+        onCommentActivated(thread) {
+          comments.activate(thread);
+          panelOpen = true;
+        },
+        onSelection: (hasText) => (comments.hasSelection = hasText),
         onFinalClose(code) {
           page?.destroy();
           page = null;
@@ -214,10 +258,13 @@
           });
         },
       });
+      comments.attach(page.comments);
+      void comments.load();
     });
     return () => {
       left = true;
       if (retry) clearTimeout(retry);
+      comments.stop();
       page?.destroy();
     };
   });
@@ -238,25 +285,53 @@
     {#snippet end()}
       <span bind:this={status} class="status" role="status"></span>
       <div bind:this={presence} class="presence"></div>
+      <button
+        type="button"
+        class="icon-button comments-toggle"
+        aria-label={t("comments.toggle")}
+        title={comments.open.length > 0
+          ? t("comments.toggleOpen", { count: comments.open.length })
+          : t("comments.toggle")}
+        aria-expanded={panelOpen}
+        aria-controls={panelId}
+        onclick={() => (panelOpen = !panelOpen)}
+      >
+        <Icon name="message-square" />
+        {#if comments.open.length > 0}<span class="comments-count" aria-hidden="true">{comments.open.length}</span>{/if}
+      </button>
       <Menu label={t("menu.moreFor", { name: shownTitle })} items={actions} />
     {/snippet}
-    <main class="page">
-      {#if stale}
-        <div class="banner" role="alert">
-          <span>{t("page.stale")}</span>
-          <button type="button" class="button" onclick={() => location.reload()}>{t("app.reload")}</button>
-        </div>
+    <div class="page-layout">
+      <main class="page">
+        {#if stale}
+          <div class="banner" role="alert">
+            <span>{t("page.stale")}</span>
+            <button type="button" class="button" onclick={() => location.reload()}>{t("app.reload")}</button>
+          </div>
+        {/if}
+        <textarea
+          bind:this={title}
+          class="title"
+          rows="1"
+          placeholder={t("page.untitled")}
+          aria-label={t("page.titleField")}
+          autocomplete="off"
+          spellcheck="false"
+        ></textarea>
+        <div bind:this={editor}></div>
+      </main>
+      {#if panelOpen && app.session}
+        <Comments
+          id={panelId}
+          {comments}
+          role={row?.role ?? "viewer"}
+          user={app.session.user.id}
+          onclose={() => {
+            panelOpen = false;
+            document.querySelector<HTMLElement>(".comments-toggle")?.focus();
+          }}
+        />
       {/if}
-      <textarea
-        bind:this={title}
-        class="title"
-        rows="1"
-        placeholder={t("page.untitled")}
-        aria-label={t("page.titleField")}
-        autocomplete="off"
-        spellcheck="false"
-      ></textarea>
-      <div bind:this={editor}></div>
-    </main>
+    </div>
   </Shell>
 {/if}

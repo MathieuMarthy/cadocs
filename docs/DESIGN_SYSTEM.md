@@ -99,6 +99,7 @@ One set: **Lucide** 0.460.0 (ISC license, compatible with AGPL-3.0), redrawn wit
 | `menu` | open the sidebar on a phone |
 | `download`, `upload` | export, import |
 | `printer` | print |
+| `message-square` | comments (opens the panel) |
 
 ## Layout
 
@@ -240,6 +241,13 @@ The short message after an action, such as `moved to trash` or `link copied`, at
 ### Comments
 
 Passage highlighted in `mark`, with a `[2]` counter in `accent-text` in the right margin.
+
+- The highlight and its counter are decorations, never part of the page's text. The thread picked shows a 2px `accent` rule under its passage. A resolved thread has no highlight, unless it is picked from its quote; a thread picked when someone resolves it is unpicked.
+- The top bar's `message-square` button opens the panel, with the count of open threads as `[2]` in `accent-text`, and in its `title` (`comments · 2 open`) for screen readers.
+- The panel sits right of the page, 320px wide, `bg` with a `line` rule on its left, sticky like the sidebar. Without room for both (under about 1180px) it covers the right of the page, with an `ink` rule.
+- In it, in mono: the `label` heading, `open · 2` and `resolved · 1` as secondary buttons (the shown one in `ink`), the composer's button (`comment on the selection` or `comment on the page`), then one bordered block per thread, `ink` border for the one picked.
+- A thread starts with its quote after a 3px `accent` rule, a button that scrolls to the passage. A passage no longer in the page keeps its quote struck in `muted`, with a `line` rule and `passage removed`. A comment on the whole page says `on the page`.
+- Comments: the author at 600, the date in `meta`, the body in sans 15px. Replies sit under a 1px `line` rule on their left. Text verbs below (`reply`, `resolve`, `reopen`); `edit` and `delete` in the `ellipsis` menu of one's own comments.
 
 ## Tone
 

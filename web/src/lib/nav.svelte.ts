@@ -115,6 +115,10 @@ export class Nav {
   readonly versions = new SvelteMap<string, number>();
   /** Bumped by every change to any page. */
   version = $state(0);
+  /** Bumped by every `comment` event of a page, for the comments panel. */
+  readonly comments = new SvelteMap<string, number>();
+  /** Bumped when events may have been lost: whatever shows reads again. */
+  reloads = $state(0);
 
   private socket: WebSocket | null = null;
   private running = false;
@@ -199,8 +203,11 @@ export class Nav {
     }, delay);
   }
 
-  private handle(event: { type?: string; space?: string }) {
+  private handle(event: { type?: string; space?: string; page?: string }) {
     switch (event.type) {
+      case "comment":
+        if (event.page) this.comments.set(event.page, (this.comments.get(event.page) ?? 0) + 1);
+        break;
       case "page.created":
       case "page.moved":
       case "page.renamed":
@@ -246,6 +253,7 @@ export class Nav {
   }
 
   async reloadAll() {
+    this.reloads += 1;
     await this.loadSpaces();
     for (const space of this.spaces) this.bump(space.id);
     await Promise.all([...this.levels.values()].map((level) => this.loadLevel(level)));
