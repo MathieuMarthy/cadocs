@@ -66,6 +66,42 @@ pub struct PageRecord {
     pub updated_at: i64,
 }
 
+/// A live page of a subtree being copied, as the source has it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubtreePage {
+    pub id: String,
+    /// `None` for the top of the subtree.
+    pub parent_id: Option<String>,
+    pub position: String,
+    pub title: String,
+}
+
+/// One page of a copy: a fresh id and slug, and where it sits among the other copies.
+#[derive(Debug, Clone)]
+pub struct CopiedPage {
+    pub id: String,
+    pub slug: String,
+    /// The id of the copy above, `None` for the top one, which goes where `PageCopy` says.
+    pub parent_id: Option<String>,
+    /// The key among its siblings, ignored for the top one.
+    pub position: String,
+    /// What `pages.title` holds until the first flush of the copy.
+    pub title: String,
+}
+
+/// The rows of a copy of `source_id` and its descendants. `pages` comes parents first, the top
+/// copy first. `space_id` is `None` to stay in the space of the source.
+#[derive(Debug, Clone)]
+pub struct PageCopy {
+    pub source_id: String,
+    pub space_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub placement: Placement,
+    pub pages: Vec<CopiedPage>,
+    pub actor: String,
+    pub now: i64,
+}
+
 /// A page above another, as a breadcrumb names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageCrumb {
@@ -115,6 +151,14 @@ pub trait PageStore: Send + Sync + 'static {
         actor: &str,
     ) -> impl Future<Output = Result<Option<Scope>, StoreError>> + Send;
 
+    /// The page, for a read that needs the check made again, as a copy does for each source.
+    /// Refused with `PageNotFound`, for a trashed page too.
+    fn page_to_read(
+        &self,
+        page_id: &str,
+        actor: &str,
+    ) -> impl Future<Output = Result<PageRecord, StoreError>> + Send;
+
     /// The page, for a change that goes through its room. Refused with `PageNotFound` or
     /// `NotAllowed`.
     fn page_to_edit(
@@ -154,10 +198,41 @@ pub trait PageStore: Send + Sync + 'static {
         now: i64,
     ) -> impl Future<Output = Result<MovedPage, StoreError>> + Send;
 
+    /// The page and its live descendants, parents first, at most `limit` of them. Refused with
+    /// `PageNotFound` for a page the user cannot read.
+    fn subtree_to_copy(
+        &self,
+        page_id: &str,
+        actor: &str,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<SubtreePage>, StoreError>> + Send;
+
+    /// Creates the rows of a copy in one transaction, and answers its top page. The user must
+    /// read the source and create pages in the target space. Refused with `PageNotFound`,
+    /// `SpaceNotFound`, `NotAllowed`, `OtherWorkspace`, `UnknownParent`, `UnknownSibling` or
+    /// `TooDeep`.
+    fn create_copies(
+        &self,
+        copy: &PageCopy,
+    ) -> impl Future<Output = Result<PageRecord, StoreError>> + Send;
+
     /// Takes the live descendants, with one date. Refused with `PageNotFound` or `NotAllowed`.
     fn trash_page(
         &self,
         page_id: &str,
+        actor: &str,
+        now: i64,
+    ) -> impl Future<Output = Result<PageSite, StoreError>> + Send;
+
+    /// Trashes the pages of a copy that failed, its top one first in `page_ids`, whatever the
+    /// role of `actor`, who is recorded as their trasher: the copy must not stay half written
+    /// because its maker lost the right to trash it. Only those pages: another page moved under
+    /// one of them goes up to the first page above that is not one, so no live page sits under a
+    /// trashed one. Answers the site of the top page, refused with `PageNotFound` once its row is
+    /// gone, or was never made.
+    fn trash_failed_copy(
+        &self,
+        page_ids: &[String],
         actor: &str,
         now: i64,
     ) -> impl Future<Output = Result<PageSite, StoreError>> + Send;

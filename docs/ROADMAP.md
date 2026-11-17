@@ -65,7 +65,7 @@ Steps. The rules of the MVP steps apply, and every new screen takes its strings 
 - [x] Step 47: TOTP. `user_totp`, recovery codes, login asking for the code, the account screen. Mail codes (ADR 0026) keep working beside it.
 - [ ] Step 48: OIDC, server. Providers in `CADOCS_OIDC_*`, code flow with PKCE, `user_identities`, how an identity meets an existing account, tests against a fake provider. An ADR for the HTTP client and its RAM and binary cost.
 - [ ] Step 49: OIDC, screens and providers. Login buttons, linking on the account screen, a manual check with Authentik and Keycloak written into `OPERATIONS.md`.
-- [ ] Step 50: duplication. `POST /pages/{page}/duplicate`, with descendants and attachments, into the same space or another, through a room.
+- [x] Step 50: duplication. `POST /pages/{page}/duplicate`, with descendants and attachments, into the same space or another, through a room.
 - [ ] Step 51: templates. `templates`, saving a page as one, a new page from one.
 - [ ] Step 52: exports. `format=html` for one page, the space export as a job behind `/jobs/{id}`, in Markdown or HTML, streamed as a zip.
 - [ ] Step 53: bulk import. A zip of Markdown files and folders becomes a tree of pages with its attachments, as a job.

@@ -12,7 +12,7 @@ use yrs::any::Number;
 use yrs::types::Attrs;
 use yrs::types::text::YChange;
 use yrs::{
-    Any, Doc, GetString, Out, ReadTxn, Text, Transact, TransactionMut, WriteTxn, Xml,
+    Any, Doc, GetString, Out, ReadTxn, StateVector, Text, Transact, TransactionMut, WriteTxn, Xml,
     XmlElementPrelim, XmlElementRef, XmlFragment, XmlFragmentRef, XmlOut, XmlTextPrelim,
     XmlTextRef,
 };
@@ -35,6 +35,13 @@ pub fn read_doc(doc: &Doc) -> Document {
 pub fn read_page(doc: &Doc) -> (String, Document) {
     let txn = doc.transact();
     (read_title(&txn), read(&txn))
+}
+
+/// The size of `doc` encoded as one update: about what writing its content elsewhere takes.
+pub fn state_len(doc: &Doc) -> usize {
+    doc.transact()
+        .encode_state_as_update_v1(&StateVector::default())
+        .len()
 }
 
 /// The content of the document `txn` reads.

@@ -57,3 +57,33 @@ test("printing shows the page alone", async ({ page, server }) => {
   await expect(page.getByRole("banner")).toBeHidden();
   await expect(page.getByLabel("page title")).toBeVisible();
 });
+
+test("a page duplicates from the page menu into another space, with its subpages", async ({
+  page,
+  server,
+}) => {
+  await asOwner(page, server);
+  const { spaceId, workspaceId } = await server.session();
+  const source = await server.page("runbook");
+  await server.rename("runbook", "Runbook");
+  const child = await server.call("POST", `/spaces/${spaceId}/pages`, { parent_id: source });
+  await server.call("PATCH", `/pages/${child.id}`, { title: "Steps" });
+  const archive = await server.call("POST", `/workspaces/${workspaceId}/spaces`, {
+    name: "Archive",
+  });
+  await server.titleStored(child.id, "Steps");
+
+  await page.goto(`${server.url}/?page=${source}`);
+  await expect(page.getByLabel("page title")).toHaveValue("Runbook");
+  await page.getByRole("banner").getByRole("button", { name: "more actions for Runbook" }).click();
+  await page.getByRole("menuitem", { name: "duplicate" }).click();
+  await page.getByLabel("copy into").selectOption({ label: "Archive" });
+  await page.getByRole("button", { name: "duplicate", exact: true }).click();
+
+  await expect(page).not.toHaveURL(new RegExp(source));
+  await expect(page.getByLabel("page title")).toHaveValue("Runbook");
+  const copy = new URL(page.url()).searchParams.get("page");
+  expect((await server.call("GET", `/pages/${copy}`)).space_id).toBe(archive.id);
+  const below = await server.call("GET", `/spaces/${archive.id}/tree?parent=${copy}`);
+  expect(below.items.map((row: { title: string }) => row.title)).toEqual(["Steps"]);
+});

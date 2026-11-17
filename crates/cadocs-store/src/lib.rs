@@ -26,8 +26,8 @@ pub use comments::{Anchor, Comment, CommentChange, CommentStore, CommentUser, Ne
 pub use groups::{Group, GroupStore, NewGroup};
 pub use jobs::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob};
 pub use pages::{
-    DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, MovedPage, NewPage, PageCrumb, PageMove,
-    PageRecord, PageStore, Placement,
+    CopiedPage, DateCursor, MAX_PAGE_DEPTH, MAX_TITLE_CHARS, MovedPage, NewPage, PageCopy,
+    PageCrumb, PageMove, PageRecord, PageStore, Placement, SubtreePage,
 };
 pub use revisions::{
     CREATE_REVISION, NewRevision, Revision, RevisionAuthor, RevisionStore, RevisionSummary,

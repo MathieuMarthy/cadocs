@@ -45,7 +45,7 @@ A workspace always keeps at least one owner. Any change that would remove the la
 | Edit or delete one's own comment | no | yes | yes | yes |
 | Edit or delete another user's comment | no | no | no | yes |
 | Open the page socket, read-write | no | no | yes | yes |
-| Create, update, move, trash or restore a page | no | no | yes | yes |
+| Create, update, move, duplicate, trash or restore a page | no | no | yes | yes |
 | List the trash | no | no | yes | yes |
 | Restore a revision, import | no | no | yes | yes |
 | Upload or delete an attachment | no | no | yes | yes |
@@ -57,6 +57,7 @@ A workspace always keeps at least one owner. Any change that would remove the la
 ## Special cases
 
 - **Move across spaces:** needs `editor` on both spaces. A move across workspaces is refused.
+- **Duplicate:** needs read access to the page and `editor` on the space the copy goes to, so a viewer copies a page into a space where they write. A copy across workspaces is refused. Each attachment the copy brings is one the caller can download.
 - **Trashed space:** every action is denied except restoring it, for a space `admin`, who also finds it in the list of trashed spaces of the workspace.
 - **Trashed page:** it behaves as absent for all actions except listing the trash, restoring and purging.
 - **Attachments:** a download needs read access to at least one page that references the file ([DATA_MODEL.md](DATA_MODEL.md#attachments)). A delete removes the file from every page that references it, so it needs `editor` on each of them, a page in the trash included. An attachment id works as a key inside its workspace: an editor who learns one can paste it into a page they edit, and the indexing job then lets that page's readers download the file. Ids are random and only shown to readers of a referencing page, who could keep the file anyway, so this is accepted (step 24).

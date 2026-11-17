@@ -366,6 +366,9 @@ async fn each_space_action_follows_the_matrix_over_rest() {
             .send(bob, "POST", &path, json!({ "after": null }))
             .await;
         check(&mut cells, "move a page", &got, Needs::Editor, 200);
+        let path = format!("/pages/{page}/duplicate");
+        let got = wiki.send(bob, "POST", &path, json!({})).await;
+        check(&mut cells, "duplicate a page", &got, Needs::Editor, 201);
         let doomed = wiki.new_page().await;
         let got = wiki.call(bob, "DELETE", &format!("/pages/{doomed}")).await;
         check(&mut cells, "trash a page", &got, Needs::Editor, 204);
@@ -497,6 +500,9 @@ async fn a_trashed_space_denies_everything_but_its_restoration() {
         cells.check(role, "update a page", &got, 404);
         let got = wiki.call(bob, "DELETE", &format!("/pages/{page}")).await;
         cells.check(role, "trash a page", &got, 404);
+        let path = format!("/pages/{page}/duplicate");
+        let got = wiki.send(bob, "POST", &path, json!({})).await;
+        cells.check(role, "duplicate a page", &got, 404);
         let path = format!("/pages/{page}/comments");
         let got = wiki.send(bob, "POST", &path, json!({ "body": "Hm" })).await;
         cells.check(role, "comment", &got, 404);

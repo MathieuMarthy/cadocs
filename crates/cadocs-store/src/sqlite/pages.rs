@@ -1,4 +1,8 @@
-use cadocs_core::permissions::{Scope, SpaceAction, WorkspaceAction, move_allowed};
+use std::collections::HashMap;
+
+use cadocs_core::permissions::{
+    Scope, SpaceAction, WorkspaceAction, duplicate_allowed, move_allowed,
+};
 use cadocs_core::position::between;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, SqliteConnection};
@@ -7,8 +11,8 @@ use super::spaces::{self, HAS_ROLE, space_access};
 use super::workspaces::authorize as authorize_workspace;
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
-    DateCursor, MAX_PAGE_DEPTH, MovedPage, NewPage, PageCrumb, PageMove, PageRecord, PageSite,
-    PageStore, Placement, StoreError,
+    DateCursor, MAX_PAGE_DEPTH, MovedPage, NewPage, PageCopy, PageCrumb, PageMove, PageRecord,
+    PageSite, PageStore, Placement, StoreError, SubtreePage,
 };
 
 /// A page with all that resolution needs to know about the user `?1`.
@@ -227,6 +231,33 @@ async fn position(
     }
 }
 
+/// Trashes the live pages of the subtree of `page_id`, with one date.
+async fn trash_subtree(
+    tx: &mut SqliteConnection,
+    page_id: &str,
+    actor: &str,
+    now: i64,
+) -> Result<(), StoreError> {
+    // A restore goes by the date alone: it must differ from any date already in the subtree.
+    let latest: Option<i64> = sqlx::query_scalar(AssertSqlSafe(format!(
+        "{SUBTREE} SELECT max(deleted_at) FROM pages WHERE id IN (SELECT id FROM subtree)"
+    )))
+    .bind(page_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let date = latest.map_or(now, |latest| now.max(latest + 1));
+    sqlx::query(AssertSqlSafe(format!(
+        "{SUBTREE} UPDATE pages SET deleted_at = ?2, deleted_by = ?3
+         WHERE deleted_at IS NULL AND id IN (SELECT id FROM subtree)"
+    )))
+    .bind(page_id)
+    .bind(date)
+    .bind(actor)
+    .execute(tx)
+    .await?;
+    Ok(())
+}
+
 /// One screen of a list ordered by `date`, a column of the page, newest first. `filter` sees `?2`.
 async fn pages_by_date(
     conn: &mut SqliteConnection,
@@ -325,6 +356,12 @@ impl PageStore for SqliteStore {
         let mut reader = self.reader.acquire().await?;
         let row = select_page(&mut reader, page_id, actor).await?;
         Ok(row.as_ref().map(scope))
+    }
+
+    async fn page_to_read(&self, page_id: &str, actor: &str) -> Result<PageRecord, StoreError> {
+        let mut reader = self.reader.acquire().await?;
+        let row = authorize(&mut reader, page_id, actor, SpaceAction::ReadPage).await?;
+        page(&row).ok_or(StoreError::PageNotFound)
     }
 
     async fn page_to_edit(&self, page_id: &str, actor: &str) -> Result<PageRecord, StoreError> {
@@ -446,6 +483,100 @@ impl PageStore for SqliteStore {
         Ok(MovedPage { page, from_space })
     }
 
+    async fn subtree_to_copy(
+        &self,
+        page_id: &str,
+        actor: &str,
+        limit: usize,
+    ) -> Result<Vec<SubtreePage>, StoreError> {
+        let mut reader = self.reader.acquire().await?;
+        authorize(&mut reader, page_id, actor, SpaceAction::ReadPage).await?;
+        // Breadth first, so parents come before their children, and the walk stops at `limit`
+        // rows however large the subtree is. A live page never sits under a trashed one.
+        let rows: Vec<(String, Option<String>, String, String)> = sqlx::query_as(
+            "WITH RECURSIVE subtree(id, parent_id, position, title, depth) AS (
+                 SELECT id, NULL, position, title, 0 FROM pages WHERE id = ?1
+                 UNION ALL
+                 SELECT p.id, p.parent_id, p.position, p.title, subtree.depth + 1
+                 FROM pages p JOIN subtree ON p.parent_id = subtree.id
+                 WHERE p.deleted_at IS NULL
+                 ORDER BY 5
+                 LIMIT ?2
+             )
+             SELECT id, parent_id, position, title FROM subtree",
+        )
+        .bind(page_id)
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&mut *reader)
+        .await?;
+        let pages = rows
+            .into_iter()
+            .map(|(id, parent_id, position, title)| SubtreePage {
+                id,
+                parent_id,
+                position,
+                title,
+            })
+            .collect();
+        Ok(pages)
+    }
+
+    async fn create_copies(&self, copy: &PageCopy) -> Result<PageRecord, StoreError> {
+        let top = copy.pages.first().ok_or(StoreError::PageNotFound)?;
+        let actor = copy.actor.as_str();
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        let row = authorize(&mut tx, &copy.source_id, actor, SpaceAction::ReadPage).await?;
+        let source: &str = row.get("space_id");
+        let target = copy.space_id.as_deref().unwrap_or(source);
+        let space = spaces::authorize(&mut tx, target, actor, SpaceAction::EditPage).await?;
+        let workspace_id: &str = space.get("workspace_id");
+        let same_workspace = workspace_id == row.get::<&str, _>("workspace_id");
+        if !duplicate_allowed(scope(&row), spaces::scope(&space), same_workspace) {
+            return Err(StoreError::OtherWorkspace);
+        }
+
+        let parent_id = copy.parent_id.as_deref();
+        let above = ancestors(&mut tx, target, parent_id).await?;
+        let mut levels: HashMap<&str, usize> = HashMap::new();
+        for page in &copy.pages {
+            let over = page.parent_id.as_deref().and_then(|id| levels.get(id));
+            levels.insert(&page.id, over.map_or(1, |level| level + 1));
+        }
+        let height = levels.values().copied().max().unwrap_or_default();
+        if above.len() + height > MAX_PAGE_DEPTH {
+            return Err(StoreError::TooDeep);
+        }
+
+        let key = position(&mut tx, target, parent_id, &copy.placement, None).await?;
+        for (index, page) in copy.pages.iter().enumerate() {
+            // The copies below the top one keep the keys of their sources, unique among them.
+            let (parent, position) = if index == 0 {
+                (parent_id, key.as_str())
+            } else {
+                (page.parent_id.as_deref(), page.position.as_str())
+            };
+            sqlx::query(
+                "INSERT INTO pages (id, workspace_id, space_id, parent_id, position, slug, title,
+                                    created_by, updated_by, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, ?9)",
+            )
+            .bind(&page.id)
+            .bind(workspace_id)
+            .bind(target)
+            .bind(parent)
+            .bind(position)
+            .bind(&page.slug)
+            .bind(&page.title)
+            .bind(actor)
+            .bind(copy.now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        let page = reread(&mut tx, &top.id, actor).await?;
+        tx.commit().await?;
+        Ok(page)
+    }
+
     async fn trash_page(
         &self,
         page_id: &str,
@@ -454,19 +585,73 @@ impl PageStore for SqliteStore {
     ) -> Result<PageSite, StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
         let row = authorize(&mut tx, page_id, actor, SpaceAction::EditPage).await?;
-        // A restore goes by the date alone: it must differ from any date already in the subtree.
-        let latest: Option<i64> = sqlx::query_scalar(AssertSqlSafe(format!(
-            "{SUBTREE} SELECT max(deleted_at) FROM pages WHERE id IN (SELECT id FROM subtree)"
-        )))
-        .bind(page_id)
+        trash_subtree(&mut tx, page_id, actor, now).await?;
+        tx.commit().await?;
+        Ok(site(&row))
+    }
+
+    async fn trash_failed_copy(
+        &self,
+        page_ids: &[String],
+        actor: &str,
+        now: i64,
+    ) -> Result<PageSite, StoreError> {
+        let ids = serde_json::to_string(page_ids).map_err(|_| StoreError::PageNotFound)?;
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+            "SELECT id, parent_id FROM pages WHERE id IN (SELECT value FROM json_each(?1))",
+        )
+        .bind(&ids)
+        .fetch_all(&mut *tx)
+        .await?;
+        let top = page_ids.first().ok_or(StoreError::PageNotFound)?;
+        let row = sqlx::query("SELECT workspace_id, space_id FROM pages WHERE id = ?1")
+            .bind(top)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or(StoreError::PageNotFound)?;
+
+        // Another editor's page moved under the copy meanwhile is not the copy's: it goes up to
+        // the first page above that is not, last there, so no live page sits under a trashed one.
+        let parents: HashMap<&str, Option<&str>> = rows
+            .iter()
+            .map(|(id, parent)| (id.as_str(), parent.as_deref()))
+            .collect();
+        let foreign: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT id, space_id, parent_id FROM pages
+             WHERE parent_id IN (SELECT value FROM json_each(?1))
+                 AND id NOT IN (SELECT value FROM json_each(?1)) AND deleted_at IS NULL",
+        )
+        .bind(&ids)
+        .fetch_all(&mut *tx)
+        .await?;
+        for (id, space_id, parent_id) in &foreign {
+            let mut above = Some(parent_id.as_str());
+            while let Some(next) = above.and_then(|page| parents.get(page)) {
+                above = *next;
+            }
+            let key = position(&mut tx, space_id, above, &Placement::Last, Some(id)).await?;
+            sqlx::query("UPDATE pages SET parent_id = ?2, position = ?3 WHERE id = ?1")
+                .bind(id)
+                .bind(above)
+                .bind(&key)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        // A restore goes by the date alone: it must differ from any date already in the copy.
+        let latest: Option<i64> = sqlx::query_scalar(
+            "SELECT max(deleted_at) FROM pages WHERE id IN (SELECT value FROM json_each(?1))",
+        )
+        .bind(&ids)
         .fetch_one(&mut *tx)
         .await?;
         let date = latest.map_or(now, |latest| now.max(latest + 1));
-        sqlx::query(AssertSqlSafe(format!(
-            "{SUBTREE} UPDATE pages SET deleted_at = ?2, deleted_by = ?3
-             WHERE deleted_at IS NULL AND id IN (SELECT id FROM subtree)"
-        )))
-        .bind(page_id)
+        sqlx::query(
+            "UPDATE pages SET deleted_at = ?2, deleted_by = ?3
+             WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?1))",
+        )
+        .bind(&ids)
         .bind(date)
         .bind(actor)
         .execute(&mut *tx)

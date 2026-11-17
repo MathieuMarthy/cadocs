@@ -26,18 +26,18 @@ use cadocs_store::{
     CommentChange, CommentStore, Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant,
     Group, GroupStore, IndexTarget, Invitation, InvitationPreview, InvitedUser, Member, Membership,
     MovedPage, NewAttachment, NewComment, NewEmailCode, NewGrant, NewGroup, NewInvitation, NewPage,
-    NewPasswordReset, NewRevision, NewSession, NewShare, NewSpace, NewUser, NewWorkspace,
+    NewPasswordReset, NewRevision, NewSession, NewShare, NewSpace, NewUser, NewWorkspace, PageCopy,
     PageCrumb, PageIndex, PageMove, PageRecord, PageSite, PageStore, Revision, RevisionStore,
     RevisionSummary, SearchHit, SearchStore, SessionStanding, Share, ShareStore, SharedPage,
     SharedView, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc,
-    StoredUpdate, Thread, TotpProof, UpdateBasis, UploadTarget, UserChanges, UserRecord, Workspace,
-    WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
+    StoredUpdate, SubtreePage, Thread, TotpProof, UpdateBasis, UploadTarget, UserChanges,
+    UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
 use serde_json::{Value, json};
-use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{AssertSqlSafe, SqlitePool};
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
@@ -133,8 +133,21 @@ impl PageStore for FlakyStore {
         self.inner.page_scope(page_id, actor).await
     }
 
+    async fn page_to_read(&self, page_id: &str, actor: &str) -> Result<PageRecord, StoreError> {
+        self.inner.page_to_read(page_id, actor).await
+    }
+
     async fn page_to_edit(&self, page_id: &str, actor: &str) -> Result<PageRecord, StoreError> {
         self.inner.page_to_edit(page_id, actor).await
+    }
+
+    async fn trash_failed_copy(
+        &self,
+        page_ids: &[String],
+        actor: &str,
+        now: i64,
+    ) -> Result<PageSite, StoreError> {
+        self.inner.trash_failed_copy(page_ids, actor, now).await
     }
 
     async fn page_by_slug(
@@ -167,6 +180,19 @@ impl PageStore for FlakyStore {
         now: i64,
     ) -> Result<MovedPage, StoreError> {
         self.inner.move_page(page_id, actor, destination, now).await
+    }
+
+    async fn subtree_to_copy(
+        &self,
+        page_id: &str,
+        actor: &str,
+        limit: usize,
+    ) -> Result<Vec<SubtreePage>, StoreError> {
+        self.inner.subtree_to_copy(page_id, actor, limit).await
+    }
+
+    async fn create_copies(&self, copy: &PageCopy) -> Result<PageRecord, StoreError> {
+        self.inner.create_copies(copy).await
     }
 
     async fn trash_page(
@@ -1803,6 +1829,115 @@ async fn a_rename_that_waits_for_its_room_checks_the_role_again() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     registry.shutdown().await.unwrap();
     assert!(store.inner.load("doc").await.unwrap().updates.is_empty());
+}
+
+/// A copy of `doc` and its child `kid` into `target`, by `user`, now a plain member who reads
+/// `space` and edits `target`. `change` runs while the copy reads its first page, between the
+/// check of that page and the next one. `target` also holds `other` and its child `mine`, which
+/// are not the copy's. Answers the status, the live pages of the copy, and the id, parent and
+/// trash date of `mine` and `other`.
+async fn copy_while(change: &str) -> (StatusCode, i64, Vec<(String, Option<String>, Option<i64>)>) {
+    let dir = TempDir::new().unwrap();
+    let state = state(&dir, collab(), SocketConfig::default(), WRITER).await;
+    let store = state.store.clone();
+    let pool = SqlitePool::connect_with(
+        SqliteConnectOptions::new().filename(dir.path().join("cadocs.db")),
+    )
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        "UPDATE workspace_members SET role = 'member' WHERE user_id = 'user';
+         UPDATE spaces SET default_role = 'viewer' WHERE id = 'space';
+         INSERT INTO spaces (id, workspace_id, slug, name, default_role, created_at, updated_at)
+             VALUES ('target', 'workspace', 'target', 'Target', 'editor', 1, 1);
+         INSERT INTO pages (id, workspace_id, space_id, parent_id, position, slug, created_at,
+                            updated_at)
+             VALUES ('kid', 'workspace', 'space', 'doc', 'a', 'kid', 1, 1),
+                    ('other', 'workspace', 'target', NULL, 'b', 'other', 1, 1),
+                    ('mine', 'workspace', 'target', 'other', 'a', 'mine', 1, 1);",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    store.hold_load.store(true, Ordering::SeqCst);
+    let request = Request::post("/api/v1/pages/doc/duplicate")
+        .header(header::COOKIE, format!("{COOKIE}={TOKEN}"))
+        .header("x-csrf-token", csrf_token(TOKEN))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"space_id":"target"}"#))
+        .unwrap();
+    let copy = tokio::spawn(router::<_, _, Fixtures>(state).oneshot(request));
+
+    store.load_entered.notified().await;
+    sqlx::raw_sql(AssertSqlSafe(change.to_owned()))
+        .execute(&pool)
+        .await
+        .unwrap();
+    store.hold_load.store(false, Ordering::SeqCst);
+    store.release_load.notify_one();
+
+    let status = copy.await.unwrap().unwrap().status();
+    let live = sqlx::query_scalar(
+        "SELECT count(*) FROM pages WHERE space_id = 'target' AND deleted_at IS NULL
+             AND id NOT IN ('other', 'mine')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let foreign = sqlx::query_as(
+        "SELECT id, parent_id, deleted_at FROM pages WHERE id IN ('other', 'mine') ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    (status, live, foreign)
+}
+
+/// A copy can last long: losing read access to its source stops it before the next page.
+#[tokio::test]
+async fn a_copy_stops_when_its_source_can_no_longer_be_read() {
+    let (status, live, _) =
+        copy_while("UPDATE spaces SET default_role = NULL WHERE id = 'space'").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(live, 0);
+}
+
+#[tokio::test]
+async fn a_copy_stops_at_a_source_trashed_meanwhile() {
+    let (status, live, _) = copy_while("UPDATE pages SET deleted_at = 1 WHERE id = 'kid'").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(live, 0);
+}
+
+/// The copy that failed goes to the trash even though its maker can no longer trash it.
+#[tokio::test]
+async fn a_copy_that_loses_its_target_still_goes_to_the_trash() {
+    let (status, live, _) =
+        copy_while("UPDATE spaces SET default_role = 'viewer' WHERE id = 'target'").await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(live, 0);
+}
+
+/// A page moved under the copy meanwhile is not the copy's: it stays live, where the copy sat.
+#[tokio::test]
+async fn a_failed_copy_trashes_only_its_own_pages() {
+    let (status, live, rows) = copy_while(
+        "UPDATE pages SET position = 'z', parent_id = (
+             SELECT id FROM pages
+             WHERE space_id = 'target' AND parent_id IS NULL AND id NOT IN ('other', 'mine'))
+         WHERE id = 'other';
+         UPDATE spaces SET default_role = 'viewer' WHERE id = 'target';",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(live, 0);
+    assert_eq!(
+        rows,
+        [
+            ("mine".to_owned(), Some("other".to_owned()), None),
+            ("other".to_owned(), None, None),
+        ]
+    );
 }
 
 #[tokio::test]

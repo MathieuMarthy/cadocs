@@ -88,6 +88,13 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 - A share reaches no socket, so its routes call no `access_changed()`: each public request checks the share again, and a revoke closes it at once.
 - Left open: a share stays open when its creator loses the editor role or leaves (ADR 0009 makes it a capability), and an expired share stays listed until revoked. Public answers are HTML for `404` only: a `429` or `503` keeps the JSON error shape.
 
+## Duplication (step 50)
+
+- `api/copies.rs`: `subtree_to_copy` (breadth first, at most `MAX_COPY_PAGES` + 1 rows, so a huge subtree costs one row over the limit), fresh ids and slugs, `create_copies` (all rows, one transaction), one `page.created`, then `fill` in a spawned task like an import: per page, `page_to_read` on the source (unreadable, trashed or moved to another space fails the copy), `registry.read` with `read_page` and `state_len`, each file through `copy_file` once (`files` maps source id to copy, `None` to leave it), `map_attachments`, then `open`, `page_to_edit`, `rewrite`. A failure, or a panic of that task, which a second task awaits, trashes the copy's own pages, by the ids made for it, through `trash_failed_copy`, which checks no role: `move_to_trash` would refuse a caller who lost edit on the target and leave a half copy live. `tests/server.rs` `copy_while` uses `hold_load` to change rights between the first source's check and the next.
+- RAM: one document and its AST at a time, plus the ids of at most 500 pages and the map of at most 5000 files. Every copy loads a room, which counts against `CADOCS_ROOM_MEMORY_MB` and unloads like any idle room, so a large copy evicts idle rooms rather than growing past the budget; with every room live it fails with `503` and goes to the trash.
+- Step 51 (templates) can reuse `fill` and `copy_file`: a template page copied into a new page is the same work with one pair.
+- Left open: links between pages of the copied subtree still point at the sources; the copy keeps the title as is (no "copy of"), which the client could change; a panic inside `fill` leaves the copy live, as for an import; a copy of a page with 500 descendants answers only once all are written, with no progress shown.
+
 ## Mail (ADR 0026)
 
 - `AppState::mail` is `Option<Outbox>`: with `None`, the routes of the Mail stage are not registered, so they answer `404` for any method. A new mail route does the same.

@@ -325,6 +325,31 @@ fn move_needs_editor_on_both_spaces_of_one_workspace() {
 }
 
 #[test]
+fn duplicate_needs_to_read_the_page_and_edit_the_target_of_one_workspace() {
+    let editor = Scope::live(Some(SpaceRole::Editor));
+    let viewer = Scope::live(Some(SpaceRole::Viewer));
+    let commenter = Scope::live(Some(SpaceRole::Commenter));
+    let absent = Scope::live(None);
+    let trashed_page = Scope {
+        page_trashed: true,
+        ..editor
+    };
+    let trashed_space = Scope {
+        space_trashed: true,
+        ..editor
+    };
+
+    assert!(duplicate_allowed(viewer, editor, true));
+    assert!(duplicate_allowed(editor, editor, true));
+    assert!(!duplicate_allowed(absent, editor, true));
+    assert!(!duplicate_allowed(trashed_page, editor, true));
+    assert!(!duplicate_allowed(viewer, commenter, true));
+    assert!(!duplicate_allowed(viewer, absent, true));
+    assert!(!duplicate_allowed(viewer, trashed_space, true));
+    assert!(!duplicate_allowed(editor, editor, false));
+}
+
+#[test]
 fn download_needs_one_readable_referencing_page() {
     let readable = Scope::live(Some(SpaceRole::Viewer));
     let hidden = Scope::live(None);
