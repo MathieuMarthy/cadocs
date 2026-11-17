@@ -6,6 +6,8 @@ import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 
+import type { CommentEditor } from "../lib/comments.svelte";
+import { anchorOf, CommentHighlights, revealHighlight, showHighlights } from "./comments";
 import { forgetTitles, PagePicker } from "./pagelink";
 import { freeSlot, renderAvatars, renderCaret, renderSelection, type User } from "./presence";
 import { commandsOf, entries, extensionsOf } from "./registry";
@@ -47,6 +49,14 @@ interface Callbacks {
   onRoleChanged: () => void;
   /** The page holds content this schema cannot show, and this tab stopped syncing. */
   onContentError: () => void;
+  /** A sync ended: anchors resolve against the real document from now on. */
+  onSynced: () => void;
+  /** The threads whose anchor spans text changed. */
+  onCommentsFound: (found: ReadonlySet<string>) => void;
+  /** A highlight was clicked. */
+  onCommentActivated: (id: string) => void;
+  /** Whether the selection holds text to comment on changed. */
+  onSelection: (hasText: boolean) => void;
 }
 
 export function openPage(page: string, elements: Elements, options: Options, callbacks: Callbacks) {
@@ -90,6 +100,11 @@ export function openPage(page: string, elements: Elements, options: Options, cal
       SlashMenu.configure({ commands: commandsOf(entries) }),
       PagePicker.configure({ workspace: options.workspace }),
       Uploads.configure({ page }),
+      CommentHighlights.configure({
+        onFound: callbacks.onCommentsFound,
+        onActivate: callbacks.onCommentActivated,
+        onSelection: callbacks.onSelection,
+      }),
       Collaboration.configure({ document: ydoc }),
       CollaborationCaret.configure({
         provider,
@@ -170,6 +185,7 @@ export function openPage(page: string, elements: Elements, options: Options, cal
       problem = null;
       failures = 0;
       editor.commands.updateUser({ ...user, slot: freeSlot(awareness) });
+      callbacks.onSynced();
     }
     renderStatus();
   });
@@ -186,7 +202,15 @@ export function openPage(page: string, elements: Elements, options: Options, cal
   };
   addEventListener("pagehide", readSource);
 
+  const comments: CommentEditor = {
+    anchor: () => anchorOf(editor.state),
+    showComments: (highlights, active) =>
+      editor.isDestroyed ? new Set() : showHighlights(editor.view, highlights, active),
+    revealComment: (id) => revealHighlight(editor.view, id),
+  };
+
   return {
+    comments,
     setEditable(value: boolean) {
       editable = value;
       applyMode();

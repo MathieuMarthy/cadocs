@@ -53,7 +53,7 @@ Steps. The rules of the MVP steps apply, and every new screen takes its strings 
 - [x] Step 35: groups, server. REST routes of groups and their members, `access_changed()` on each change, the permission matrix extended. Done when group grants change what a member reaches, over REST and sockets.
 - [x] Step 36: groups, screens. Groups in workspace settings, groups in space grants.
 - [x] Step 37: comments, server. Migration, REST routes, resolve and reopen, one level of replies, anchors stored as given (ADR 0012), a `comment` event on the events socket, permission tests.
-- [ ] Step 38: comments, screens. The side panel, anchors from the selection, highlights as decorations, lost anchors shown with their quote, resolve and reopen.
+- [x] Step 38: comments, screens. The side panel, anchors from the selection, highlights as decorations, lost anchors shown with their quote, resolve and reopen.
 - [ ] Step 39: mentions. A user mention node in the editor and in `cadocs-content`, mentions of users and pages in comments, body mentions diffed by the reindex job into `mentions`.
 - [ ] Step 40: backlinks. `page_links` filled by the reindex job, a route and a panel listing the pages that link here.
 - [ ] Step 41: in-app notifications. `notifications` for mentions, replies and comments on one's pages, the `notification` event, a list with unread count and read state.
@@ -71,6 +71,28 @@ Steps. The rules of the MVP steps apply, and every new screen takes its strings 
 - [ ] Step 53: bulk import. A zip of Markdown files and folders becomes a tree of pages with its attachments, as a job.
 - [ ] Step 54: French. Every string of the catalogue translated, the language picker on the account screen.
 - [ ] Step 55: V1 exit. Benchmark, binary size, security review of shares, OIDC, TOTP and comments, `COVERAGE.md` and the permission matrix for the new routes.
+
+Parallel work. Steps 38 to 53 fall into independent lanes. Each lane runs in order, and lanes can run side by side in separate branches or worktrees:
+
+| Lane | Steps | Depends on |
+| --- | --- | --- |
+| Discussion | 38 → 39 → 41 → 42 | 39 needs the comment panel of 38 for mentions in comments; 41 notifies mentions; 42 mails what 41 stores |
+| Content | 40, 43, 44, in any order | none |
+| Shares | 45 → 46 | none |
+| Login | 47 → 48 → 49 | none, but 47 and 48 both change the login flow, so not at once |
+| Page copies | 50 → 51 | 51 reuses the copy of 50 to create a page from a template |
+| Archives | 52 → 53 | 53 reuses the job and zip handling of 52 |
+
+Step 54 comes after every step with a screen (38, 41, 42, 44, 46, 47, 49, 51, 52, 53), and step 55 after all of them.
+
+Lanes do not depend on each other, but they share files, so merge one branch at a time and rebase the others:
+
+- Migrations are numbered in sequence (`crates/cadocs-store/migrations/sqlite/`): renumber at merge, and keep the upgrade test of step 33 green.
+- The string catalogue `web/src/lib/i18n/en.ts` grows in every screen step.
+- 39 and 40 both change the reindex job (`crates/cadocs-jobs/src/index.rs`); 39 and 43 both add nodes to the editor schema and to `cadocs-content`.
+- 43, 45 and 52 all touch the HTML renderer of `cadocs-content`.
+- `ROADMAP.md`, `COVERAGE.md`, `docs/notes/` and the permission matrix change at the end of every step.
+- The idle RSS each step reports is measured on its own branch, then again once merged if the step added a dependency or a background task.
 
 Exit criteria:
 
