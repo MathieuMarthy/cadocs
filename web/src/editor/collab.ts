@@ -8,6 +8,7 @@ import * as Y from "yjs";
 
 import type { CommentEditor } from "../lib/comments.svelte";
 import { anchorOf, CommentHighlights, revealHighlight, showHighlights } from "./comments";
+import { MentionPicker } from "./mention";
 import { forgetTitles, PagePicker } from "./pagelink";
 import { freeSlot, renderAvatars, renderCaret, renderSelection, type User } from "./presence";
 import { commandsOf, entries, extensionsOf } from "./registry";
@@ -37,7 +38,7 @@ interface Options {
   user: Omit<User, "slot">;
   /** Whether the role allows writing, until `setEditable` says otherwise. */
   editable: boolean;
-  /** The page's workspace once known, whose pages `[[` offers. */
+  /** The page's workspace once known, whose pages `[[` and members `@` offer. */
   workspace: () => string | null;
 }
 
@@ -99,6 +100,7 @@ export function openPage(page: string, elements: Elements, options: Options, cal
       ...extensionsOf(entries),
       SlashMenu.configure({ commands: commandsOf(entries) }),
       PagePicker.configure({ workspace: options.workspace }),
+      MentionPicker.configure({ workspace: options.workspace }),
       Uploads.configure({ page }),
       CommentHighlights.configure({
         onFound: callbacks.onCommentsFound,

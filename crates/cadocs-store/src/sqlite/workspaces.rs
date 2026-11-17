@@ -6,7 +6,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, SqliteConnection};
 
 use super::accounts::{INSERT_SESSION, membership, select_memberships};
-use super::{BEGIN_WRITE, SqliteStore, search};
+use super::{BEGIN_WRITE, SqliteStore, mentions, search};
 use crate::{
     Invitation, InvitationPreview, InvitedUser, MAX_SLUG_CHARS, Member, Membership, NewInvitation,
     NewSession, NewWorkspace, StoreError, Workspace, WorkspaceChanges, WorkspaceStore,
@@ -422,6 +422,7 @@ impl WorkspaceStore for SqliteStore {
             .await?;
         end_links_of(&mut tx, workspace_id, user_id).await?;
         end_grants_of(&mut tx, workspace_id, user_id).await?;
+        mentions::forget_member(&mut tx, workspace_id, user_id).await?;
         tx.commit().await?;
         Ok(())
     }

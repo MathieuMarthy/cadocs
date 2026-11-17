@@ -1,5 +1,6 @@
 use sqlx::{AssertSqlSafe, Row, SqliteConnection};
 
+use super::mentions::{self, Place};
 use super::pages::{self, SELECT_PAGE};
 use super::spaces::{HAS_ROLE, space_access};
 use super::workspaces::authorize as authorize_workspace;
@@ -48,12 +49,12 @@ impl SearchStore for SqliteStore {
 
     async fn index_page(&self, index: &PageIndex<'_>) -> Result<bool, StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
-        let workspace: Option<String> =
-            sqlx::query_scalar("SELECT workspace_id FROM pages WHERE id = ?1")
+        let page: Option<(String, Option<String>)> =
+            sqlx::query_as("SELECT workspace_id, updated_by FROM pages WHERE id = ?1")
                 .bind(index.page_id)
                 .fetch_optional(&mut *tx)
                 .await?;
-        let Some(workspace) = workspace else {
+        let Some((workspace, last_editor)) = page else {
             return Ok(false);
         };
         let rowid: i64 = sqlx::query_scalar(
@@ -102,6 +103,14 @@ impl SearchStore for SqliteStore {
                     .await?;
             }
         }
+        // The job knows no author: a new mention is put down to whoever flushed last.
+        let body = Place {
+            page_id: index.page_id,
+            comment_id: None,
+            workspace_id: &workspace,
+        };
+        let author = last_editor.as_deref();
+        mentions::replace(&mut tx, &body, index.mentions, author, now_ms()).await?;
         tx.commit().await?;
         Ok(true)
     }

@@ -316,6 +316,15 @@ impl RevisionStore for FlakyStore {
     ) -> Result<Vec<(String, String)>, StoreError> {
         self.inner.readable_titles(actor, ids).await
     }
+
+    async fn member_names(
+        &self,
+        actor: &str,
+        page_id: &str,
+        ids: &[String],
+    ) -> Result<Vec<(String, String)>, StoreError> {
+        self.inner.member_names(actor, page_id, ids).await
+    }
 }
 
 impl SpaceStore for FlakyStore {
@@ -544,9 +553,12 @@ impl CommentStore for FlakyStore {
         comment_id: &str,
         actor: &str,
         body: &str,
+        mentions: &[String],
         now: i64,
     ) -> Result<CommentChange, StoreError> {
-        self.inner.edit_comment(comment_id, actor, body, now).await
+        self.inner
+            .edit_comment(comment_id, actor, body, mentions, now)
+            .await
     }
 
     async fn delete_comment(

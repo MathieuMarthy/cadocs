@@ -8,7 +8,7 @@ use std::fmt::Write;
 use crate::ast::*;
 use crate::headings::numbered;
 use crate::url::allowed;
-use crate::{ATTACHMENT_PATH, Links, PAGE_PATH, PageTitles};
+use crate::{ATTACHMENT_PATH, Links, PAGE_PATH, PageTitles, UNKNOWN_USER};
 
 /// HTML whose links point to the application's own addresses.
 pub fn to_html(document: &Document, titles: &dyn PageTitles) -> String {
@@ -318,6 +318,19 @@ fn inlines(context: &Context, content: &[Inline], out: &mut String) {
                 }
                 None => out
                     .push_str(r#"<span class="page-link page-link-missing">page not found</span>"#),
+            },
+            Inline::Mention { id } => match context.titles.name(id) {
+                Some(name) => {
+                    out.push_str(r#"<span class="mention">@"#);
+                    escape(&name, out);
+                    out.push_str("</span>");
+                }
+                None => {
+                    let _ = write!(
+                        out,
+                        r#"<span class="mention mention-missing">@{UNKNOWN_USER}</span>"#
+                    );
+                }
             },
         }
     }

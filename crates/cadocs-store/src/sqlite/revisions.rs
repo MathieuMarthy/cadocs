@@ -249,4 +249,30 @@ impl RevisionStore for SqliteStore {
             .map(|row| (row.get("id"), row.get("title")))
             .collect())
     }
+
+    async fn member_names(
+        &self,
+        actor: &str,
+        page_id: &str,
+        ids: &[String],
+    ) -> Result<Vec<(String, String)>, StoreError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids = serde_json::to_string(ids).expect("strings make JSON");
+        let mut reader = self.reader.acquire().await?;
+        let names = sqlx::query_as(
+            "SELECT u.id, u.name FROM pages p
+             JOIN workspace_members me ON me.workspace_id = p.workspace_id AND me.user_id = ?1
+             JOIN workspace_members m ON m.workspace_id = p.workspace_id
+             JOIN users u ON u.id = m.user_id
+             WHERE p.id = ?2 AND m.user_id IN (SELECT value FROM json_each(?3))",
+        )
+        .bind(actor)
+        .bind(page_id)
+        .bind(ids)
+        .fetch_all(&mut *reader)
+        .await?;
+        Ok(names)
+    }
 }

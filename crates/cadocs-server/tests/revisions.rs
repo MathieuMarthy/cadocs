@@ -363,3 +363,41 @@ async fn a_view_names_only_the_pages_its_reader_can_open() {
     assert!(!html.contains("Hidden"), "{html}");
     assert!(html.contains("page not found"), "{html}");
 }
+
+#[tokio::test]
+async fn a_view_and_an_export_name_the_members_mentioned() {
+    const DAVE: &str = "33333333-0000-7000-8000-000000000009";
+    let wiki = wiki().await;
+    wiki.api.add_user(DAVE, "dave@example.org").await;
+    wiki.api
+        .sql(&format!(
+            "UPDATE users SET name = 'Bob <B>' WHERE id = '{BOB}';
+             UPDATE users SET name = 'Dave' WHERE id = '{DAVE}'"
+        ))
+        .await;
+    let mut editor = Editor::open(&wiki, &wiki.ada).await;
+    let mentions = paragraph(vec![
+        Inline::Mention { id: BOB.into() },
+        text(" and "),
+        Inline::Mention { id: DAVE.into() },
+    ]);
+    editor.write("Mentions", &mentions).await;
+    wiki.titles_until(|t| t.first().is_some_and(|t| t == "Mentions"))
+        .await;
+
+    // Dave has an account but is no member: a reader of the page is not told his name.
+    let path = format!("/pages/{}/revisions/1", wiki.page);
+    let html = wiki.api.get(&wiki.vic, &path).await.body["html"].clone();
+    assert_eq!(
+        html,
+        r#"<p><span class="mention">@Bob &lt;B&gt;</span> and <span class="mention mention-missing">@someone</span></p>"#
+    );
+    let path = format!("/pages/{}/export?format=md", wiki.page);
+    let reply = wiki.api.get(&wiki.vic, &path).await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    let markdown = String::from_utf8(reply.bytes).unwrap();
+    assert!(
+        markdown.ends_with("@Bob \\<B\\> and @someone\n"),
+        "{markdown}"
+    );
+}

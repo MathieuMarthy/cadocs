@@ -2,6 +2,9 @@
 
 use cadocs_content::ast::*;
 
+/// The user the sample mentions.
+pub const MENTIONED: &str = "0190a0b0-0000-7000-8000-0000000000aa";
+
 pub fn text(value: &str) -> Inline {
     Inline::Text {
         text: value.into(),
@@ -101,7 +104,11 @@ pub fn every_node() -> Document {
                 Inline::PageLink {
                     id: "0190a0b0-0000-7000-8000-000000000001".into(),
                 },
-                text(" after"),
+                text(" after, ask "),
+                Inline::Mention {
+                    id: MENTIONED.into(),
+                },
+                text("."),
             ]),
             Block::Heading {
                 level: 2,

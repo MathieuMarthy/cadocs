@@ -23,7 +23,7 @@ pub(crate) fn inline_text(content: &[Inline]) -> String {
         match inline {
             Inline::Text { text: chunk, .. } => text.push_str(chunk),
             Inline::HardBreak => text.push('\n'),
-            Inline::PageLink { .. } => {}
+            Inline::PageLink { .. } | Inline::Mention { .. } => {}
         }
     }
     text

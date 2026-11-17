@@ -1,6 +1,7 @@
 //! Comments of a page (V1, ADR 0012). A `commenter` writes them here, never through the page
 //! socket. Anchors are stored as the client sends them, and every change publishes a `comment`
-//! event to the readers of the space.
+//! event to the readers of the space. A body is plain text whose `<user:ID>` tokens mention
+//! users (`cadocs_content::comment`): the store records those of the workspace.
 
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
@@ -11,6 +12,7 @@ use axum::{Extension, Json, Router};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use cadocs_collab::{Authorizer, Event};
+use cadocs_content::comment::mentioned_users;
 use cadocs_store::{
     AccountStore, Anchor, Comment, CommentChange, CommentStore, CommentUser, DocStore, NewComment,
     Thread, now_ms,
@@ -216,6 +218,7 @@ async fn create<S: DocStore + CommentStore, A>(
         page_id: page,
         parent_id: request.parent_id,
         actor: current.user.id,
+        mentions: mentioned_users(&body),
         body,
         anchor,
         now: now_ms(),
@@ -236,7 +239,13 @@ async fn edit<S: DocStore + CommentStore, A>(
     fields.finish()?;
     let change = state
         .store
-        .edit_comment(&comment, &current.user.id, &body, now_ms())
+        .edit_comment(
+            &comment,
+            &current.user.id,
+            &body,
+            &mentioned_users(&body),
+            now_ms(),
+        )
         .await?;
     announce(&state, &change);
     Ok(Json(change.comment.into()))

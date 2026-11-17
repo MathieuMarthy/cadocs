@@ -1,6 +1,6 @@
 //! Comments of a page (V1, ADR 0012). A thread is a comment on the page with one level of replies.
-//! The store keeps the body and the anchor as given: it never reads the Markdown, nor the Yjs
-//! positions.
+//! The store keeps the body and the anchor as given: it never reads the body, nor the Yjs
+//! positions. The caller reads the users a body mentions, which the store records.
 //!
 //! Reading comments is `ReadComments` on the page, writing one or resolving a thread is
 //! `WriteComment`, changing one's own is `EditOwnComment`, another's `EditOtherComment`. A comment
@@ -33,7 +33,7 @@ pub struct Comment {
     /// The thread a reply belongs to, `None` for a thread.
     pub parent_id: Option<String>,
     pub author: Option<CommentUser>,
-    /// Markdown.
+    /// Plain text with mentions (`cadocs_content::comment`).
     pub body: String,
     pub anchor: Option<Anchor>,
     pub resolved_at: Option<i64>,
@@ -57,6 +57,8 @@ pub struct NewComment {
     pub actor: String,
     pub body: String,
     pub anchor: Option<Anchor>,
+    /// The users the body mentions: those of the workspace are recorded.
+    pub mentions: Vec<String>,
     pub now: i64,
 }
 
@@ -87,12 +89,14 @@ pub trait CommentStore: Send + Sync + 'static {
         comment: &NewComment,
     ) -> impl Future<Output = Result<CommentChange, StoreError>> + Send;
 
-    /// Replaces the body. Refused with `CommentNotFound` or `NotAllowed`.
+    /// Replaces the body, and its mentions with `mentions`. Refused with `CommentNotFound` or
+    /// `NotAllowed`.
     fn edit_comment(
         &self,
         comment_id: &str,
         actor: &str,
         body: &str,
+        mentions: &[String],
         now: i64,
     ) -> impl Future<Output = Result<CommentChange, StoreError>> + Send;
 

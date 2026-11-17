@@ -17,7 +17,7 @@ export function forgetTitles() {
   titles.clear();
 }
 
-function titleOf(id: string) {
+export function titleOf(id: string) {
   let title = titles.get(id);
   if (!title) {
     title = api<{ title: string }>("GET", `/pages/${encodeURIComponent(id)}`).then(

@@ -191,6 +191,7 @@ async fn index_page<S: SearchStore>(store: &S, id: &str, doc: &Doc) -> anyhow::R
             body: &analyzer.index_text(&plain_text),
             plain_text: &plain_text,
             attachments: &[],
+            mentions: &[],
         })
         .await?;
     anyhow::ensure!(indexed, "{id} was not indexed");

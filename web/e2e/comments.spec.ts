@@ -316,11 +316,11 @@ test("an author edits and deletes their comment", async ({ left, right }) => {
   await expect(thread(left, "First draft").getByRole("alert")).toHaveText("storage is failing");
   await left.unroute("**/api/v1/comments/*/resolve");
 
-  // While it is edited, the body is the field's value, not text: the one thread is found by role.
+  // While it is edited, the body is the field's text: the one thread is found by role.
   const own = panel(left).getByRole("article");
   await own.getByRole("button", { name: "actions on the comment by Ada" }).click();
   await left.getByRole("menuitem", { name: "edit" }).click();
-  await expect(own.getByRole("textbox", { name: "edit the comment", exact: true })).toHaveValue("First draft");
+  await expect(own.getByRole("textbox", { name: "edit the comment", exact: true })).toHaveText("First draft");
   await own.getByRole("textbox", { name: "edit the comment", exact: true }).fill("Second draft");
   await own.getByRole("button", { name: "save", exact: true }).click();
   await expect(thread(right, "Second draft")).toContainText("edited");
@@ -330,4 +330,29 @@ test("an author edits and deletes their comment", async ({ left, right }) => {
   await thread(left, "Second draft").getByRole("button", { name: "delete the thread", exact: true }).click();
   await expect(thread(right, "Second draft")).toHaveCount(0);
   await expect(panel(right).getByText("no open comments")).toBeVisible();
+});
+
+test("editing a comment again starts over from its text, and saves what the field shows", async ({ left }) => {
+  await expect(status(left)).toContainText("synced");
+  await comment(left, "First draft", "page");
+  const own = panel(left).getByRole("article");
+  const field = own.getByRole("textbox", { name: "edit the comment", exact: true });
+  const edit = async () => {
+    await own.getByRole("button", { name: "actions on the comment by Ada" }).click();
+    await left.getByRole("menuitem", { name: "edit" }).click();
+  };
+  await edit();
+  await field.click();
+  await left.keyboard.press("Control+End");
+  await left.keyboard.type(" changed");
+  await expect(field).toHaveText("First draft changed");
+
+  // The form is open already: picking edit again shows the comment's text, as it opens it.
+  await edit();
+  await expect(field).toHaveText("First draft");
+  await field.click();
+  await left.keyboard.press("Control+End");
+  await left.keyboard.type(" again");
+  await own.getByRole("button", { name: "save", exact: true }).click();
+  await expect(own.locator(".comment-body")).toHaveText("First draft again");
 });

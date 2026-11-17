@@ -1,4 +1,5 @@
-//! The search index of a page (ADR 0007): its text, stemmed, and the attachments it shows.
+//! The search index of a page (ADR 0007): its text, stemmed, the attachments it shows, and the
+//! users it mentions.
 
 use std::sync::Arc;
 
@@ -45,6 +46,7 @@ impl<S: DocStore + SearchStore> Index<S> {
         let title = analyzer.index_text(&title);
         let body = analyzer.index_text(&plain_text);
         let attachments = document.attachments();
+        let mentions = document.mentions();
         self.store
             .index_page(&PageIndex {
                 page_id,
@@ -52,6 +54,7 @@ impl<S: DocStore + SearchStore> Index<S> {
                 body: &body,
                 plain_text: &plain_text,
                 attachments: &attachments,
+                mentions: &mentions,
             })
             .await?;
         Ok(())

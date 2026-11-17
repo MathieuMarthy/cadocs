@@ -5,6 +5,7 @@
 //! The schema is defined once, in [`schema`], and a test compares it with the editor's.
 
 pub mod ast;
+pub mod comment;
 pub mod html;
 pub mod markdown;
 pub mod schema;
@@ -60,10 +61,20 @@ pub fn relative_page_id(href: &str) -> Option<String> {
     (!id.is_empty()).then(|| id.to_string())
 }
 
+/// What renderers show for a mention whose name the reader may not see, after `@`.
+pub const UNKNOWN_USER: &str = "someone";
+
 /// Looks up the title of a page that content links to, as the reader may see it: `None` for a
 /// page the reader cannot open or that does not exist, which renderers show without a title.
+/// Also the name of a mentioned user: a closure knows none, so a public page shows no name.
 pub trait PageTitles {
     fn title(&self, id: &str) -> Option<String>;
+
+    /// The name of a mentioned user, `None` for one the reader may not see, shown as
+    /// [`UNKNOWN_USER`].
+    fn name(&self, _user_id: &str) -> Option<String> {
+        None
+    }
 }
 
 impl<F: Fn(&str) -> Option<String>> PageTitles for F {

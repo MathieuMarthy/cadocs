@@ -14,6 +14,8 @@
   } from "../lib/comments.svelte";
   import { Form } from "../lib/form.svelte";
   import { t } from "../lib/i18n";
+  import CommentBody from "./CommentBody.svelte";
+  import CommentField from "./CommentField.svelte";
   import IconButton from "./IconButton.svelte";
   import Menu, { type MenuItem } from "./Menu.svelte";
   import Time from "./Time.svelte";
@@ -24,6 +26,7 @@
     comments,
     role,
     user,
+    workspace,
     onclose,
   }: {
     /** The panel's id, which the top bar's button controls. */
@@ -33,6 +36,8 @@
     role: string;
     /** The reader's id, who may change their own comments. */
     user: string;
+    /** The page's workspace once known, whose members and pages a comment mentions. */
+    workspace: string | null;
     onclose: () => void;
   } = $props();
 
@@ -50,6 +55,8 @@
   let editing = $state<string | null>(null);
   let deleting = $state<string | null>(null);
   let text = $state("");
+  /** Bumped by each opening, so that a field opened again reads `text` again: it reads it once. */
+  let opened = $state(0);
   const acting = new Form();
   /** The thread a resolve or reopen acted on, which shows its refusal. */
   let target = $state<string | null>(null);
@@ -65,7 +72,7 @@
     comments.start();
     body = "";
     await tick();
-    panel?.querySelector<HTMLTextAreaElement>(".comment-form textarea")?.focus();
+    panel?.querySelector<HTMLElement>(".comment-form .comment-field")?.focus();
   }
 
   function cancel() {
@@ -97,12 +104,13 @@
     editing = kind === "edit" ? comment.id : null;
     deleting = kind === "delete" ? comment.id : null;
     text = kind === "edit" ? comment.body : "";
+    opened += 1;
     target = null;
     acting.problem = null;
     acting.fields = {};
     await tick();
     panel
-      ?.querySelector<HTMLElement>(`[data-form="${CSS.escape(comment.id)}"] textarea, [data-form="${CSS.escape(comment.id)}"] button`)
+      ?.querySelector<HTMLElement>(`[data-form="${CSS.escape(comment.id)}"] :is(.comment-field, button)`)
       ?.focus();
   }
 
@@ -182,7 +190,7 @@
         {:else}
           <p class="meta">{t("comments.wholePage")}</p>
         {/if}
-        <textarea class="comment-field" aria-label={t("comments.field")} bind:value={body} rows="3" required></textarea>
+        <CommentField label={t("comments.field")} bind:value={body} {workspace} />
         {#if problemOf(composing)}<p class="problem" role="alert">{problemOf(composing)}</p>{/if}
         <div class="comment-actions">
           <button class="button" type="submit" disabled={composing.busy}>{t("comments.submit")}</button>
@@ -237,7 +245,9 @@
           {/if}
           {#if writable && replying === thread.id}
             <form class="comment-form" data-form={thread.id} onsubmit={(event) => reply(event, thread)}>
-              <textarea class="comment-field" aria-label={t("comments.replyField")} bind:value={text} rows="2" required></textarea>
+              {#key opened}
+                <CommentField label={t("comments.replyField")} bind:value={text} {workspace} short />
+              {/key}
               {#if problemOf(acting)}<p class="problem" role="alert">{problemOf(acting)}</p>{/if}
               <div class="comment-actions">
                 <button class="button" type="submit" disabled={acting.busy}>{t("comments.reply")}</button>
@@ -293,7 +303,9 @@
     </div>
     {#if editing === comment.id}
       <form class="comment-form" data-form={comment.id} onsubmit={(event) => save(event, comment)}>
-        <textarea class="comment-field" aria-label={t("comments.editField")} bind:value={text} rows="3" required></textarea>
+        {#key opened}
+          <CommentField label={t("comments.editField")} bind:value={text} {workspace} />
+        {/key}
         {#if problemOf(acting)}<p class="problem" role="alert">{problemOf(acting)}</p>{/if}
         <div class="comment-actions">
           <button class="button" type="submit" disabled={acting.busy}>{t("comments.save")}</button>
@@ -301,7 +313,7 @@
         </div>
       </form>
     {:else}
-      <p class="comment-body">{comment.body}</p>
+      <CommentBody body={comment.body} {workspace} />
     {/if}
     {#if deleting === comment.id}
       <div class="comment-form" data-form={comment.id}>

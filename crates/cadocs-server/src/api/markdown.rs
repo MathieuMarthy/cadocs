@@ -29,7 +29,9 @@ use axum::{Extension, Json, Router};
 use cadocs_content::ast::{Block, Document, Inline};
 use cadocs_content::markdown::{from_markdown_with, to_markdown_with};
 use cadocs_content::yjs::{read_page, replace_page};
-use cadocs_content::{ATTACHMENT_PATH, Links, PAGE_PATH, relative_attachment_id, relative_page_id};
+use cadocs_content::{
+    ATTACHMENT_PATH, Links, PAGE_PATH, PageTitles, relative_attachment_id, relative_page_id,
+};
 use cadocs_core::permissions::SpaceRole;
 use cadocs_files::{FileError, FileStore, Stored};
 use cadocs_store::{
@@ -48,6 +50,7 @@ use uuid::Uuid;
 
 use super::attachments::{MAX_NAME_CHARS, disposition, file_error, header};
 use super::pages::{self, PageBody};
+use super::revisions::Readable;
 use super::{ApiError, ErrorCode, PathParam};
 use crate::AppState;
 use crate::session::{self, CurrentSession};
@@ -211,7 +214,7 @@ fn safe_name(name: &str, fallback: &str) -> String {
 fn page_markdown(
     title: &str,
     mut document: Document,
-    titles: &dyn Fn(&str) -> Option<String>,
+    titles: &dyn PageTitles,
     links: &dyn Links,
 ) -> String {
     let heading = Block::Heading {
@@ -222,7 +225,7 @@ fn page_markdown(
         }],
     };
     document.blocks.insert(0, heading);
-    to_markdown_with(&document, &titles, links)
+    to_markdown_with(&document, titles, links)
 }
 
 /// Takes the first block as the title when it is a top level heading, as an export writes it.
@@ -235,7 +238,7 @@ fn take_title(document: &mut Document) -> Option<String> {
         .map(|inline| match inline {
             Inline::Text { text, .. } => text.as_str(),
             Inline::HardBreak => " ",
-            Inline::PageLink { .. } => "",
+            Inline::PageLink { .. } | Inline::Mention { .. } => "",
         })
         .collect();
     document.blocks.remove(0);
@@ -268,14 +271,7 @@ async fn export<S: DocStore + PageStore + AttachmentStore + RevisionStore, A>(
     let user = &current.user.id;
     state.store.page(&page, user).await?.ok_or_else(not_found)?;
     let (title, document) = state.registry.read(&page, read_page).await?;
-    let linked = document.page_links();
-    let titles: HashMap<String, String> = state
-        .store
-        .readable_titles(user, &linked)
-        .await?
-        .into_iter()
-        .collect();
-    let titles = |id: &str| titles.get(id).cloned();
+    let titles = Readable::read(&*state.store, user, &page, &document).await?;
     let absolute = Absolute {
         origin: state.http.public_url.origin(),
     };

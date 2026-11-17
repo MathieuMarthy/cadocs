@@ -116,7 +116,17 @@
         },
         {
           "type": "text",
-          "text": " after"
+          "text": " after, ask "
+        },
+        {
+          "type": "mention",
+          "attrs": {
+            "id": "0190a0b0-0000-7000-8000-0000000000aa"
+          }
+        },
+        {
+          "type": "text",
+          "text": "."
         }
       ]
     },

@@ -4,6 +4,7 @@ mod backup;
 mod comments;
 mod groups;
 mod jobs;
+mod mentions;
 mod pages;
 mod revisions;
 mod search;

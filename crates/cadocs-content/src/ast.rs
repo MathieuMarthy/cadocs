@@ -38,6 +38,23 @@ impl Document {
     /// The ids of the pages the content links to, in order, each once: what a renderer needs the
     /// titles of.
     pub fn page_links(&self) -> Vec<String> {
+        self.inline_ids(|inline| match inline {
+            Inline::PageLink { id } => Some(id),
+            _ => None,
+        })
+    }
+
+    /// The ids of the users the content mentions, in order, each once: what the indexing job
+    /// records, and what a renderer needs the names of.
+    pub fn mentions(&self) -> Vec<String> {
+        self.inline_ids(|inline| match inline {
+            Inline::Mention { id } => Some(id),
+            _ => None,
+        })
+    }
+
+    /// The ids `pick` finds in inline content, in order, each once, never empty.
+    fn inline_ids(&self, pick: impl Fn(&Inline) -> Option<&String>) -> Vec<String> {
         let mut ids: Vec<String> = Vec::new();
         visit(&self.blocks, &mut |block| {
             let inlines: &[Inline] = match block {
@@ -48,10 +65,8 @@ impl Document {
                 } => content,
                 _ => &[],
             };
-            for inline in inlines {
-                if let Inline::PageLink { id } = inline
-                    && !ids.contains(id)
-                {
+            for id in inlines.iter().filter_map(&pick) {
+                if !id.is_empty() && !ids.contains(id) {
                     ids.push(id.clone());
                 }
             }
@@ -211,6 +226,11 @@ pub enum Inline {
     HardBreak,
     /// A link to another page, by id only: its title is looked up when rendered.
     PageLink {
+        id: String,
+    },
+    /// A user named in the content, by id only: their name is looked up when rendered, and shown
+    /// only to a reader allowed to see it.
+    Mention {
         id: String,
     },
 }

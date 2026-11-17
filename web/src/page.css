@@ -512,6 +512,32 @@
   color: var(--selection-ink);
 }
 
+/* Mention of a member: their name after `@`, in the accent, set apart from text without a rule.
+   Comments and revisions show it too. */
+.mention {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.mention.mention-missing {
+  color: var(--muted);
+  font-weight: inherit;
+}
+.tiptap .mention.ProseMirror-selectednode {
+  background: var(--selection);
+  color: var(--selection-ink);
+}
+
+/* Links to pages in a comment's text, as in the page. */
+.comment-body a.page-link {
+  color: var(--accent-text);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.comment-body a.page-link.page-link-missing {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
 /* Attachments: an image as wide as the text allows, a file as a line to download. */
 .tiptap figure.image-block {
   margin: 0 0 var(--space-4);
@@ -791,11 +817,28 @@
   font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.5;
-  resize: vertical;
+  /* Three lines, two for a reply, then it grows with its text. */
+  min-height: calc(3 * 1.5em + 2 * var(--space-2) + 2px);
+  outline: none;
+  overflow-wrap: anywhere;
+}
+
+.comment-field.short {
+  min-height: calc(2 * 1.5em + 2 * var(--space-2) + 2px);
+}
+
+.comment-field p {
+  margin: 0;
 }
 
 .comment-field:focus {
   border-color: var(--ink);
+}
+
+.comment-field a.page-link {
+  color: var(--accent-text);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 
 .threads {
