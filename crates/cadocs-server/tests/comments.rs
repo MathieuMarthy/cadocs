@@ -8,6 +8,8 @@ use serde_json::{Value, json};
 
 const BOB: &str = "33333333-0000-7000-8000-000000000001";
 const CAROL: &str = "33333333-0000-7000-8000-000000000002";
+/// Has an account, but is no member of the workspace.
+const DAVE: &str = "33333333-0000-7000-8000-000000000003";
 
 /// Ada owns the workspace and the space, Bob comments on it, Carol only reads it.
 struct Wiki {
@@ -511,4 +513,85 @@ async fn a_stranger_to_the_space_learns_nothing() {
     assert_eq!(wiki.edit(&dave, &thread, "y").await.status, 404);
     assert_eq!(wiki.resolve(&dave, &thread, true).await.status, 404);
     assert_eq!(wiki.delete(&dave, &thread).await.status, 404);
+}
+
+/// The users comment `comment` mentions, each checked to be by Bob on the wiki's page.
+async fn comment_mentions(w: &Wiki, comment: &str) -> Vec<&'static str> {
+    let all = w
+        .api
+        .number(&format!(
+            "SELECT count(*) FROM mentions WHERE comment_id = '{comment}'"
+        ))
+        .await;
+    let mut found = Vec::new();
+    for user in [BOB, CAROL, DAVE] {
+        let rows = w
+            .api
+            .number(&format!(
+                "SELECT count(*) FROM mentions WHERE comment_id = '{comment}'
+                 AND user_id = '{user}' AND author_id = '{BOB}' AND page_id = '{}'",
+                w.page
+            ))
+            .await;
+        if rows == 1 {
+            found.push(user);
+        }
+    }
+    assert_eq!(
+        all as usize,
+        found.len(),
+        "every mention is by Bob, on the page"
+    );
+    found
+}
+
+// Mentions
+
+#[tokio::test]
+async fn a_comment_records_the_members_it_mentions() {
+    let w = wiki().await;
+    w.api.add_user(DAVE, "dave@example.org").await;
+    let body = format!(
+        "<user:{CAROL}>, <user:{CAROL}>, <user:{DAVE}> and <page:{}>",
+        w.page
+    );
+    let reply = w.comment(&w.bob, json!({ "body": body })).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    assert_eq!(
+        reply.body["body"],
+        body.as_str(),
+        "the body is kept as given"
+    );
+    let comment = id(&reply);
+    // Dave is no member, and a page mention is no one's.
+    assert_eq!(comment_mentions(&w, &comment).await, [CAROL]);
+
+    // An edit adds and removes, and keeps what stays as it was.
+    w.api
+        .sql(&format!(
+            "UPDATE mentions SET read_at = 7 WHERE comment_id = '{comment}'"
+        ))
+        .await;
+    let reply = w
+        .edit(&w.bob, &comment, &format!("<user:{BOB}> <user:{CAROL}>"))
+        .await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert_eq!(comment_mentions(&w, &comment).await, [BOB, CAROL]);
+    let read = w
+        .api
+        .number(&format!(
+            "SELECT count(*) FROM mentions WHERE user_id = '{CAROL}' AND read_at = 7"
+        ))
+        .await;
+    assert_eq!(read, 1, "Carol's mention stays read");
+    let reply = w.edit(&w.bob, &comment, "nobody").await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert!(comment_mentions(&w, &comment).await.is_empty());
+
+    // A reply mentions too, and deleting the thread takes its mentions.
+    w.reply_to(&w.bob, &comment, &format!("<user:{CAROL}>"))
+        .await;
+    assert_eq!(w.api.number("SELECT count(*) FROM mentions").await, 1);
+    assert_eq!(w.delete(&w.bob, &comment).await.status, 204);
+    assert_eq!(w.api.number("SELECT count(*) FROM mentions").await, 0);
 }

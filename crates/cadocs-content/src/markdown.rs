@@ -7,6 +7,7 @@
 //! | toggle | `<details>`, `<summary>` and `</summary>`, `</details>`, each on its own line |
 //! | table of contents | `[TOC]` alone in a paragraph |
 //! | link to a page | `[title](/?page=<id>)` |
+//! | mention of a user | `@name`, or `@someone` for a name the reader may not see |
 //! | image | `![alt](/api/v1/attachments/<id>)` alone in a paragraph |
 //! | file | `[name](/api/v1/attachments/<id>)` alone in a paragraph |
 //! | underline | `<u>` and `</u>` |
@@ -16,7 +17,7 @@
 //!
 //! What is lost: a plugin block becomes its text, a table's spans and its first row's header
 //! flags (the first row is always the header), several blocks in a table cell become one line
-//! joined by `<br>`, an ordered list's `type`. Import reads `[!TIP]` and `[!IMPORTANT]` as notes,
+//! joined by `<br>`, an ordered list's `type`, a mention, which reads back as its text. Import reads `[!TIP]` and `[!IMPORTANT]` as notes,
 //! headings below level 3 as level 3, any other image as its alternative text, and any other HTML
 //! as text. A link whose address [`crate::url::allowed`] refuses keeps only its text both ways.
 
@@ -28,7 +29,7 @@ use pulldown_cmark::{
 
 use crate::ast::*;
 use crate::url::allowed;
-use crate::{Links, PageTitles, Relative};
+use crate::{Links, PageTitles, Relative, UNKNOWN_USER};
 
 const TOC: &str = "[TOC]";
 const EMPTY: &str = "<br>";
@@ -533,6 +534,7 @@ fn flanks(
             Some(Inline::Text { text, .. }) => text.chars().next(),
             Some(Inline::HardBreak) => Some('\n'),
             Some(Inline::PageLink { .. }) => Some('['),
+            Some(Inline::Mention { .. }) => Some('@'),
             None => None,
         },
     };
@@ -625,6 +627,11 @@ fn inlines(ctx: &Writer<'_>, content: &[Inline], flow: Flow) -> String {
                 out.push('[');
                 escape(&title, false, &mut out);
                 let _ = write!(out, "]({})", destination(&ctx.links.page(id)));
+            }
+            Inline::Mention { id } => {
+                let name = ctx.titles.name(id);
+                out.push('@');
+                escape(name.as_deref().unwrap_or(UNKNOWN_USER), false, &mut out);
             }
         }
     }

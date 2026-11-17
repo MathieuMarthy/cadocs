@@ -73,7 +73,7 @@ img{max-width:100%;height:auto}figure{margin:1rem 0}\
 margin:1rem 0}\
 .toc ol{list-style:none;padding-left:0}\
 .toc [data-depth=\"1\"]{padding-left:1rem}.toc [data-depth=\"2\"]{padding-left:2rem}\
-.page-link-missing{color:var(--muted)}\
+.page-link-missing,.mention-missing{color:var(--muted)}\
 .plugin{border:1px dashed var(--line);padding:.5rem 1rem}\
 .children{margin-top:3rem;border-top:1px solid var(--line)}\
 .children h2{font-size:1rem;color:var(--muted)}";
@@ -180,6 +180,7 @@ async fn page<S: DocStore + ShareStore, A>(
         .iter()
         .map(|page| (page.id.as_str(), page.title.as_str()))
         .collect();
+    // A closure knows no member's name, which no share covers: a mention shows as `@someone`.
     let titles = |id: &str| {
         titles
             .get(id)

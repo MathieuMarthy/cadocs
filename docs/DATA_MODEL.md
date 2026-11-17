@@ -289,7 +289,7 @@ CREATE TABLE comments (
     page_id      TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
     parent_id    TEXT REFERENCES comments(id) ON DELETE CASCADE, -- one level of replies
     author_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
-    body         TEXT NOT NULL,              -- Markdown
+    body         TEXT NOT NULL,              -- plain text, <user:ID> and <page:ID> mention
     anchor_start BLOB,                       -- Yjs RelativePosition, NULL: reply or whole page
     anchor_end   BLOB,
     anchor_text  TEXT,                       -- quoted text, shown if the anchor is lost
@@ -315,7 +315,9 @@ CREATE INDEX mentions_page ON mentions(page_id);
 CREATE INDEX mentions_comment ON mentions(comment_id);
 ```
 
-A comment's anchor is a pair of Yjs relative positions stored here, so it follows edits and merges without writing to the document. A `commenter` stays read-only on the wire (ADR 0012). Mentions in the page body are diffed from the Yjs content by the indexing job.
+A comment's anchor is a pair of Yjs relative positions stored here, so it follows edits and merges without writing to the document. A `commenter` stays read-only on the wire (ADR 0012).
+
+A mention row is one user named in one place: the page body (`comment_id` is `NULL`) or one comment. The indexing job diffs the body's `mention` nodes, and a comment's create and edit diff its `<user:ID>` tokens ([API.md](API.md#comments)). A user no longer named loses their row, a user named anew gets one, and a user still named keeps theirs, `read_at` included. Only members of the page's workspace are recorded. A new body mention is put down to the page's `updated_by`, since the job does not know who wrote it; a comment's to whoever wrote the comment or the edit. A row says nothing of whether its user can read the page: what shows mentions to their user (step 41) checks that when it reads them.
 
 ## Attachments
 

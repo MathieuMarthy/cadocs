@@ -326,6 +326,7 @@
           {comments}
           role={row?.role ?? "viewer"}
           user={app.session.user.id}
+          workspace={row?.workspace_id ?? null}
           onclose={() => {
             panelOpen = false;
             document.querySelector<HTMLElement>(".comments-toggle")?.focus();

@@ -2,6 +2,7 @@ use cadocs_core::permissions::SpaceAction;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, SqliteConnection};
 
+use super::mentions::{self, Place};
 use super::pages;
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
@@ -60,6 +61,7 @@ async fn select_comment(
 
 /// What deciding on a comment needs to know about its row.
 struct Target {
+    page_id: String,
     parent_id: Option<String>,
     site: PageSite,
 }
@@ -94,6 +96,7 @@ async fn authorize_comment(
         Err(StoreError::PageNotFound) => Err(StoreError::CommentNotFound),
         Err(error) => Err(error),
         Ok(page) => Ok(Target {
+            page_id,
             parent_id: row.get("parent_id"),
             site: pages::site(&page),
         }),
@@ -182,12 +185,16 @@ impl CommentStore for SqliteStore {
         .bind(new.now)
         .execute(&mut *tx)
         .await?;
+        let site = pages::site(&page);
+        let place = Place {
+            page_id: &new.page_id,
+            comment_id: Some(&new.id),
+            workspace_id: &site.workspace_id,
+        };
+        mentions::replace(&mut tx, &place, &new.mentions, Some(&new.actor), new.now).await?;
         let comment = select_comment(&mut tx, &new.id).await?;
         tx.commit().await?;
-        Ok(CommentChange {
-            comment,
-            site: pages::site(&page),
-        })
+        Ok(CommentChange { comment, site })
     }
 
     async fn edit_comment(
@@ -195,6 +202,7 @@ impl CommentStore for SqliteStore {
         comment_id: &str,
         actor: &str,
         body: &str,
+        users: &[String],
         now: i64,
     ) -> Result<CommentChange, StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
@@ -205,6 +213,12 @@ impl CommentStore for SqliteStore {
             .bind(now)
             .execute(&mut *tx)
             .await?;
+        let place = Place {
+            page_id: &target.page_id,
+            comment_id: Some(comment_id),
+            workspace_id: &target.site.workspace_id,
+        };
+        mentions::replace(&mut tx, &place, users, Some(actor), now).await?;
         let comment = select_comment(&mut tx, comment_id).await?;
         tx.commit().await?;
         Ok(CommentChange {

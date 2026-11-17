@@ -90,7 +90,132 @@ fn index<'a>(page: &'a str, body: &'a str, attachments: &'a [String]) -> PageInd
         body,
         plain_text: body,
         attachments,
+        mentions: &[],
     }
+}
+
+/// The index of `doc`, mentioning `mentions`.
+fn index_with(mentions: &[String]) -> PageIndex<'_> {
+    PageIndex {
+        mentions,
+        ..index("doc", "text", &[])
+    }
+}
+
+/// `(user, author, read)` of the mentions in the body of `page`, by user.
+async fn body_mentions(dir: &TempDir, page: &str) -> Vec<(String, Option<String>, bool)> {
+    let mut connection = connection(&dir.path().join("cadocs.db")).await;
+    sqlx::query_as(
+        "SELECT user_id, author_id, read_at IS NOT NULL FROM mentions
+         WHERE page_id = ?1 AND comment_id IS NULL ORDER BY user_id",
+    )
+    .bind(page)
+    .fetch_all(&mut connection)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn indexing_diffs_the_members_the_body_mentions() {
+    let (store, dir) = open().await;
+    sql(
+        &dir,
+        "INSERT INTO users (id, email, name, created_at, updated_at)
+             VALUES ('bob', 'bob@example.org', 'Bob', 1, 1),
+                    ('eve', 'eve@example.org', 'Eve', 1, 1);
+         INSERT INTO workspace_members (workspace_id, user_id, role, created_at)
+             VALUES ('ws', 'bob', 'member', 1), ('other', 'eve', 'member', 1);
+         UPDATE pages SET updated_by = 'bob' WHERE id = 'doc';",
+    )
+    .await;
+    let mentioned = |ids: &[&str]| -> Vec<String> { ids.iter().map(|id| id.to_string()).collect() };
+    // Eve belongs to another workspace, and nobody is `gone`: neither is recorded.
+    let first = mentioned(&["ada", "eve", "gone"]);
+    store.index_page(&index_with(&first)).await.unwrap();
+    let ada = ("ada".to_owned(), Some("bob".to_owned()), false);
+    assert_eq!(body_mentions(&dir, "doc").await, [ada]);
+
+    // A mention still there keeps its row, read or not; a new one gets the last editor.
+    sql(
+        &dir,
+        "UPDATE mentions SET read_at = 5; UPDATE pages SET updated_by = 'ada'",
+    )
+    .await;
+    store
+        .index_page(&index_with(&mentioned(&["bob", "ada"])))
+        .await
+        .unwrap();
+    let ada = ("ada".to_owned(), Some("bob".to_owned()), true);
+    let bob = ("bob".to_owned(), Some("ada".to_owned()), false);
+    assert_eq!(body_mentions(&dir, "doc").await, [ada, bob.clone()]);
+
+    store
+        .index_page(&index_with(&mentioned(&["bob"])))
+        .await
+        .unwrap();
+    assert_eq!(body_mentions(&dir, "doc").await, [bob]);
+
+    // Mentions in comments are not the body's: a reindex leaves them alone.
+    sql(
+        &dir,
+        "INSERT INTO comments (id, page_id, author_id, body, created_at, updated_at)
+             VALUES ('c', 'doc', 'bob', '<user:ada>', 1, 1);
+         INSERT INTO mentions (id, user_id, page_id, comment_id, author_id, created_at)
+             VALUES ('m', 'ada', 'doc', 'c', 'bob', 1);",
+    )
+    .await;
+    store.index_page(&index_with(&[])).await.unwrap();
+    assert!(body_mentions(&dir, "doc").await.is_empty());
+    let mut connection = connection(&dir.path().join("cadocs.db")).await;
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM mentions WHERE comment_id = 'c'")
+        .fetch_one(&mut connection)
+        .await
+        .unwrap();
+    assert_eq!(left, 1);
+}
+
+#[tokio::test]
+async fn a_member_who_leaves_loses_the_mentions_of_the_workspace() {
+    let (store, dir) = open().await;
+    sql(
+        &dir,
+        "INSERT INTO users (id, email, name, created_at, updated_at)
+             VALUES ('bob', 'bob@example.org', 'Bob', 1, 1);
+         INSERT INTO workspace_members (workspace_id, user_id, role, created_at)
+             VALUES ('ws', 'bob', 'member', 1), ('other', 'bob', 'member', 1);
+         INSERT INTO comments (id, page_id, author_id, body, created_at, updated_at)
+             VALUES ('c', 'doc', 'ada', '<user:bob>', 1, 1);
+         INSERT INTO mentions (id, user_id, page_id, comment_id, author_id, created_at)
+             VALUES ('in-body', 'bob', 'doc', NULL, 'ada', 1),
+                    ('in-comment', 'bob', 'doc', 'c', 'ada', 1),
+                    ('elsewhere', 'bob', 'away', NULL, 'ada', 1);",
+    )
+    .await;
+    store.remove_member("ws", "ada", "bob").await.unwrap();
+    let mut connection = connection(&dir.path().join("cadocs.db")).await;
+    let left: Vec<String> = sqlx::query_scalar("SELECT id FROM mentions ORDER BY id")
+        .fetch_all(&mut connection)
+        .await
+        .unwrap();
+    assert_eq!(left, ["elsewhere"], "another workspace keeps its mention");
+}
+
+#[tokio::test]
+async fn indexing_drops_the_mentions_of_someone_no_longer_a_member() {
+    let (store, dir) = open().await;
+    // A row left from before the user left, still named by the body.
+    sql(
+        &dir,
+        "INSERT INTO users (id, email, name, created_at, updated_at)
+             VALUES ('bob', 'bob@example.org', 'Bob', 1, 1);
+         INSERT INTO mentions (id, user_id, page_id, comment_id, author_id, created_at)
+             VALUES ('old', 'bob', 'doc', NULL, 'ada', 1);",
+    )
+    .await;
+    let named = ["bob".to_owned(), "ada".to_owned()];
+    store.index_page(&index_with(&named)).await.unwrap();
+    let ada = ("ada".to_owned(), None, false);
+    assert_eq!(body_mentions(&dir, "doc").await, [ada]);
 }
 
 #[tokio::test]

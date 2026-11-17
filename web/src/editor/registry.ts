@@ -17,6 +17,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { FileBlock, ImageBlock } from "./attachments";
 import { Callout, PluginBlock, TableOfContents, Toggle } from "./blocks";
 import { lowlight } from "./code";
+import { Mention } from "./mention";
 import { PageLink } from "./pagelink";
 import { TableMenuOnRightClick, TableWithControls } from "./table";
 import { MarkdownSource, quietInSource } from "./source";
@@ -265,8 +266,24 @@ export const entries: Entry[] = [
           return t("slash.pageLink");
         },
         hint: "[[",
-        keywords: ["page", "mention", "wiki"],
+        keywords: ["page", "wiki"],
         apply: (chain) => chain.insertContent("[["),
+      },
+    ],
+  },
+  {
+    // The picker that `@` opens is added by `collab.ts` and the comment composer, which know the
+    // workspace.
+    name: "mention",
+    extensions: [Mention],
+    commands: [
+      {
+        get label() {
+          return t("slash.mention");
+        },
+        hint: "@",
+        keywords: ["person", "user", "mention"],
+        apply: (chain) => chain.insertContent("@"),
       },
     ],
   },

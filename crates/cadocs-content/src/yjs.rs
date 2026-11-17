@@ -326,6 +326,9 @@ fn inlines<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Vec<Inline> {
                 "pageLink" => found.push(Inline::PageLink {
                     id: string_attr(txn, &inline, "id").unwrap_or_default(),
                 }),
+                "mention" => found.push(Inline::Mention {
+                    id: string_attr(txn, &inline, "id").unwrap_or_default(),
+                }),
                 other => {
                     warn_unknown("node", other);
                     push_inline(
@@ -522,7 +525,7 @@ fn write_block<P: XmlFragment>(txn: &mut TransactionMut, parent: &P, block: &Blo
         Block::Details { summary, content } => {
             let details = element(txn, parent, "details");
             let head = element(txn, &details, "detailsSummary");
-            // `text*`: breaks become spaces, and page links are left out.
+            // `text*`: breaks become spaces, and page links and mentions are left out.
             let text: Vec<Inline> = summary.iter().fold(Vec::new(), |mut list, inline| {
                 let inline = match inline {
                     Inline::Text { .. } => inline.clone(),
@@ -530,7 +533,7 @@ fn write_block<P: XmlFragment>(txn: &mut TransactionMut, parent: &P, block: &Blo
                         text: " ".into(),
                         marks: Marks::default(),
                     },
-                    Inline::PageLink { .. } => return list,
+                    Inline::PageLink { .. } | Inline::Mention { .. } => return list,
                 };
                 push_inline(&mut list, inline);
                 list
@@ -650,11 +653,15 @@ fn write_inlines(txn: &mut TransactionMut, parent: &XmlElementRef, content: &[In
                 text = None;
                 element(txn, parent, "hardBreak");
             }
-            Inline::PageLink { id } => {
+            Inline::PageLink { id } | Inline::Mention { id } => {
                 text = None;
-                let link = element(txn, parent, "pageLink");
+                let tag = match inline {
+                    Inline::PageLink { .. } => "pageLink",
+                    _ => "mention",
+                };
+                let node = element(txn, parent, tag);
                 if !id.is_empty() {
-                    link.insert_attribute(txn, "id", Any::from(id.as_str()));
+                    node.insert_attribute(txn, "id", Any::from(id.as_str()));
                 }
             }
         }

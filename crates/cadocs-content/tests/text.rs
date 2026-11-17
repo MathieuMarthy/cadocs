@@ -24,8 +24,10 @@ fn every_node_gives_its_text() {
     ] {
         assert!(text.contains(part), "missing {part:?} in {text:?}");
     }
-    // A page link's title belongs to another page, which a reader of this one may not see.
+    // A page link's title belongs to another page, which a reader of this one may not see. A
+    // mention gives nothing either: the name it shows follows renames, which reindex nothing.
     assert!(!text.contains("0190a0b0"));
+    assert!(text.contains("after, ask ."), "{text:?}");
 }
 
 #[test]

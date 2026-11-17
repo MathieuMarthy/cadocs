@@ -110,6 +110,15 @@
       "atom": false,
       "attrs": {}
     },
+    "mention": {
+      "content": "",
+      "group": "inline",
+      "inline": true,
+      "atom": true,
+      "attrs": {
+        "id": null
+      }
+    },
     "orderedList": {
       "content": "listItem+",
       "group": "block list",

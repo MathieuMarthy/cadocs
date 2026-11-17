@@ -1,12 +1,25 @@
 mod common;
 
-use cadocs_content::Links;
 use cadocs_content::ast::*;
 use cadocs_content::html::{to_html, to_html_with};
+use cadocs_content::{Links, PageTitles};
 use common::*;
 
 fn titles(id: &str) -> Option<String> {
     (id == "0190a0b0-0000-7000-8000-000000000001").then(|| "Other <page>".to_string())
+}
+
+/// A reader who may see the sample's linked page, and knows the user it mentions.
+struct Reader;
+
+impl PageTitles for Reader {
+    fn title(&self, id: &str) -> Option<String> {
+        titles(id)
+    }
+
+    fn name(&self, id: &str) -> Option<String> {
+        (id == MENTIONED).then(|| "Ada <Lovelace>".to_string())
+    }
 }
 
 fn html(blocks: Vec<Block>) -> String {
@@ -15,8 +28,9 @@ fn html(blocks: Vec<Block>) -> String {
 
 #[test]
 fn every_node_renders() {
-    let out = to_html(&every_node(), &titles);
+    let out = to_html(&every_node(), &Reader);
     for part in [
+        r#" after, ask <span class="mention">@Ada &lt;Lovelace&gt;</span>.</p>"#,
         r#"<h1 id="h-01">Title</h1>"#,
         "<strong>bold</strong>",
         "<em>italic</em>",
@@ -272,4 +286,30 @@ fn plugin_text_keeps_its_lines() {
         text: "a\nb".into(),
     }]);
     assert_eq!(out, r#"<div class="plugin" data-kind="k">a<br>b</div>"#);
+}
+
+#[test]
+fn a_mention_without_a_name_shows_none_and_no_id() {
+    let out = html(vec![Block::Paragraph(vec![Inline::Mention {
+        id: MENTIONED.into(),
+    }])]);
+    assert_eq!(
+        out,
+        r#"<p><span class="mention mention-missing">@someone</span></p>"#
+    );
+}
+
+#[test]
+fn a_public_page_shows_no_name_for_a_mention() {
+    // A share answers titles with a closure, which knows no user: names stay out of public pages.
+    let document = Document {
+        blocks: vec![Block::Paragraph(vec![Inline::Mention {
+            id: MENTIONED.into(),
+        }])],
+    };
+    let out = to_html_with(&document, &|_: &str| Some("t".to_string()), &Shared);
+    assert!(
+        out.contains("@someone") && !out.contains(MENTIONED),
+        "{out}"
+    );
 }

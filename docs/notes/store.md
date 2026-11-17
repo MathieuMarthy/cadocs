@@ -46,7 +46,8 @@ What a change to the stores, roles or the workspace, space and page routes must 
 ## Comments
 
 - `CommentStore` (step 37) checks on the page row: `authorize_comment` in `sqlite/comments.rs` finds the page from the comment, picks `EditOwnComment` or `EditOtherComment` by author, and turns `PageNotFound` into `CommentNotFound`. Resolving is `WriteComment` on any thread. Every write answers a `CommentChange` with the `PageSite`, so the handler publishes `Event::comment`.
-- The body and the anchor are stored as given: nothing parses the Markdown or the Yjs positions. The `mentions` table waits for step 39.
+- The body and the anchor are stored as given: nothing parses the Yjs positions. The handler reads the users a body mentions (`cadocs_content::comment::mentioned_users`) and passes them in `NewComment::mentions` or to `edit_comment`.
+- Mentions (step 39): `sqlite/mentions.rs` `replace` makes the rows of one place (a body, `comment_id IS NULL`, or a comment) those of a list, in the caller's transaction: a delete of the users gone, then one `INSERT … SELECT` from `workspace_members`, so a stranger or an unknown id is skipped without an error. Ids are `lower(hex(randomblob(16)))`, since the job has no UUID generator and nothing sorts by them. `index_page` calls it with the page's `updated_by` as author. Its delete also drops users no longer in `workspace_members`, and `remove_member` deletes the mentions of the one who leaves on the pages of that workspace (`forget_member`), so a row always names a member. Comment mentions go with their comment by the foreign key. `member_names` (on `RevisionStore`, beside `readable_titles`) answers names for renderers, only to a member of the page's workspace.
 - Left open: a thread's replies all come with it, with no cap, so a thread of thousands of replies makes one large answer.
 ## Shares
 

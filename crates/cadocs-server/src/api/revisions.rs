@@ -10,6 +10,8 @@ use axum::middleware::from_fn_with_state;
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use cadocs_collab::Authorizer;
+use cadocs_content::PageTitles;
+use cadocs_content::ast::Document;
 use cadocs_content::html::to_html;
 use cadocs_jobs::{self as revisions, RevisionError, decode_bounded};
 use cadocs_store::{AccountStore, DocStore, RevisionStore, RevisionSummary};
@@ -116,18 +118,45 @@ async fn view<S: DocStore + RevisionStore, A>(
     let user = &current.user.id;
     let revision = state.store.revision(&page, number(&n)?, user).await?;
     let decoded = decode_bounded(&state.registry, &revision.state).await?;
-    let links = decoded.document.page_links();
-    let titles: HashMap<String, String> = state
-        .store
-        .readable_titles(user, &links)
-        .await?
-        .into_iter()
-        .collect();
-    let html = to_html(&decoded.document, &|id: &str| titles.get(id).cloned());
+    let titles = Readable::read(&*state.store, user, &page, &decoded.document).await?;
+    let html = to_html(&decoded.document, &titles);
     Ok(Json(RevisionBody {
         summary: revision.summary.into(),
         html,
     }))
+}
+
+/// The titles and names a reader of a page may see in its content: those of the pages it links to
+/// that they can open, and of the members of its workspace it mentions.
+pub(super) struct Readable {
+    titles: HashMap<String, String>,
+    names: HashMap<String, String>,
+}
+
+impl Readable {
+    pub(super) async fn read<S: RevisionStore>(
+        store: &S,
+        user: &str,
+        page: &str,
+        document: &Document,
+    ) -> Result<Self, ApiError> {
+        let titles = store.readable_titles(user, &document.page_links()).await?;
+        let names = store.member_names(user, page, &document.mentions()).await?;
+        Ok(Self {
+            titles: titles.into_iter().collect(),
+            names: names.into_iter().collect(),
+        })
+    }
+}
+
+impl PageTitles for Readable {
+    fn title(&self, id: &str) -> Option<String> {
+        self.titles.get(id).cloned()
+    }
+
+    fn name(&self, user_id: &str) -> Option<String> {
+        self.names.get(user_id).cloned()
+    }
 }
 
 /// The current content becomes a revision before it is replaced (`cadocs_jobs::restore`).

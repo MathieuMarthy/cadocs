@@ -112,7 +112,18 @@ fn layout_matches_what_the_editor_writes() {
             _ => "text".into(),
         })
         .collect();
-    assert_eq!(kinds, ["text", "hardBreak", "text", "pageLink", "text"]);
+    assert_eq!(
+        kinds,
+        [
+            "text",
+            "hardBreak",
+            "text",
+            "pageLink",
+            "text",
+            "mention",
+            "text"
+        ]
+    );
     let XmlOut::Text(first) = &parts[0] else {
         unreachable!()
     };
@@ -303,4 +314,20 @@ fn page_links_lists_each_linked_page_once() {
         ],
     };
     assert_eq!(document.page_links(), ["a", "b", "c"]);
+}
+
+#[test]
+fn mentions_lists_each_mentioned_user_once() {
+    let mention = |id: &str| Inline::Mention { id: id.to_owned() };
+    let document = Document {
+        blocks: vec![
+            Block::Paragraph(vec![mention("a"), text(" and "), mention("b")]),
+            Block::Blockquote(vec![Block::Heading {
+                level: 2,
+                content: vec![mention("a"), mention("c"), mention("")],
+            }]),
+        ],
+    };
+    assert_eq!(document.mentions(), ["a", "b", "c"]);
+    assert_eq!(every_node().mentions(), [MENTIONED]);
 }

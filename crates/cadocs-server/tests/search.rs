@@ -415,3 +415,26 @@ async fn a_space_after_the_last_word_ends_it() {
     assert_eq!(wiki.found(&wiki.ada, "q=cat", 1).await, vec![page.clone()]);
     assert!(wiki.found(&wiki.ada, "q=cat+", 0).await.is_empty());
 }
+
+#[tokio::test]
+async fn the_reindex_records_the_members_the_body_mentions() {
+    let wiki = wiki().await;
+    let space = wiki.space("Open", json!("viewer")).await;
+    let page = wiki.page(&space).await;
+    let mention = |id: &str| cadocs_content::ast::Inline::Mention { id: id.to_owned() };
+    let content = vec![Block::Paragraph(vec![mention(BOB), mention(EVE)])];
+    wiki.write(&page, "Plan", content).await;
+
+    // Eve has no account: only Bob is recorded, by Ada, who wrote last.
+    let recorded = format!(
+        "SELECT count(*) FROM mentions m JOIN pages p ON p.id = m.page_id
+         WHERE m.page_id = '{page}' AND m.user_id = '{BOB}' AND m.comment_id IS NULL
+           AND m.author_id = p.updated_by"
+    );
+    let deadline = Instant::now() + PATIENCE;
+    while wiki.api.number(&recorded).await == 0 && Instant::now() < deadline {
+        sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(wiki.api.number(&recorded).await, 1);
+    assert_eq!(wiki.api.number("SELECT count(*) FROM mentions").await, 1);
+}

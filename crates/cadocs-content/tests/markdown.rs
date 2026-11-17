@@ -1,11 +1,25 @@
 mod common;
 
+use cadocs_content::PageTitles;
 use cadocs_content::ast::*;
 use cadocs_content::markdown::{from_markdown, from_markdown_with, to_markdown, to_markdown_with};
 use common::*;
 
 fn titles(id: &str) -> Option<String> {
     (id == "0190a0b0-0000-7000-8000-000000000001").then(|| "Other page".to_string())
+}
+
+/// A reader who may see the sample's linked page, and knows the user it mentions.
+struct Reader;
+
+impl PageTitles for Reader {
+    fn title(&self, id: &str) -> Option<String> {
+        titles(id)
+    }
+
+    fn name(&self, id: &str) -> Option<String> {
+        (id == MENTIONED).then(|| "Ada *L*".to_string())
+    }
 }
 
 fn none(_: &str) -> Option<String> {
@@ -39,13 +53,20 @@ fn italic() -> Marks {
 #[test]
 fn every_node_round_trips_through_markdown() {
     let mut expected = every_node();
-    // Markdown has no plugin block: its text stands for it (ADR 0016).
+    // Markdown has no plugin block: its text stands for it (ADR 0016). A mention is its text.
     for block in &mut expected.blocks {
         if let Block::Plugin { text, .. } = block {
             *block = para(text);
         }
+        if let Block::Paragraph(content) = block
+            && let Some(at) = content
+                .iter()
+                .position(|inline| matches!(inline, Inline::Mention { .. }))
+        {
+            content.splice(at - 1..at + 2, [text(" after, ask @Ada *L*.")]);
+        }
     }
-    let written = to_markdown(&every_node(), &titles);
+    let written = to_markdown(&every_node(), &Reader);
     assert_eq!(from_markdown(&written), expected, "through\n{written}");
 }
 
@@ -131,10 +152,10 @@ fn an_attachment_is_a_block_only_alone_in_its_paragraph() {
 
 #[test]
 fn every_node_writes_its_convention() {
-    let written = to_markdown(&every_node(), &titles);
+    let written = to_markdown(&every_node(), &Reader);
     for part in [
         "# Title\n",
-        "plain **bold** *italic* ~~struck~~ <u>under</u> `code` [a link](https://example.com/a)\\\nsee [Other page](/?page=0190a0b0-0000-7000-8000-000000000001) after",
+        "plain **bold** *italic* ~~struck~~ <u>under</u> `code` [a link](https://example.com/a)\\\nsee [Other page](/?page=0190a0b0-0000-7000-8000-000000000001) after, ask @Ada \\*L\\*.",
         "- one\n  - nested\n- two",
         "3. three\n4. four",
         "- [x] done\n- [ ] to do",
@@ -230,6 +251,14 @@ fn links_keep_titles_and_odd_addresses() {
             ..Marks::default()
         },
     )])]);
+}
+
+#[test]
+fn a_mention_without_a_name_writes_no_id() {
+    let written = md(vec![Block::Paragraph(vec![Inline::Mention {
+        id: MENTIONED.into(),
+    }])]);
+    assert_eq!(written, "@someone\n");
 }
 
 #[test]

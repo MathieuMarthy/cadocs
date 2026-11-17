@@ -28,6 +28,9 @@ pub struct PageIndex<'a> {
     /// The attachments the content shows. Each one of the page's workspace gets a reference
     /// from the page, so its readers can download it.
     pub attachments: &'a [String],
+    /// The users the content mentions. Those of the page's workspace become its body mentions,
+    /// by whoever wrote last.
+    pub mentions: &'a [String],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

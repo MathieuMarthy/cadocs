@@ -116,4 +116,13 @@ pub trait RevisionStore: Send + Sync + 'static {
         actor: &str,
         ids: &[String],
     ) -> impl Future<Output = Result<Vec<(String, String)>, StoreError>> + Send;
+
+    /// The names of the users among `ids` who are members of the workspace of `page_id`, when
+    /// the actor is one too, for a renderer's mentions. Anyone else stays unnamed.
+    fn member_names(
+        &self,
+        actor: &str,
+        page_id: &str,
+        ids: &[String],
+    ) -> impl Future<Output = Result<Vec<(String, String)>, StoreError>> + Send;
 }
