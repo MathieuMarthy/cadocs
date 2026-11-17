@@ -52,7 +52,7 @@ Steps. The rules of the MVP steps apply, and every new screen takes its strings 
 - [x] Step 34: i18n foundation. A string catalogue in `web/`, English as the source, a language setting per user that falls back to the browser's, every existing string moved into it. Done when the UI looks the same in English and a test fails on a string left out of the catalogue.
 - [x] Step 35: groups, server. REST routes of groups and their members, `access_changed()` on each change, the permission matrix extended. Done when group grants change what a member reaches, over REST and sockets.
 - [x] Step 36: groups, screens. Groups in workspace settings, groups in space grants.
-- [ ] Step 37: comments, server. Migration, REST routes, resolve and reopen, one level of replies, anchors stored as given (ADR 0012), a `comment` event on the events socket, permission tests.
+- [x] Step 37: comments, server. Migration, REST routes, resolve and reopen, one level of replies, anchors stored as given (ADR 0012), a `comment` event on the events socket, permission tests.
 - [ ] Step 38: comments, screens. The side panel, anchors from the selection, highlights as decorations, lost anchors shown with their quote, resolve and reopen.
 - [ ] Step 39: mentions. A user mention node in the editor and in `cadocs-content`, mentions of users and pages in comments, body mentions diffed by the reindex job into `mentions`.
 - [ ] Step 40: backlinks. `page_links` filled by the reindex job, a route and a panel listing the pages that link here.

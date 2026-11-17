@@ -2,6 +2,7 @@
 
 mod accounts;
 mod attachments;
+mod comments;
 mod groups;
 mod jobs;
 mod pages;
@@ -20,6 +21,7 @@ pub use accounts::{
     SessionStanding, UpdateBasis, User, UserChanges, UserRecord,
 };
 pub use attachments::{Attachment, AttachmentStore, NewAttachment, UploadTarget};
+pub use comments::{Anchor, Comment, CommentChange, CommentStore, CommentUser, NewComment, Thread};
 pub use groups::{Group, GroupStore, NewGroup};
 pub use jobs::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob};
 pub use pages::{
@@ -125,6 +127,12 @@ pub enum StoreError {
     AttachmentNotFound,
     #[error("no such revision")]
     RevisionNotFound,
+    #[error("no such comment")]
+    CommentNotFound,
+    #[error("a reply answers a thread, not another reply")]
+    NestedReply,
+    #[error("only a thread can be resolved")]
+    NotAThread,
     #[error("the workspace has no room left for this file")]
     QuotaExceeded,
 }

@@ -1,6 +1,6 @@
 //! The space actions of PERMISSIONS.md, cell by cell, over REST and the page socket: one
 //! server per role, and each action of the matrix tried by a member holding that role.
-//! Comments and public shares come in V1, so their rows wait for their routes. The workspace
+//! Public shares come later in V1, so their rows wait for their routes. The workspace
 //! rows that have their own routes, reads and groups, are at the end.
 
 mod common;
@@ -38,6 +38,7 @@ const ROLES: [Option<&str>; 5] = [
 #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
 enum Needs {
     Viewer = 1,
+    Commenter = 2,
     Editor = 3,
     Admin = 4,
 }
@@ -168,6 +169,29 @@ impl Wiki {
         }
     }
 
+    /// A comment of `by` on the page, made over REST.
+    async fn comment(&self, by: &Login) -> String {
+        let path = format!("/pages/{}/comments", self.page);
+        let reply = self
+            .send(by, "POST", &path, json!({ "body": "Why?" }))
+            .await;
+        assert_eq!(reply.status, 201, "{reply:?}");
+        id(&reply)
+    }
+
+    /// A comment by `bob` on the page, whatever role he holds now.
+    async fn own_comment(&self) -> String {
+        let id = uuid::Uuid::now_v7().to_string();
+        self.api
+            .sql(&format!(
+                "INSERT INTO comments (id, page_id, author_id, body, created_at, updated_at)
+                 VALUES ('{id}', '{}', '{BOB}', 'Mine', 1, 1)",
+                self.page
+            ))
+            .await;
+        id
+    }
+
     async fn call(&self, by: &Login, method: &str, path: &str) -> Reply {
         self.api.raw(method, path, &by.headers(), b"").await
     }
@@ -271,6 +295,64 @@ async fn each_space_action_follows_the_matrix_over_rest() {
         let got = wiki.call(bob, "GET", &path).await;
         check(&mut cells, "download", &got, Needs::Viewer, 200);
 
+        // Read comments, create one or a reply, resolve or reopen.
+        let path = format!("/pages/{page}/comments");
+        let got = wiki.call(bob, "GET", &path).await;
+        check(&mut cells, "read comments", &got, Needs::Viewer, 200);
+        let got = wiki.send(bob, "POST", &path, json!({ "body": "Hm" })).await;
+        check(&mut cells, "create a comment", &got, Needs::Commenter, 201);
+        let theirs = wiki.comment(&wiki.ada).await;
+        let body = json!({ "body": "Me too", "parent_id": theirs });
+        let got = wiki.send(bob, "POST", &path, body).await;
+        check(&mut cells, "reply", &got, Needs::Commenter, 201);
+        let path = format!("/comments/{theirs}/resolve");
+        let got = wiki
+            .send(bob, "POST", &path, json!({ "resolved": true }))
+            .await;
+        check(&mut cells, "resolve", &got, Needs::Commenter, 200);
+        let got = wiki
+            .send(bob, "POST", &path, json!({ "resolved": false }))
+            .await;
+        check(&mut cells, "reopen", &got, Needs::Commenter, 200);
+
+        // Edit or delete one's own comment, then another user's.
+        let own = wiki.own_comment().await;
+        let path = format!("/comments/{own}");
+        let body = json!({ "body": "Edited" });
+        let got = wiki.send(bob, "PATCH", &path, body.clone()).await;
+        check(
+            &mut cells,
+            "edit one's comment",
+            &got,
+            Needs::Commenter,
+            200,
+        );
+        let got = wiki.call(bob, "DELETE", &path).await;
+        check(
+            &mut cells,
+            "delete one's comment",
+            &got,
+            Needs::Commenter,
+            204,
+        );
+        let path = format!("/comments/{theirs}");
+        let got = wiki.send(bob, "PATCH", &path, body).await;
+        check(
+            &mut cells,
+            "edit another's comment",
+            &got,
+            Needs::Admin,
+            200,
+        );
+        let got = wiki.call(bob, "DELETE", &path).await;
+        check(
+            &mut cells,
+            "delete another's comment",
+            &got,
+            Needs::Admin,
+            204,
+        );
+
         // Create, update, move, trash or restore a page.
         let path = format!("/spaces/{space}/pages");
         let got = wiki.send(bob, "POST", &path, json!({})).await;
@@ -365,6 +447,7 @@ async fn a_trashed_space_denies_everything_but_its_restoration() {
     for role in ROLES {
         let wiki = Wiki::new(role).await;
         let (bob, space, page) = (&wiki.bob, wiki.space.clone(), wiki.page.clone());
+        let comment = wiki.own_comment().await;
         let reply = wiki
             .call(&wiki.ada, "DELETE", &format!("/spaces/{space}"))
             .await;
@@ -378,6 +461,7 @@ async fn a_trashed_space_denies_everything_but_its_restoration() {
             format!("/pages/{page}"),
             format!("/pages/{page}/export"),
             format!("/pages/{page}/revisions"),
+            format!("/pages/{page}/comments"),
             format!("/attachments/{}", wiki.attachment),
         ];
         for path in reads {
@@ -401,6 +485,23 @@ async fn a_trashed_space_denies_everything_but_its_restoration() {
         cells.check(role, "update a page", &got, 404);
         let got = wiki.call(bob, "DELETE", &format!("/pages/{page}")).await;
         cells.check(role, "trash a page", &got, 404);
+        let path = format!("/pages/{page}/comments");
+        let got = wiki.send(bob, "POST", &path, json!({ "body": "Hm" })).await;
+        cells.check(role, "comment", &got, 404);
+        let path = format!("/comments/{comment}");
+        let got = wiki
+            .send(bob, "PATCH", &path, json!({ "body": "Hm" }))
+            .await;
+        cells.check(role, "edit one's comment", &got, 404);
+        let path = format!("/comments/{comment}/resolve");
+        let got = wiki
+            .send(bob, "POST", &path, json!({ "resolved": true }))
+            .await;
+        cells.check(role, "resolve", &got, 404);
+        let got = wiki
+            .call(bob, "DELETE", &format!("/comments/{comment}"))
+            .await;
+        cells.check(role, "delete one's comment", &got, 404);
 
         // Only its admins find it in the workspace's list of trashed spaces.
         let workspace = wiki.api.first_workspace().await;

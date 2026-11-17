@@ -23,14 +23,14 @@ use cadocs_server::session::{csrf_token, token_hash};
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, CodeAttempt,
-    Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant, Group, GroupStore, IndexTarget,
-    Invitation, InvitationPreview, InvitedUser, Member, Membership, MovedPage, NewAttachment,
-    NewEmailCode, NewGrant, NewGroup, NewInvitation, NewPage, NewPasswordReset, NewRevision,
-    NewSession, NewSpace, NewUser, NewWorkspace, PageCrumb, PageIndex, PageMove, PageRecord,
-    PageSite, PageStore, Revision, RevisionStore, RevisionSummary, SearchHit, SearchStore,
-    SessionStanding, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc,
-    StoredUpdate, UpdateBasis, UploadTarget, UserChanges, UserRecord, Workspace, WorkspaceChanges,
-    WorkspaceReach, WorkspaceStore, now_ms,
+    CommentChange, CommentStore, Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant,
+    Group, GroupStore, IndexTarget, Invitation, InvitationPreview, InvitedUser, Member, Membership,
+    MovedPage, NewAttachment, NewComment, NewEmailCode, NewGrant, NewGroup, NewInvitation, NewPage,
+    NewPasswordReset, NewRevision, NewSession, NewSpace, NewUser, NewWorkspace, PageCrumb,
+    PageIndex, PageMove, PageRecord, PageSite, PageStore, Revision, RevisionStore, RevisionSummary,
+    SearchHit, SearchStore, SessionStanding, Snapshot, Space, SpaceChanges, SpaceStore,
+    SqliteStore, StoreError, StoredDoc, StoredUpdate, Thread, UpdateBasis, UploadTarget,
+    UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -467,6 +467,52 @@ impl GroupStore for FlakyStore {
     ) -> Result<(), StoreError> {
         self.inner
             .remove_group_member(group_id, actor, user_id)
+            .await
+    }
+}
+
+impl CommentStore for FlakyStore {
+    async fn threads(
+        &self,
+        page_id: &str,
+        actor: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Thread>, StoreError> {
+        self.inner.threads(page_id, actor, after, limit).await
+    }
+
+    async fn create_comment(&self, comment: &NewComment) -> Result<CommentChange, StoreError> {
+        self.inner.create_comment(comment).await
+    }
+
+    async fn edit_comment(
+        &self,
+        comment_id: &str,
+        actor: &str,
+        body: &str,
+        now: i64,
+    ) -> Result<CommentChange, StoreError> {
+        self.inner.edit_comment(comment_id, actor, body, now).await
+    }
+
+    async fn delete_comment(
+        &self,
+        comment_id: &str,
+        actor: &str,
+    ) -> Result<CommentChange, StoreError> {
+        self.inner.delete_comment(comment_id, actor).await
+    }
+
+    async fn resolve_comment(
+        &self,
+        comment_id: &str,
+        actor: &str,
+        resolved: bool,
+        now: i64,
+    ) -> Result<CommentChange, StoreError> {
+        self.inner
+            .resolve_comment(comment_id, actor, resolved, now)
             .await
     }
 }

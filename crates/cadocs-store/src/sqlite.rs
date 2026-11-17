@@ -1,6 +1,7 @@
 mod accounts;
 mod attachments;
 mod backup;
+mod comments;
 mod groups;
 mod jobs;
 mod pages;

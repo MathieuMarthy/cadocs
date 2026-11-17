@@ -35,6 +35,7 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 ## Events
 
 - `cadocs-collab::events` holds the hubs, reached through `DocRegistry` (`publish`, `publish_after_recheck`, `join_events`). A handler that changes the tree or a space publishes once it is stored; a rename's event comes from the flush, never from `PATCH`. A new space has no reader yet, so `space.created` goes through `publish_after_recheck`.
+- A comment's change publishes `Event::comment` (`api/comments.rs`), to the readers of its space like a page event. Its body limit of 64 KiB assumes UTF-8 sent as is, as `JSON.stringify` does: a body of 10,000 characters written as `\u` escapes can pass it.
 - Code that changes pages outside a handler must publish the same events, as `Cleanup::purge_trash` does for `purge_page`.
 - `tests/events.rs` forces `resync` with a single-threaded runtime, since a real TCP client takes far too long to fall behind.
 

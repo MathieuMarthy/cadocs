@@ -282,8 +282,8 @@ CREATE TABLE comments (
     created_at   BIGINT NOT NULL,
     updated_at   BIGINT NOT NULL
 );
-CREATE INDEX comments_page ON comments(page_id, created_at);
-CREATE INDEX comments_parent ON comments(parent_id);
+CREATE INDEX comments_page ON comments(page_id, parent_id, id);  -- threads in order, ids being UUIDv7
+CREATE INDEX comments_parent ON comments(parent_id, id);
 
 CREATE TABLE mentions (
     id          TEXT PRIMARY KEY,

@@ -237,6 +237,51 @@ async fn each_change_to_a_page_has_its_event() {
 }
 
 #[tokio::test]
+async fn each_change_to_a_comment_has_its_event() {
+    let wiki = wiki().await;
+    let bob = wiki.bob().await;
+    let private = wiki.new_space("Private", Value::Null).await;
+    let hidden = wiki.new_page_in(&private, &wiki.ada).await;
+    let space = &wiki.space;
+    let page = wiki.new_page_in(space, &wiki.ada).await;
+    let mut socket = wiki.socket(&bob).await;
+    let comment = page_event("comment", space, &page);
+
+    // Bob cannot read the private space, so its comment says nothing to him.
+    let path = format!("/pages/{hidden}/comments");
+    let reply = wiki.call("POST", &path, json!({ "body": "Hidden" })).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let path = format!("/pages/{page}/comments");
+    let reply = wiki.call("POST", &path, json!({ "body": "Seen" })).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let thread = id(&reply);
+    assert_eq!(event(&mut socket).await, comment);
+
+    let body = json!({ "body": "Answer", "parent_id": thread });
+    let reply = wiki.call("POST", &path, body).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    assert_eq!(event(&mut socket).await, comment);
+
+    let path = format!("/comments/{thread}");
+    let reply = wiki.call("PATCH", &path, json!({ "body": "Edited" })).await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert_eq!(event(&mut socket).await, comment);
+
+    let path = format!("/comments/{thread}/resolve");
+    for resolved in [true, false] {
+        let reply = wiki
+            .call("POST", &path, json!({ "resolved": resolved }))
+            .await;
+        assert_eq!(reply.status, 200, "{reply:?}");
+        assert_eq!(event(&mut socket).await, comment);
+    }
+
+    let reply = wiki.delete(&format!("/comments/{thread}")).await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    assert_eq!(event(&mut socket).await, comment);
+}
+
+#[tokio::test]
 async fn a_move_across_spaces_is_sent_to_both() {
     let wiki = wiki().await;
     let bob = wiki.bob().await;

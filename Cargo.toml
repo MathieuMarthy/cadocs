@@ -28,6 +28,8 @@ anyhow = "1"
 async_zip = { version = "0.0.19", default-features = false, features = ["tokio"] }
 argon2 = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "password-hash"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
+# Comment anchors in JSON (docs/API.md#comments). sqlx already links this version.
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 bytes = { version = "1", default-features = false }
 cadocs-collab = { path = "crates/cadocs-collab" }
 cadocs-content = { path = "crates/cadocs-content" }

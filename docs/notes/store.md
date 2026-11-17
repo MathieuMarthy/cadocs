@@ -39,6 +39,12 @@ What a change to the stores, roles or the workspace, space and page routes must 
 - The quota is checked again inside `create_attachment`, so two uploads at once cannot both pass. `DELETE` removes the row with every reference, then the handler deletes the file, so it needs `editor` on every referencing page, trashed ones included (`delete_allowed`).
 - The indexing job adds references with one `INSERT … SELECT` per id, from the page's workspace only: an orphan deleted first gives nothing, one referenced first is kept by `forget_orphan`.
 
+## Comments
+
+- `CommentStore` (step 37) checks on the page row: `authorize_comment` in `sqlite/comments.rs` finds the page from the comment, picks `EditOwnComment` or `EditOtherComment` by author, and turns `PageNotFound` into `CommentNotFound`. Resolving is `WriteComment` on any thread. Every write answers a `CommentChange` with the `PageSite`, so the handler publishes `Event::comment`.
+- The body and the anchor are stored as given: nothing parses the Markdown or the Yjs positions. The `mentions` table waits for step 39.
+- Left open: a thread's replies all come with it, with no cap, so a thread of thousands of replies makes one large answer.
+
 ## Search
 
 - `search` takes an FTS5 expression, which only `cadocs-search` builds, and filters with `HAS_ROLE`, live pages and live spaces. `with_reindex_delay` exists for tests; production waits 5 seconds (`REINDEX_DELAY`).

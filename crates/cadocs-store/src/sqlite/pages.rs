@@ -35,7 +35,7 @@ pub(super) fn scope(row: &SqliteRow) -> Scope {
     }
 }
 
-fn site(row: &SqliteRow) -> PageSite {
+pub(super) fn site(row: &SqliteRow) -> PageSite {
     PageSite {
         workspace_id: row.get("workspace_id"),
         space_id: row.get("space_id"),

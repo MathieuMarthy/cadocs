@@ -18,6 +18,7 @@ anyhow.workspace = true
 async_zip.workspace = true
 argon2.workspace = true
 axum.workspace = true
+base64.workspace = true
 cadocs-collab.workspace = true
 cadocs-content.workspace = true
 cadocs-core.workspace = true

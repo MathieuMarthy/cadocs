@@ -1,6 +1,6 @@
 # API
 
-All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today `/ws/pages/{page_id}`, and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/auth/forgot-password`, `/auth/register` with its confirmation and `/me/email-2fa` with its confirmation and `/me/email/confirm` when mail is on, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, spaces, grants, pages, attachments, search and revisions, with the export and import of one page, apart from `/duplicate` and the space exports. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
+All routes are under `/api/v1`, and bodies are JSON unless stated otherwise. Today `/ws/pages/{page_id}`, and these REST routes, exist: `/auth/setup`, `/auth/login`, `/auth/logout`, `/auth/password-reset/{token}`, `/auth/forgot-password`, `/auth/register` with its confirmation and `/me/email-2fa` with its confirmation and `/me/email/confirm` when mail is on, `/session`, `/me`, `/admin/users`, and those of workspaces, members, invitations, groups, spaces, grants, pages, attachments, search, revisions and comments, with the export and import of one page, apart from `/duplicate` and the space exports. Any other path under `/api/v1` answers `404` in the error shape. The rest is the target design.
 
 ## Conventions
 
@@ -198,6 +198,14 @@ The role in `GET /pages/{page}` tells the front end whether to make the editor r
 | GET | `/me/mentions` | user | Unread mentions |
 | POST | `/me/mentions/{id}/read` | user | Mark a mention as read |
 
+Bodies and answers:
+- A comment is `{ id, page_id, parent_id, author, body, anchor, resolved_at, resolved_by, created_at, updated_at }`. `author` and `resolved_by` are `{ id, name }`, or `null` once the account is deleted. `parent_id` is `null` for a thread. `anchor` is `{ start, end, text }` or `null` for a reply and a comment on the whole page: `start` and `end` are base64 of encoded Yjs `RelativePosition` values, stored as sent (ADR 0012), and `text` is the quoted text.
+- `GET /pages/{page}/comments` is paginated over threads, oldest first, each with a `replies` array holding all its replies, oldest first. Comments of a trashed page answer `404`, as the page does.
+- `POST /pages/{page}/comments` takes `{ body, parent_id?, anchor? }` and answers `201` with the comment. `body` is Markdown, at most 10,000 characters once trimmed, and not empty. A position is at most 1024 bytes decoded and not empty (`anchor: invalid`), and `text` at most 1000 characters (`anchor: too_long`). A reply's `parent_id` names a thread of the same page (`parent_id: unknown`), not a reply (`parent_id: nested`), and a reply takes no anchor (`anchor: reply`).
+- `PATCH /comments/{id}` takes `{ body }` and answers the comment with a new `updated_at`. `DELETE` answers `204`, and deleting a thread deletes its replies. Each needs `commenter` for one's own comment, a space `admin` for another's.
+- `POST /comments/{id}/resolve` takes `{ resolved }` and answers the comment. Resolving a resolved thread keeps who resolved it first, and neither leaves `updated_at` changed. A reply cannot be resolved: `409`.
+- Every change sends the `comment` event to the readers of the space.
+
 ### Attachments
 
 | Method | Route | Role | Purpose |
@@ -343,5 +351,6 @@ Events are hints. The client refetches through REST, and refetches the tree afte
 | `page.created`, `page.moved`, `page.renamed`, `page.trashed`, `page.restored`, `page.purged` | `space`, `page` | The tree or the trash changed. A move across spaces is sent to both |
 | `space.created`, `space.updated`, `space.trashed`, `space.restored`, `space.purged` | `space` | The space list changed. A reader of a new space may also get `access.changed` |
 | `access.changed` | none | The user's permissions changed, reload the space list |
+| `comment` | `space`, `page` | A comment of the page was written, edited, resolved, reopened or deleted |
 | `notification` | `id` | A new notification (V1) |
 | `resync` | none | Events were dropped because the client lagged, reload everything shown |

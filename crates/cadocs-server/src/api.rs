@@ -3,6 +3,7 @@
 mod admin;
 mod attachments;
 pub mod auth;
+mod comments;
 mod groups;
 mod invitations;
 mod markdown;
@@ -29,8 +30,8 @@ use axum::routing::any;
 use axum::{Json, Router};
 use cadocs_collab::{Authorizer, CollabError};
 use cadocs_store::{
-    AccountStore, AttachmentStore, DocStore, GroupStore, PageStore, RevisionStore, SearchStore,
-    SpaceStore, StoreError, WorkspaceStore,
+    AccountStore, AttachmentStore, CommentStore, DocStore, GroupStore, PageStore, RevisionStore,
+    SearchStore, SpaceStore, StoreError, WorkspaceStore,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -209,6 +210,8 @@ impl From<StoreError> for ApiError {
                 .with_message("Two grants name the same user or group")
                 .with_field("grants", "duplicate"),
             StoreError::UnknownParent => invalid("parent_id", "unknown"),
+            StoreError::NestedReply => invalid("parent_id", "nested"),
+            StoreError::NotAThread => conflict.with_message("Only a thread can be resolved"),
             StoreError::PageCycle => invalid("parent_id", "cycle"),
             StoreError::TooDeep => invalid("parent_id", "too_deep"),
             StoreError::UnknownSibling => invalid("after", "unknown"),
@@ -225,7 +228,8 @@ impl From<StoreError> for ApiError {
             | StoreError::SpaceNotFound
             | StoreError::PageNotFound
             | StoreError::AttachmentNotFound
-            | StoreError::RevisionNotFound => ApiError::new(ErrorCode::NotFound),
+            | StoreError::RevisionNotFound
+            | StoreError::CommentNotFound => ApiError::new(ErrorCode::NotFound),
             error => {
                 tracing::error!(%error, "storage failed");
                 ApiError::new(ErrorCode::Unavailable)
@@ -393,7 +397,8 @@ where
         + PageStore
         + AttachmentStore
         + SearchStore
-        + RevisionStore,
+        + RevisionStore
+        + CommentStore,
     A: Authorizer,
 {
     // A nested fallback only sees paths below the root of the nest. `router` in `lib.rs` also
@@ -410,7 +415,8 @@ where
         .merge(attachments::routes(state))
         .merge(markdown::routes(state))
         .merge(search::routes(state))
-        .merge(revisions::routes(state));
+        .merge(revisions::routes(state))
+        .merge(comments::routes(state));
     finish(routes, state.http.clone())
 }
 
