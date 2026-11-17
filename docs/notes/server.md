@@ -19,11 +19,20 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 ## Sessions
 
 - A route that needs a user goes in `authenticated` in `api/auth.rs`, or gets `session::require`, which checks the session and CSRF; handlers read `Extension<CurrentSession>`. `session::require_in_handler` does it for a route open to everyone.
-- What depends on a password check must hold when the write happens, since a hash can wait 10 seconds: `create_session`, `UpdateBasis` and `use_password_reset` re-check inside the write.
+- What depends on a password check must hold when the write happens, since a hash can wait 10 seconds: `create_session`, `UpdateBasis` and `use_password_reset` re-check inside the write. So does the choice of a second factor: `create_session` refuses an account whose app, or whose code by mail with a relay (`mail`), went on during the hash, and `create_session_with_code` one whose app did; the login then answers `401` and the next try asks for the factor (`cadocs-store/tests/accounts.rs`).
 - `POST /auth/setup` needs `AppState::setup_code`, new at each start and logged by `main` while no account exists (ADR 0021). `tests/common` sends `Api::setup_code`; the end-to-end `TestServer::setupCode` reads it from the log.
 - Over HTTPS the cookie is `__Host-session` (`session::cookie_name`): tests on `common::ORIGIN` use `common::COOKIE`.
 - A failed session touch retries on each request, up to 1 second each, with no back-off.
 - An admin who deletes or disables themself through `/admin/users` gets no removal cookie, unlike `DELETE /me`: the next request is a `401`. The reset links an admin made go when they are disabled, demoted or deleted.
+
+## Authenticator app (step 47)
+
+- `totp.rs` holds RFC 6238 (HMAC-SHA-1, 6 digits, 30 s, a window of one step each way, checked against the RFC's vectors) and the recovery codes. The routes are in `api/auth.rs`, outside the mail blocks: they need no relay.
+- At login the app comes first: `Credentials::totp_secret` set means `totp` is asked and nothing is mailed, whatever `email_2fa` says. Its refusals name the field `totp`, so the mail flow and its `code` are untouched.
+- `AppState::totp_guesses` (`AccountLimiter`, by user id) bounds guesses per account, counted after the password matched and before the code is looked at, so an email alone locks nobody out. A test that logs in more than 5 times with the app in a minute hits it; `forget_step` in `tests/totp.rs` resets the replay guard instead of waiting.
+- Replay: the step a login uses is stored by `create_session_with_totp` with `last_step < step`, in the session's transaction. A confirmed setup stores its step too, so the next login needs a later code (e2e uses step + 1).
+- `cadocs reset-totp <email>` is the way back for someone who lost the app and the codes. A reset link leaves the app on, on purpose.
+- Left open: turning the app on ends no other session, as for the code by mail; no screen shows how many recovery codes are left; a setup abandoned without `DELETE` keeps its pending row until the next setup or `DELETE`; the per-account limit counts right codes too, so someone who holds the password can keep the owner at `429` (they could log in anyway).
 
 ## Sockets
 

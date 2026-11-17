@@ -155,6 +155,14 @@ impl ApiError {
         self
     }
 
+    /// A `429` that says how long to wait.
+    pub fn rate_limited(wait: Duration) -> Self {
+        Self {
+            retry_after: Some(whole_secs(wait)),
+            ..Self::new(ErrorCode::RateLimited)
+        }
+    }
+
     /// Logs the cause and hides it from the client.
     pub fn internal(cause: impl Display) -> Self {
         tracing::error!(%cause, "request failed");
@@ -195,6 +203,8 @@ impl From<StoreError> for ApiError {
                 conflict.with_message("This account is the last instance admin")
             }
             StoreError::UserDisabled => conflict.with_message("This account is disabled"),
+            StoreError::TotpOn => conflict.with_message("The authenticator app is on already"),
+            StoreError::TotpOff => conflict.with_message("The authenticator app is off"),
             StoreError::GroupNameTaken => conflict
                 .with_message("Another group of this workspace has this name")
                 .with_field("name", "taken"),
@@ -476,10 +486,7 @@ pub fn count_request(
     headers: &HeaderMap,
 ) -> Result<(), ApiError> {
     let client = http.trusted_proxies.client_ip(peer.ip(), headers);
-    limiter.check(client).map_err(|wait| ApiError {
-        retry_after: Some(whole_secs(wait)),
-        ..ApiError::new(ErrorCode::RateLimited)
-    })
+    limiter.check(client).map_err(ApiError::rate_limited)
 }
 
 /// Rounded up: a client that waits this long is sure to pass.

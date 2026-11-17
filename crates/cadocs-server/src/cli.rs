@@ -6,12 +6,14 @@ use std::path::PathBuf;
 use anyhow::bail;
 
 const USAGE: &str = "usage: cadocs [serve] | cadocs reset-password <email> \
-                     | cadocs test-mail <email> | cadocs backup <dir> | cadocs restore <dir>";
+                     | cadocs reset-totp <email> | cadocs test-mail <email> \
+                     | cadocs backup <dir> | cadocs restore <dir>";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Serve,
     ResetPassword { email: String },
+    ResetTotp { email: String },
     TestMail { to: String },
     Backup { to: PathBuf },
     Restore { from: PathBuf },
@@ -25,6 +27,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> anyhow::Result<Command
     match names[..] {
         [] | [Some("serve")] => Ok(Command::Serve),
         [Some("reset-password"), Some(email)] => Ok(Command::ResetPassword {
+            email: email.to_owned(),
+        }),
+        [Some("reset-totp"), Some(email)] => Ok(Command::ResetTotp {
             email: email.to_owned(),
         }),
         [Some("test-mail"), Some(to)] => Ok(Command::TestMail { to: to.to_owned() }),
@@ -53,6 +58,16 @@ mod tests {
         assert_eq!(
             parsed(&["reset-password", "ada@example.org"]).unwrap(),
             Command::ResetPassword {
+                email: "ada@example.org".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn reset_totp_takes_an_email() {
+        assert_eq!(
+            parsed(&["reset-totp", "ada@example.org"]).unwrap(),
+            Command::ResetTotp {
                 email: "ada@example.org".to_owned()
             }
         );
@@ -92,6 +107,7 @@ mod tests {
             &["--port"],
             &["reset-password"],
             &["reset-password", "a@b.c", "extra"],
+            &["reset-totp"],
             &["test-mail"],
             &["test-mail", "a@b.c", "extra"],
             &["backup"],

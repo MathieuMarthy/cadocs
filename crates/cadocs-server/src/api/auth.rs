@@ -1,6 +1,6 @@
 //! Accounts and sessions: first run, login, logout, `/session` and `/me`, and what an instance
 //! with a relay adds (ADR 0026): the reset link by mail, registration, a second factor and the
-//! proof of a new address.
+//! proof of a new address. And a second factor from an authenticator app, which needs no relay.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -17,7 +17,8 @@ use cadocs_core::permissions::{InstanceAction, instance_allows, instance_role};
 use cadocs_mail::{Mail, Outbox};
 use cadocs_store::{
     AccountStore, CodeAttempt, CodePurpose, DocStore, FirstUser, MAX_SLUG_CHARS, Membership,
-    NewEmailCode, NewSession, NewUser, StoreError, UpdateBasis, User, UserChanges, now_ms,
+    NewEmailCode, NewSession, NewUser, StoreError, TotpProof, UpdateBasis, User, UserChanges,
+    now_ms,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -29,6 +30,7 @@ use crate::session::{
     self, CODE_LIFETIME, CurrentSession, check_setup_code, code_hash, csrf_token, new_code,
     new_password_reset, new_token, token_hash,
 };
+use crate::totp;
 
 /// Each client can guess this many passwords at once, then one per `GUESS_REFILL`. Setup, login,
 /// using a reset link and a `PATCH /me` that checks the current password share this budget.
@@ -42,6 +44,12 @@ pub const MAIL_REFILL: Duration = Duration::from_secs(60);
 /// Each address gets this many messages at once, then one per `ADDRESS_REFILL`, whoever asks.
 pub const ADDRESS_BURST: u32 = 3;
 pub const ADDRESS_REFILL: Duration = Duration::from_secs(10 * 60);
+
+/// Each account takes this many guesses at the code of its app at once, then one per
+/// `TOTP_REFILL`, from any client: about 1,440 a day, a chance in 230 to hit one of the 3 codes a
+/// window accepts. Only someone who knows the password gets to guess.
+pub const TOTP_BURST: u32 = 5;
+pub const TOTP_REFILL: Duration = Duration::from_secs(60);
 
 /// Far above any of these bodies. Routes before a session must not buffer the default 2 MB.
 pub(super) const MAX_BODY_BYTES: usize = 16 * 1024;
@@ -92,7 +100,11 @@ where
     let mut authenticated = Router::new()
         .route("/auth/logout", post(logout))
         .route("/session", get(current_session))
-        .route("/me", patch(update_me).delete(delete_me));
+        .route("/me", patch(update_me).delete(delete_me))
+        // The app needs no relay.
+        .route("/me/totp", post(start_totp).delete(disable_totp))
+        .route("/me/totp/confirm", post(enable_totp))
+        .route("/me/totp/recovery-codes", post(new_recovery_codes));
     if state.mail.is_some() {
         let sends = from_fn_with_state(
             (state.mail_requests.clone(), state.http.clone()),
@@ -122,6 +134,7 @@ pub(super) struct UserBody {
     name: String,
     is_instance_admin: bool,
     email_2fa: bool,
+    totp: bool,
     language: Option<String>,
 }
 
@@ -133,6 +146,7 @@ impl From<User> for UserBody {
             name: user.name,
             is_instance_admin: user.is_instance_admin,
             email_2fa: user.email_2fa,
+            totp: user.totp,
             language: user.language,
         }
     }
@@ -278,6 +292,7 @@ async fn setup<S: AccountStore, A>(
         name,
         is_instance_admin: true,
         email_2fa: false,
+        totp: false,
         language: None,
     };
     let first = FirstUser {
@@ -309,11 +324,15 @@ struct LoginRequest {
     /// The code mailed for the second factor (ADR 0026).
     #[serde(default)]
     code: String,
+    /// A code from the authenticator app, or a recovery code.
+    #[serde(default)]
+    totp: String,
 }
 
 /// An unknown email, a wrong password and a disabled account answer alike, and in the same time.
 /// Past the password, an account with the second factor on needs the code mailed to it: without
-/// one, the answer mails it and names `code` as `required`.
+/// one, the answer mails it and names `code` as `required`. The app, when on, takes the place of
+/// the code by mail, and is asked for as `totp`.
 async fn login<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -331,7 +350,36 @@ async fn login<S: AccountStore, A>(
     let workspaces = state.store.memberships(&found.user.id).await?;
     let (token, session) = new_session(&state, &found.user.id)?;
     let checked = found.password_hash.as_deref().unwrap_or_default();
-    let created = if found.needs_code(state.mail.is_some()) {
+    let created = if let Some(secret) = &found.totp_secret {
+        let given = totp::clean_code(&body.totp);
+        if given.is_empty() {
+            return Err(totp_problem("required"));
+        }
+        if let Err(wait) = state.totp_guesses.check(&found.user.id) {
+            return Err(ApiError::rate_limited(wait));
+        }
+        let recovery;
+        let proof = if totp::is_app_code(&given) {
+            let now = totp::step_at(session.now);
+            let Some(step) = totp::matching_step(secret, &given, now) else {
+                return Err(totp_problem("wrong"));
+            };
+            TotpProof::App { secret, step }
+        } else {
+            recovery = totp::recovery_hash(&given);
+            TotpProof::Recovery {
+                code_hash: &recovery,
+            }
+        };
+        let store = &state.store;
+        match store
+            .create_session_with_totp(&session, checked, &proof)
+            .await
+        {
+            Err(StoreError::WrongCode) => return Err(totp_problem("wrong")),
+            created => created?,
+        }
+    } else if found.needs_code(state.mail.is_some()) {
         let code = body.code.trim();
         if code.is_empty() {
             count_request(&state.mail_requests, &state.http, peer, &headers)?;
@@ -351,7 +399,8 @@ async fn login<S: AccountStore, A>(
             .create_session_with_code(&session, checked, &attempt)
             .await?
     } else {
-        state.store.create_session(&session, checked).await?
+        let mail = state.mail.is_some();
+        state.store.create_session(&session, checked, mail).await?
     };
     if !created {
         return Err(wrong_credentials());
@@ -365,6 +414,14 @@ async fn login<S: AccountStore, A>(
 
 fn wrong_credentials() -> ApiError {
     ApiError::new(ErrorCode::Unauthenticated).with_message("Wrong email or password")
+}
+
+fn totp_problem(problem: &'static str) -> ApiError {
+    let error = ApiError::new(ErrorCode::ValidationFailed).with_field("totp", problem);
+    match problem {
+        "required" => error.with_message("Type a code from your authenticator app"),
+        _ => error.with_message("Wrong code"),
+    }
 }
 
 fn code_problem(problem: &'static str) -> ApiError {
@@ -536,6 +593,7 @@ async fn update_me<S: AccountStore, A>(
         email,
         password_hash,
         email_2fa_off: false,
+        totp_off: false,
         language,
     };
     let keep = current.token_hash();
@@ -573,6 +631,7 @@ async fn update_me<S: AccountStore, A>(
         id: user.id,
         is_instance_admin: user.is_instance_admin,
         email_2fa: user.email_2fa && !unproven,
+        totp: user.totp,
         language: changes.language.unwrap_or(user.language),
     }))
 }
@@ -770,6 +829,163 @@ async fn disable_email_2fa<S: AccountStore, A>(
     let checked_hash = check_current_password(&state, &current, (peer, &headers), password).await?;
     let changes = UserChanges {
         email_2fa_off: true,
+        language: None,
+        ..UserChanges::default()
+    };
+    let keep = current.token_hash();
+    let basis = UpdateBasis {
+        session: &keep,
+        checked_hash: checked_hash.as_deref(),
+    };
+    state
+        .store
+        .update_user(&current.user.id, &changes, &basis, now_ms())
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct PasswordRequest {
+    current_password: Option<String>,
+}
+
+/// Checks the password a change needs, as a guess, and returns the basis of that change.
+async fn require_password<S: AccountStore, A>(
+    state: &AppState<S, A>,
+    current: &CurrentSession,
+    client: (SocketAddr, &HeaderMap),
+    password: Option<String>,
+) -> Result<Option<String>, ApiError> {
+    match password {
+        Some(password) => check_current_password(state, current, client, password).await,
+        None => {
+            Err(ApiError::new(ErrorCode::ValidationFailed)
+                .with_field("current_password", "required"))
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct TotpSetup {
+    /// Base32, for an app that takes it typed.
+    secret: String,
+    /// `otpauth://`, for a QR code.
+    uri: String,
+}
+
+/// Starts the setup of an authenticator app: a new secret, which counts once a code from it
+/// comes back. It needs the password, or a stolen session could tie the account to its own app.
+async fn start_totp<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    JsonBody(body): JsonBody<PasswordRequest>,
+) -> Result<Response, ApiError> {
+    let client = (peer, &headers);
+    let checked_hash = require_password(&state, &current, client, body.current_password).await?;
+    let secret = totp::new_secret().map_err(ApiError::internal)?;
+    let keep = current.token_hash();
+    let basis = UpdateBasis {
+        session: &keep,
+        checked_hash: checked_hash.as_deref(),
+    };
+    let user = &current.user;
+    state
+        .store
+        .start_totp(&user.id, &secret, &basis, now_ms())
+        .await?;
+    let body = TotpSetup {
+        secret: totp::encode_secret(&secret),
+        uri: totp::uri(&secret, state.http.public_url.host(), &user.email),
+    };
+    let no_store = [(CACHE_CONTROL, HeaderValue::from_static("no-store"))];
+    Ok((no_store, Json(body)).into_response())
+}
+
+#[derive(Serialize)]
+struct RecoveryCodes {
+    recovery_codes: Vec<String>,
+}
+
+/// New recovery codes as an answer, never cached, and the hashes to store.
+fn recovery_codes() -> Result<(Response, Vec<String>), ApiError> {
+    let codes = totp::new_recovery_codes().map_err(ApiError::internal)?;
+    let hashes = codes.iter().map(|code| totp::recovery_hash(code)).collect();
+    let no_store = [(CACHE_CONTROL, HeaderValue::from_static("no-store"))];
+    let body = RecoveryCodes {
+        recovery_codes: codes,
+    };
+    Ok(((no_store, Json(body)).into_response(), hashes))
+}
+
+/// Turns the app on with a first code from it, which proves it holds the secret, and answers
+/// the recovery codes, shown this once.
+async fn enable_totp<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    JsonBody(body): JsonBody<EnableRequest>,
+) -> Result<Response, ApiError> {
+    let code = totp::clean_code(&body.code);
+    if code.is_empty() {
+        return Err(code_problem("required"));
+    }
+    // As for the other codes, though this one guards nothing the session does not have already.
+    count_request(&state.password_guesses, &state.http, peer, &headers)?;
+    let user_id = &current.user.id;
+    let Some(secret) = state.store.pending_totp(user_id).await? else {
+        return Err(StoreError::WrongCode.into());
+    };
+    let now = now_ms();
+    let step = totp::is_app_code(&code)
+        .then(|| totp::matching_step(&secret, &code, totp::step_at(now)))
+        .flatten()
+        .ok_or(StoreError::WrongCode)?;
+    let (response, hashes) = recovery_codes()?;
+    state
+        .store
+        .enable_totp(user_id, &secret, step, &hashes, now)
+        .await?;
+    Ok(response)
+}
+
+/// Replaces the recovery codes, as when they run out or might have leaked.
+async fn new_recovery_codes<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    JsonBody(body): JsonBody<PasswordRequest>,
+) -> Result<Response, ApiError> {
+    let client = (peer, &headers);
+    let checked_hash = require_password(&state, &current, client, body.current_password).await?;
+    let (response, hashes) = recovery_codes()?;
+    let keep = current.token_hash();
+    let basis = UpdateBasis {
+        session: &keep,
+        checked_hash: checked_hash.as_deref(),
+    };
+    state
+        .store
+        .replace_recovery_codes(&current.user.id, &hashes, &basis)
+        .await?;
+    Ok(response)
+}
+
+/// Turns the app off, or ends a setup, with the password, as for the code by mail.
+async fn disable_totp<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    JsonBody(body): JsonBody<PasswordRequest>,
+) -> Result<StatusCode, ApiError> {
+    let client = (peer, &headers);
+    let checked_hash = require_password(&state, &current, client, body.current_password).await?;
+    let changes = UserChanges {
+        totp_off: true,
         language: None,
         ..UserChanges::default()
     };
@@ -1014,6 +1230,7 @@ async fn confirm_registration<S: AccountStore, A>(
         name,
         is_instance_admin: false,
         email_2fa: false,
+        totp: false,
         language: None,
     };
     let new = NewUser {

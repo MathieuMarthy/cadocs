@@ -69,9 +69,25 @@ CREATE TABLE email_codes (                   -- ADR 0026
 );
 CREATE INDEX email_codes_expiry ON email_codes(expires_at);
 CREATE INDEX email_codes_user ON email_codes(user_id);
+
+CREATE TABLE user_totp (                     -- an authenticator app (RFC 6238)
+    user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    secret     BLOB NOT NULL,                -- 20 random bytes, readable: the server computes the codes
+    enabled_at BIGINT,                       -- NULL while the setup waits for its first code
+    last_step  BIGINT NOT NULL DEFAULT 0,    -- the time step of the last code used: none works twice
+    created_at BIGINT NOT NULL
+);
+
+CREATE TABLE user_recovery_codes (           -- single use, in place of a code from the app
+    user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,                 -- SHA-256 of the code, which holds 80 random bits
+    PRIMARY KEY (user_id, code_hash)
+);
 ```
 
 A new code replaces the one of the same purpose and address, and deletes every expired code. The hash binds the code to its purpose and its address, with a key the server draws at each start: 6 digits are a million guesses, which a copy of the database would otherwise give away. A registration sets `email_verified_at` with the account, and so does the first `login` or `email` code an account uses. An `email` code proves the account's own address before the second factor depends on it, or a new address before the account moves to it: only the account that asked can use it, and the address it moves to is verified. An address changed with no relay is not, and the second factor goes off with it.
+
+The app's secret cannot be hashed, since the server computes each code from it: a copy of the database gives it away, so a backup needs the care of the server itself. A login stores the step of the code it used, in the transaction that opens the session, and refuses any step at or before it. Recovery codes are not keyed by `code_key`, which a restart would change: their 80 bits make a plain hash enough. Turning the app off deletes its row and the codes; turning it on again starts from a new secret.
 
 `sessions.last_seen_at` is written at most once every 5 minutes, so that reads do not turn into writes. Each such write also extends `expires_at`.
 
@@ -427,5 +443,5 @@ Specified when their stage starts, following the same conventions.
 
 | Stage | Tables |
 | --- | --- |
-| V1 | `page_links` (backlinks), `notifications`, `user_totp` and recovery codes, `templates` |
+| V1 | `page_links` (backlinks), `notifications`, `templates` |
 | V2 | `page_labels`, `audit_log`, `api_tokens`, `webhooks`, `workspace_plugins` (content plugins offered, and enabled per member), `user_plugins` (user plugins, per user for the whole instance) (ADR 0016) |

@@ -37,6 +37,7 @@ fn main() -> anyhow::Result<()> {
     match command {
         Command::Serve => run_server(config),
         Command::ResetPassword { email } => on_one_thread(reset_password(config, &email)),
+        Command::ResetTotp { email } => on_one_thread(reset_totp(config, &email)),
         Command::TestMail { to } => on_one_thread(test_mail(config, to)),
         Command::Backup { to } => on_one_thread(async move {
             let copied = backup::backup(&config.data_dir, &to, local_files(&config)).await?;
@@ -101,6 +102,21 @@ async fn reset_password(config: Config, email: &str) -> anyhow::Result<()> {
     let (link, reset) = new_password_reset(&config.http.public_url, &found.user.id, None)?;
     store.create_password_reset(&reset).await?;
     println!("{link}");
+    Ok(())
+}
+
+/// Turns off the authenticator app of an account, for someone who lost it with their recovery
+/// codes. The password stays: `reset-password` is the other half when that is lost too.
+async fn reset_totp(config: Config, email: &str) -> anyhow::Result<()> {
+    let path = config.data_dir.join("cadocs.db");
+    let store = SqliteStore::open_existing(&path)
+        .await
+        .with_context(|| format!("cannot open {}", path.display()))?;
+    let email = normalize_email(email);
+    let found = store.credentials(&email).await?;
+    let found = found.with_context(|| format!("no account uses {email}"))?;
+    store.turn_totp_off(&found.user.id).await?;
+    println!("the authenticator app of {email} is off");
     Ok(())
 }
 

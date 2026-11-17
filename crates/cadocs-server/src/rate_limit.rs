@@ -1,4 +1,4 @@
-//! Limits per client address, and per mail address. Each one has one date, when it will have its
+//! Limits per client address, per mail address, and per account. Each one has one date, when it will have its
 //! whole burst back.
 
 use std::collections::HashMap;
@@ -94,6 +94,28 @@ impl AddressLimiter {
 
     fn check_at(&self, address: &str, now: Instant) -> Result<(), Duration> {
         self.buckets.check_at(self.hasher.hash_one(address), now)
+    }
+}
+
+/// Bounds the guesses at the second factor of one account, from any client: a code from an app
+/// cannot die after a few tries as a mailed one does. Only someone who knows the password counts
+/// here, so a full table, which makes newcomers wait, takes a flood of right passwords.
+#[derive(Debug)]
+pub struct AccountLimiter {
+    buckets: Buckets<String>,
+}
+
+impl AccountLimiter {
+    /// Allows `burst` guesses at once, then one more per `refill`.
+    pub fn new(burst: u32, refill: Duration) -> Self {
+        Self {
+            buckets: Buckets::new(burst, refill),
+        }
+    }
+
+    /// Counts one guess for the account `user_id`, or says how long it must wait.
+    pub fn check(&self, user_id: &str) -> Result<(), Duration> {
+        self.buckets.check_at(user_id.to_owned(), Instant::now())
     }
 }
 

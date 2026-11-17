@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub use accounts::{
     AccountStore, ActiveSession, AdminChanges, CodeAttempt, CodePurpose, Credentials, FirstUser,
     MAX_CODE_TRIES, Membership, NewEmailCode, NewPasswordReset, NewSession, NewUser,
-    SessionStanding, UpdateBasis, User, UserChanges, UserRecord,
+    SessionStanding, TotpProof, UpdateBasis, User, UserChanges, UserRecord,
 };
 pub use attachments::{Attachment, AttachmentStore, NewAttachment, UploadTarget};
 pub use comments::{Anchor, Comment, CommentChange, CommentStore, CommentUser, NewComment, Thread};
@@ -89,6 +89,10 @@ pub enum StoreError {
     UserNotFound,
     #[error("the code is wrong, used, expired or dead")]
     WrongCode,
+    #[error("the authenticator app of this account is on")]
+    TotpOn,
+    #[error("the authenticator app of this account is off")]
+    TotpOff,
     #[error("this account is disabled")]
     UserDisabled,
     #[error("no such workspace")]

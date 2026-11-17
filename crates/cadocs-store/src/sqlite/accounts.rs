@@ -8,7 +8,7 @@ use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
     AccountStore, ActiveSession, AdminChanges, CodeAttempt, Credentials, FirstUser, MAX_CODE_TRIES,
     Membership, NewEmailCode, NewPasswordReset, NewSession, NewUser, SessionStanding, StoreError,
-    UpdateBasis, User, UserChanges, UserRecord,
+    TotpProof, UpdateBasis, User, UserChanges, UserRecord,
 };
 
 pub(super) const INSERT_SESSION: &str =
@@ -31,8 +31,18 @@ const USABLE_RESET: &str = "SELECT r.user_id FROM password_resets r
      WHERE r.token_hash = ?1 AND r.expires_at > ?2 AND u.disabled_at IS NULL";
 
 const SELECT_RECORD: &str =
-    "SELECT id, email, name, is_instance_admin, email_2fa, language, disabled_at, created_at
+    "SELECT id, email, name, is_instance_admin, email_2fa, language, disabled_at, created_at,
+            EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = users.id
+                                               AND t.enabled_at IS NOT NULL) AS totp
      FROM users";
+
+/// The account of the row in `users` has no authenticator app on.
+const NO_APP: &str = "NOT EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = users.id
+                                                  AND t.enabled_at IS NOT NULL)";
+
+/// Turns the app of user `?1` off, or ends its setup.
+const DELETE_TOTP: &str = "DELETE FROM user_totp WHERE user_id = ?1";
+const DELETE_RECOVERY_CODES: &str = "DELETE FROM user_recovery_codes WHERE user_id = ?1";
 
 fn record(row: &SqliteRow) -> UserRecord {
     UserRecord {
@@ -133,6 +143,59 @@ async fn use_code(
     Ok(right)
 }
 
+/// Whether the session behind a change is still there, and the password it was checked against
+/// still the account's: hashing takes a while.
+async fn check_basis(
+    tx: &mut SqliteConnection,
+    user_id: &str,
+    basis: &UpdateBasis<'_>,
+) -> Result<(), StoreError> {
+    let holds: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM sessions s JOIN users u ON u.id = s.user_id
+                        WHERE s.token_hash = ?1 AND u.id = ?2
+                          AND (?3 IS NULL OR u.password_hash = ?3))",
+    )
+    .bind(basis.session)
+    .bind(user_id)
+    .bind(basis.checked_hash)
+    .fetch_one(&mut *tx)
+    .await?;
+    if holds {
+        Ok(())
+    } else {
+        Err(StoreError::StaleCredentials)
+    }
+}
+
+async fn turn_totp_off(tx: &mut SqliteConnection, user_id: &str) -> Result<(), StoreError> {
+    for statement in [DELETE_TOTP, DELETE_RECOVERY_CODES] {
+        sqlx::query(statement)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    Ok(())
+}
+
+async fn insert_recovery_codes(
+    tx: &mut SqliteConnection,
+    user_id: &str,
+    hashes: &[String],
+) -> Result<(), StoreError> {
+    sqlx::query(DELETE_RECOVERY_CODES)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    for hash in hashes {
+        sqlx::query("INSERT INTO user_recovery_codes (user_id, code_hash) VALUES (?1, ?2)")
+            .bind(user_id)
+            .bind(hash)
+            .execute(&mut *tx)
+            .await?;
+    }
+    Ok(())
+}
+
 fn user(row: &SqliteRow) -> User {
     User {
         id: row.get("id"),
@@ -140,6 +203,7 @@ fn user(row: &SqliteRow) -> User {
         name: row.get("name"),
         is_instance_admin: row.get::<i64, _>("is_instance_admin") != 0,
         email_2fa: row.get::<i64, _>("email_2fa") != 0,
+        totp: row.get("totp"),
         language: row.get("language"),
     }
 }
@@ -210,8 +274,11 @@ impl AccountStore for SqliteStore {
 
     async fn credentials(&self, email: &str) -> Result<Option<Credentials>, StoreError> {
         let row = sqlx::query(
-            "SELECT id, email, name, is_instance_admin, email_2fa, language, password_hash, disabled_at
-             FROM users WHERE email = ?1",
+            "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.language,
+                    u.password_hash, u.disabled_at, t.secret AS totp_secret,
+                    t.secret IS NOT NULL AS totp
+             FROM users u LEFT JOIN user_totp t ON t.user_id = u.id AND t.enabled_at IS NOT NULL
+             WHERE u.email = ?1",
         )
         .bind(email)
         .fetch_optional(&self.reader)
@@ -220,6 +287,7 @@ impl AccountStore for SqliteStore {
             user: user(&row),
             password_hash: row.get("password_hash"),
             disabled: row.get::<Option<i64>, _>("disabled_at").is_some(),
+            totp_secret: row.get("totp_secret"),
         }))
     }
 
@@ -235,17 +303,22 @@ impl AccountStore for SqliteStore {
         &self,
         session: &NewSession,
         checked_hash: &str,
+        mail: bool,
     ) -> Result<bool, StoreError> {
-        let created = sqlx::query(
+        // The handler chose no factor from what it read before the hash: one turned on since
+        // must not be skipped.
+        let created = sqlx::query(AssertSqlSafe(format!(
             "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at)
              SELECT ?1, id, ?3, ?3, ?4 FROM users
-             WHERE id = ?2 AND password_hash = ?5 AND disabled_at IS NULL",
-        )
+             WHERE id = ?2 AND password_hash = ?5 AND disabled_at IS NULL
+               AND NOT (?6 AND email_2fa = 1) AND {NO_APP}"
+        )))
         .bind(&session.token_hash)
         .bind(&session.user_id)
         .bind(session.now)
         .bind(session.expires_at)
         .bind(checked_hash)
+        .bind(mail)
         .execute(&self.writer)
         .await?
         .rows_affected();
@@ -259,7 +332,9 @@ impl AccountStore for SqliteStore {
     ) -> Result<Option<ActiveSession>, StoreError> {
         let row = sqlx::query(
             "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.language,
-                    s.last_seen_at
+                    s.last_seen_at,
+                    EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = u.id
+                                                       AND t.enabled_at IS NOT NULL) AS totp
              FROM sessions s JOIN users u ON u.id = s.user_id
              WHERE s.token_hash = ?1 AND s.expires_at > ?2 AND u.disabled_at IS NULL",
         )
@@ -394,6 +469,9 @@ impl AccountStore for SqliteStore {
                 .bind(user_id)
                 .execute(&mut *tx)
                 .await?;
+        }
+        if changes.totp_off {
+            turn_totp_off(&mut tx, user_id).await?;
         }
         tx.commit().await?;
         Ok(())
@@ -663,11 +741,11 @@ impl AccountStore for SqliteStore {
         attempt: &CodeAttempt<'_>,
     ) -> Result<bool, StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
-        // What `create_session` checks, and the address the code went to.
-        let still: bool = sqlx::query_scalar(
+        // What `create_session` checks, the app included: it replaces the code by mail.
+        let still: bool = sqlx::query_scalar(AssertSqlSafe(format!(
             "SELECT EXISTS (SELECT 1 FROM users WHERE id = ?1 AND password_hash = ?2
-                                                  AND disabled_at IS NULL)",
-        )
+                                                  AND disabled_at IS NULL AND {NO_APP})"
+        )))
         .bind(&session.user_id)
         .bind(checked_hash)
         .fetch_one(&mut *tx)
@@ -782,5 +860,152 @@ impl AccountStore for SqliteStore {
         .fetch_one(&self.reader)
         .await?;
         Ok(count as u64)
+    }
+
+    async fn start_totp(
+        &self,
+        user_id: &str,
+        secret: &[u8],
+        basis: &UpdateBasis<'_>,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        check_basis(&mut tx, user_id, basis).await?;
+        let stored = sqlx::query(
+            "INSERT INTO user_totp (user_id, secret, created_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (user_id) DO UPDATE SET
+                 secret = excluded.secret, created_at = excluded.created_at, last_step = 0
+             WHERE enabled_at IS NULL",
+        )
+        .bind(user_id)
+        .bind(secret)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if stored == 0 {
+            return Err(StoreError::TotpOn);
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn pending_totp(&self, user_id: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        let secret = sqlx::query_scalar(
+            "SELECT secret FROM user_totp WHERE user_id = ?1 AND enabled_at IS NULL",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.reader)
+        .await?;
+        Ok(secret)
+    }
+
+    async fn enable_totp(
+        &self,
+        user_id: &str,
+        secret: &[u8],
+        step: i64,
+        recovery_hashes: &[String],
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        let enabled = sqlx::query(
+            "UPDATE user_totp SET enabled_at = ?3, last_step = ?4
+             WHERE user_id = ?1 AND secret = ?2 AND enabled_at IS NULL",
+        )
+        .bind(user_id)
+        .bind(secret)
+        .bind(now)
+        .bind(step)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if enabled == 0 {
+            return Err(StoreError::WrongCode);
+        }
+        insert_recovery_codes(&mut tx, user_id, recovery_hashes).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn create_session_with_totp(
+        &self,
+        session: &NewSession,
+        checked_hash: &str,
+        proof: &TotpProof<'_>,
+    ) -> Result<bool, StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        let created = sqlx::query(
+            "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at)
+             SELECT ?1, id, ?3, ?3, ?4 FROM users
+             WHERE id = ?2 AND password_hash = ?5 AND disabled_at IS NULL",
+        )
+        .bind(&session.token_hash)
+        .bind(&session.user_id)
+        .bind(session.now)
+        .bind(session.expires_at)
+        .bind(checked_hash)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if created == 0 {
+            return Ok(false);
+        }
+        let used = match proof {
+            // A later step only, so a code seen over a shoulder or in a log is spent.
+            TotpProof::App { secret, step } => sqlx::query(
+                "UPDATE user_totp SET last_step = ?3
+                 WHERE user_id = ?1 AND secret = ?2 AND enabled_at IS NOT NULL
+                   AND last_step < ?3",
+            )
+            .bind(&session.user_id)
+            .bind(*secret)
+            .bind(*step),
+            TotpProof::Recovery { code_hash } => sqlx::query(
+                "DELETE FROM user_recovery_codes WHERE user_id = ?1 AND code_hash = ?2
+                   AND EXISTS (SELECT 1 FROM user_totp WHERE user_id = ?1
+                                                         AND enabled_at IS NOT NULL)",
+            )
+            .bind(&session.user_id)
+            .bind(*code_hash),
+        }
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if used == 0 {
+            return Err(StoreError::WrongCode);
+        }
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    async fn replace_recovery_codes(
+        &self,
+        user_id: &str,
+        recovery_hashes: &[String],
+        basis: &UpdateBasis<'_>,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        check_basis(&mut tx, user_id, basis).await?;
+        let on: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM user_totp WHERE user_id = ?1
+                                                     AND enabled_at IS NOT NULL)",
+        )
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !on {
+            return Err(StoreError::TotpOff);
+        }
+        insert_recovery_codes(&mut tx, user_id, recovery_hashes).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn turn_totp_off(&self, user_id: &str) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        turn_totp_off(&mut tx, user_id).await?;
+        tx.commit().await?;
+        Ok(())
     }
 }

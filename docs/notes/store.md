@@ -8,6 +8,10 @@ What a change to the stores, roles or the workspace, space and page routes must 
 - **Roles are checked in the store.** A method takes the actor and checks the role itself, inside the write transaction (`authorize` in `sqlite/workspaces.rs`, `spaces.rs`, `pages.rs`, resolving through `SELECT_SPACE` or `SELECT_PAGE` and `cadocs-core`), so a route cannot forget it. A refusal becomes `SpaceNotFound`, `PageNotFound` or `NotAllowed`. Methods only jobs call (`index_target`, `index_page`, `latest_revision`, `add_revision`) check no role.
 - **Last owner, last admin:** counted on the enabled ones who would stay. `would_remove_last_instance_admin` is called by `delete_user` and `administer_user`.
 
+## Second factors
+
+- The app (`user_totp`, `user_recovery_codes`, step 47) sits beside `users.email_2fa`. `User::totp` comes from an `EXISTS` on an enabled row in every query that feeds `user(&row)`: a new one must select it too. `check_basis` is the password and session check of `update_user` for the other writes that follow a password check (`start_totp`, `replace_recovery_codes`). Turning the app off is `UserChanges::totp_off` through `update_user`, or `turn_totp_off` for the command line.
+
 ## Documents
 
 - The room assigns `seq` from `StoredDoc::last_seq() + 1`, and must flush its queue before it compacts. `compact` refuses an older snapshot (`StaleSnapshot`). `append_updates` can be replayed after a lost commit, and answers `SeqConflict` for a `seq` the snapshot covers or that holds other data. It takes a `DocEdit` (title and author for the `pages` row), and answers `PageNotFound` without that row: a test on `SqliteStore` inserts one.

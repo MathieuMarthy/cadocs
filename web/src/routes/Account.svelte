@@ -2,6 +2,7 @@
   import Confirm from "../components/Confirm.svelte";
   import Field from "../components/Field.svelte";
   import Shell from "../components/Shell.svelte";
+  import { copy } from "../lib/actions";
   import { api, type User } from "../lib/api";
   import { Form } from "../lib/form.svelte";
   import { app, mailFeatures, signOut, updateUser } from "../lib/session.svelte";
@@ -114,6 +115,95 @@
     }
   }
 
+  // The authenticator app (RFC 6238), which needs no relay.
+  interface TotpSetup {
+    secret: string;
+    uri: string;
+  }
+  interface Recovery {
+    recovery_codes: string[];
+  }
+  let totpPassword = $state("");
+  let totpSetup = $state<TotpSetup | null>(null);
+  let totpCode = $state("");
+  /** The QR code of the setup, once its module loaded. */
+  let qr = $state<{ size: number; path: string } | null>(null);
+  /** Recovery codes just made, shown this once. */
+  let recovery = $state<string[]>([]);
+  const totp = new Form();
+
+  /** The dark modules as one SVG path, drawn with no `{@html}`. Loaded only for a setup. */
+  async function drawQr(uri: string) {
+    const { encode } = await import("uqr");
+    const { data, size } = encode(uri, { ecc: "M", border: 2 });
+    let path = "";
+    data.forEach((row, y) =>
+      row.forEach((dark, x) => {
+        if (dark) path += `M${x},${y}h1v1h-1z`;
+      }),
+    );
+    qr = { size, path };
+  }
+
+  /** The key in groups of four, as apps print it. */
+  const grouped = (secret: string) => secret.match(/.{1,4}/g)?.join(" ") ?? secret;
+
+  async function startTotp(event: SubmitEvent) {
+    event.preventDefault();
+    const body = totpPassword ? { current_password: totpPassword } : {};
+    let started: TotpSetup | null = null;
+    const done = await totp.run(async () => {
+      started = await api<TotpSetup>("POST", "/me/totp", body);
+    });
+    if (done && started) {
+      const setup: TotpSetup = started;
+      totpSetup = setup;
+      totpPassword = "";
+      totpCode = "";
+      qr = null;
+      // Without the QR code, the key still works typed.
+      drawQr(setup.uri).catch(() => (qr = null));
+    }
+  }
+
+  async function confirmTotp(event: SubmitEvent) {
+    event.preventDefault();
+    const done = await totp.run(async () => {
+      const answer = await api<Recovery>("POST", "/me/totp/confirm", { code: totpCode });
+      recovery = answer.recovery_codes;
+    });
+    if (done) {
+      updateUser({ ...app.session!.user, totp: true });
+      totpSetup = null;
+      qr = null;
+    }
+  }
+
+  function cancelTotp() {
+    totpSetup = null;
+    qr = null;
+    totp.problem = null;
+    totp.fields = {};
+  }
+
+  /**
+   * New recovery codes or the app off: both need the password. Buttons, not submits, so Enter in
+   * the password field does neither.
+   */
+  async function changeTotp(action: "codes" | "off") {
+    const body = totpPassword ? { current_password: totpPassword } : {};
+    const done =
+      action === "codes"
+        ? await totp.run(async () => {
+            const answer = await api<Recovery>("POST", "/me/totp/recovery-codes", body);
+            recovery = answer.recovery_codes;
+          })
+        : await totp.run(() => api("DELETE", "/me/totp", body));
+    if (!done) return;
+    totpPassword = "";
+    if (action !== "codes") updateUser({ ...app.session!.user, totp: false });
+  }
+
   const removal = new Form();
 
   async function remove() {
@@ -197,6 +287,7 @@
       <h2 id="factor-heading">{t("account.factor")}</h2>
       {#if app.session!.user.email_2fa}
         <p class="meta">{t("account.factorOn", { email: app.session!.user.email })}</p>
+        {#if app.session!.user.totp}<p class="meta">{t("account.factorAfterApp")}</p>{/if}
         <form aria-labelledby="factor-heading" onsubmit={turnFactorOff}>
           <Field
             label={t("form.currentPassword")}
@@ -243,6 +334,89 @@
     </section>
   {/if}
 
+  <section aria-labelledby="totp-heading">
+    <h2 id="totp-heading">{t("account.totp")}</h2>
+    {#if recovery.length > 0}
+      <p class="notice" role="status">{t("account.recoveryHint")}</p>
+      <ol class="recovery" aria-label={t("account.recoveryCodes")}>
+        {#each recovery as code (code)}<li>{code}</li>{/each}
+      </ol>
+      <div class="actions">
+        <button
+          class="button secondary"
+          type="button"
+          onclick={() => copy(recovery.join("\n"), t("account.recoveryCopied"), t("account.recoveryCopyFailed"))}
+        >
+          {t("account.recoveryCopy")}
+        </button>
+        <button class="button" type="button" onclick={() => (recovery = [])}>{t("account.recoveryDone")}</button>
+      </div>
+    {:else if app.session!.user.totp}
+      <p class="meta">{t("account.totpOn")}</p>
+      <form aria-labelledby="totp-heading" onsubmit={(event) => event.preventDefault()}>
+        <Field
+          label={t("form.currentPassword")}
+          type="password"
+          bind:value={totpPassword}
+          autocomplete="current-password"
+          required
+          problem={totp.field("current_password")}
+        />
+        {#if totp.problem}<p class="problem" role="alert">{totp.problem}</p>{/if}
+        <div class="actions">
+          <button class="button secondary" type="button" disabled={totp.busy} onclick={() => changeTotp("codes")}>
+            {t("account.recoveryNew")}
+          </button>
+          <button class="button secondary" type="button" disabled={totp.busy} onclick={() => changeTotp("off")}>
+            {t("account.turnOff")}
+          </button>
+        </div>
+      </form>
+    {:else if totpSetup}
+      <p class="meta">{t("account.totpScan")}</p>
+      <div class="qr">
+        {#if qr}
+          <svg viewBox="0 0 {qr.size} {qr.size}" role="img" aria-label={t("account.totpQr")}>
+            <path d={qr.path} />
+          </svg>
+        {/if}
+      </div>
+      <p class="meta">{t("account.totpKey")} <code class="secret">{grouped(totpSetup.secret)}</code></p>
+      <form aria-labelledby="totp-heading" onsubmit={confirmTotp}>
+        <Field
+          label={t("account.totpCode")}
+          bind:value={totpCode}
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          spellcheck="false"
+          required
+          problem={totp.field("code")}
+        />
+        {#if totp.problem}<p class="problem" role="alert">{totp.problem}</p>{/if}
+        <div class="actions">
+          <button class="button" disabled={totp.busy}>{t("account.turnOn")}</button>
+          <button class="button secondary" type="button" disabled={totp.busy} onclick={cancelTotp}>
+            {t("common.cancel")}
+          </button>
+        </div>
+      </form>
+    {:else}
+      <p class="meta">{t("account.totpOff")}</p>
+      <form aria-labelledby="totp-heading" onsubmit={startTotp}>
+        <Field
+          label={t("form.currentPassword")}
+          type="password"
+          bind:value={totpPassword}
+          autocomplete="current-password"
+          required
+          problem={totp.field("current_password")}
+        />
+        {#if totp.problem}<p class="problem" role="alert">{totp.problem}</p>{/if}
+        <button class="button" disabled={totp.busy}>{t("account.totpSetUp")}</button>
+      </form>
+    {/if}
+  </section>
+
   <section aria-labelledby="delete-heading">
     <h2 id="delete-heading">{t("account.delete")}</h2>
     <p class="meta">{t("account.deleteHint")}</p>
@@ -258,3 +432,36 @@
     </div>
   </section>
 </Shell>
+
+<style>
+  /* Dark on light in both themes: not every app reads a QR code drawn the other way round. */
+  .qr {
+    width: 200px;
+    height: 200px;
+    margin: var(--space-4) 0;
+    border: 1px solid var(--line);
+    background: #f5f5f4;
+  }
+
+  .qr svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    fill: #141414;
+    shape-rendering: crispEdges;
+  }
+
+  .secret {
+    font-family: var(--font-mono);
+    color: var(--ink);
+    user-select: all;
+  }
+
+  .recovery {
+    columns: 2;
+    margin: var(--space-4) 0;
+    padding-left: var(--space-6);
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+</style>

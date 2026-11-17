@@ -30,7 +30,7 @@ use cadocs_store::{
     PageCrumb, PageIndex, PageMove, PageRecord, PageSite, PageStore, Revision, RevisionStore,
     RevisionSummary, SearchHit, SearchStore, SessionStanding, Share, ShareStore, SharedPage,
     SharedView, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc,
-    StoredUpdate, Thread, UpdateBasis, UploadTarget, UserChanges, UserRecord, Workspace,
+    StoredUpdate, Thread, TotpProof, UpdateBasis, UploadTarget, UserChanges, UserRecord, Workspace,
     WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -706,8 +706,9 @@ impl AccountStore for FlakyStore {
         &self,
         session: &NewSession,
         checked_hash: &str,
+        mail: bool,
     ) -> Result<bool, StoreError> {
-        self.inner.create_session(session, checked_hash).await
+        self.inner.create_session(session, checked_hash, mail).await
     }
 
     async fn session(
@@ -842,6 +843,59 @@ impl AccountStore for FlakyStore {
 
     async fn email_2fa_users(&self) -> Result<u64, StoreError> {
         self.inner.email_2fa_users().await
+    }
+
+    async fn start_totp(
+        &self,
+        user_id: &str,
+        secret: &[u8],
+        basis: &UpdateBasis<'_>,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        self.inner.start_totp(user_id, secret, basis, now).await
+    }
+
+    async fn pending_totp(&self, user_id: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        self.inner.pending_totp(user_id).await
+    }
+
+    async fn enable_totp(
+        &self,
+        user_id: &str,
+        secret: &[u8],
+        step: i64,
+        recovery_hashes: &[String],
+        now: i64,
+    ) -> Result<(), StoreError> {
+        self.inner
+            .enable_totp(user_id, secret, step, recovery_hashes, now)
+            .await
+    }
+
+    async fn create_session_with_totp(
+        &self,
+        session: &NewSession,
+        checked_hash: &str,
+        proof: &TotpProof<'_>,
+    ) -> Result<bool, StoreError> {
+        self.inner
+            .create_session_with_totp(session, checked_hash, proof)
+            .await
+    }
+
+    async fn replace_recovery_codes(
+        &self,
+        user_id: &str,
+        recovery_hashes: &[String],
+        basis: &UpdateBasis<'_>,
+    ) -> Result<(), StoreError> {
+        self.inner
+            .replace_recovery_codes(user_id, recovery_hashes, basis)
+            .await
+    }
+
+    async fn turn_totp_off(&self, user_id: &str) -> Result<(), StoreError> {
+        self.inner.turn_totp_off(user_id).await
     }
 }
 
@@ -1141,7 +1195,7 @@ async fn open_session(state: &AppState<FlakyStore, Fixed>, last_seen_at: i64) ->
     assert!(
         state
             .store
-            .create_session(&session, "unused")
+            .create_session(&session, "unused", false)
             .await
             .unwrap()
     );

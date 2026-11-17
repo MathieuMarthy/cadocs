@@ -24,8 +24,20 @@ pub struct User {
     pub is_instance_admin: bool,
     /// Whether a login needs a code by mail after the password (ADR 0026).
     pub email_2fa: bool,
+    /// Whether a login needs a code from an authenticator app (RFC 6238). It replaces the code by
+    /// mail when both are on.
+    pub totp: bool,
     /// The language of the interface, `None` to follow the browser's.
     pub language: Option<String>,
+}
+
+/// What stands in for the code of the app at login.
+#[derive(Debug, Clone, Copy)]
+pub enum TotpProof<'a> {
+    /// The time step whose code matched, and the secret it was checked against.
+    App { secret: &'a [u8], step: i64 },
+    /// The hash of a recovery code.
+    Recovery { code_hash: &'a str },
 }
 
 /// An account as an instance admin sees it.
@@ -43,6 +55,8 @@ pub struct Credentials {
     pub user: User,
     pub password_hash: Option<String>,
     pub disabled: bool,
+    /// The secret of the authenticator app, once it is on.
+    pub totp_secret: Option<Vec<u8>>,
 }
 
 impl Credentials {
@@ -93,6 +107,8 @@ pub struct UserChanges {
     pub password_hash: Option<String>,
     /// Only to turn the factor off: turning it on needs a code (`enable_email_2fa`).
     pub email_2fa_off: bool,
+    /// Turns the authenticator app off, or ends its setup, and deletes the recovery codes.
+    pub totp_off: bool,
     /// `Some(None)` clears it.
     pub language: Option<Option<String>>,
 }
@@ -203,12 +219,14 @@ pub trait AccountStore: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Option<String>, StoreError>> + Send;
 
     /// Opens a session, unless the user is disabled or their password is no longer
-    /// `checked_hash`: hashing takes a while, and the password may change in the meantime. Returns
-    /// whether the session exists.
+    /// `checked_hash`: hashing takes a while, and the password may change in the meantime. Nor
+    /// when a second factor went on meanwhile: the authenticator app, or the code by mail when
+    /// `mail` says the instance asks for it. Returns whether the session exists.
     fn create_session(
         &self,
         session: &NewSession,
         checked_hash: &str,
+        mail: bool,
     ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 
     /// Returns a session only if it has not expired and its user is enabled.
@@ -357,4 +375,54 @@ pub trait AccountStore: Send + Sync + 'static {
 
     /// How many enabled accounts have the second factor on, for the notice at start.
     fn email_2fa_users(&self) -> impl Future<Output = Result<u64, StoreError>> + Send;
+
+    /// Stores a new secret for the authenticator app, waiting for its first code, in place of a
+    /// setup not finished. Refused with `TotpOn` while the app is on, and `StaleCredentials` as
+    /// `update_user`.
+    fn start_totp(
+        &self,
+        user_id: &str,
+        secret: &[u8],
+        basis: &UpdateBasis<'_>,
+        now: i64,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// The secret of a setup waiting for its first code.
+    fn pending_totp(
+        &self,
+        user_id: &str,
+    ) -> impl Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send;
+
+    /// Turns the app on with the code of `step`, if the setup still holds `secret`, and stores
+    /// the recovery codes. Anything else is a `WrongCode`.
+    fn enable_totp(
+        &self,
+        user_id: &str,
+        secret: &[u8],
+        step: i64,
+        recovery_hashes: &[String],
+        now: i64,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Opens a session with a second factor from the app, as `create_session_with_code` does with a
+    /// code by mail. A code of a step at or before the last one used, from a secret the account no
+    /// longer has, or a recovery code it does not hold is a `WrongCode`. A recovery code goes.
+    fn create_session_with_totp(
+        &self,
+        session: &NewSession,
+        checked_hash: &str,
+        proof: &TotpProof<'_>,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Replaces the recovery codes of an account whose app is on, else `TotpOff`.
+    /// `StaleCredentials` as `update_user`.
+    fn replace_recovery_codes(
+        &self,
+        user_id: &str,
+        recovery_hashes: &[String],
+        basis: &UpdateBasis<'_>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Turns the app off with no password, for the command line.
+    fn turn_totp_off(&self, user_id: &str) -> impl Future<Output = Result<(), StoreError>> + Send;
 }

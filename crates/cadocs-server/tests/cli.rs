@@ -202,6 +202,61 @@ fn reset_password_does_not_make_a_database() {
     assert!(!dir.path().join("cadocs.db").exists());
 }
 
+/// A number the database answers.
+fn count(dir: &Path, statement: &'static str) -> i64 {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let options = SqliteConnectOptions::new().filename(dir.join("cadocs.db"));
+            let db = SqlitePool::connect_with(options).await.unwrap();
+            let number = sqlx::query_scalar(statement).fetch_one(&db).await.unwrap();
+            db.close().await;
+            number
+        })
+}
+
+#[test]
+fn reset_totp_turns_the_app_off_beside_a_running_server() {
+    let dir = TempDir::new().unwrap();
+    seed(dir.path());
+    run_sql(
+        dir.path(),
+        "INSERT INTO user_totp (user_id, secret, enabled_at, last_step, created_at)
+         VALUES ('user-1', x'00', 1, 0, 1)",
+    );
+    run_sql(
+        dir.path(),
+        "INSERT INTO user_recovery_codes (user_id, code_hash) VALUES ('user-1', 'hash')",
+    );
+    let _server = start(cadocs(dir.path()));
+
+    let output = cadocs(dir.path())
+        .args(["reset-totp", " Ada@Example.org "])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("ada@example.org"), "{stdout}");
+    assert_eq!(count(dir.path(), "SELECT count(*) FROM user_totp"), 0);
+    assert_eq!(
+        count(dir.path(), "SELECT count(*) FROM user_recovery_codes"),
+        0
+    );
+
+    let output = cadocs(dir.path())
+        .args(["reset-totp", "nobody@example.org"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("no account"),
+        "{}",
+        stderr(&output)
+    );
+}
+
 /// A relay on its own runtime, which lives as long as what this returns.
 fn fake_relay(behavior: Behavior) -> (tokio::runtime::Runtime, FakeRelay) {
     let runtime = tokio::runtime::Builder::new_multi_thread()

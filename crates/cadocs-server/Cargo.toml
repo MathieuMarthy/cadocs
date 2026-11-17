@@ -27,11 +27,14 @@ cadocs-jobs.workspace = true
 cadocs-mail.workspace = true
 cadocs-search.workspace = true
 cadocs-store.workspace = true
+data-encoding.workspace = true
 futures-util = { workspace = true, features = ["io"] }
 getrandom.workspace = true
+hmac.workspace = true
 percent-encoding.workspace = true
 rust-embed.workspace = true
 serde = { workspace = true, features = ["derive"] }
+sha1.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
