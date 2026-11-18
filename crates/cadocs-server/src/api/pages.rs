@@ -109,7 +109,7 @@ impl From<PageCrumb> for CrumbBody {
     }
 }
 
-fn new_slug() -> Result<String, getrandom::Error> {
+pub(super) fn new_slug() -> Result<String, getrandom::Error> {
     let mut bytes = [0; SLUG_CHARS];
     getrandom::fill(&mut bytes)?;
     let letter = |byte: &u8| char::from(SLUG_ALPHABET[usize::from(byte % 32)]);
@@ -117,7 +117,7 @@ fn new_slug() -> Result<String, getrandom::Error> {
 }
 
 /// `after` as a request has it: missing for the end of the list, `null` for its start.
-fn placement(after: Option<Option<String>>) -> Placement {
+pub(super) fn placement(after: Option<Option<String>>) -> Placement {
     match after {
         None => Placement::Last,
         Some(None) => Placement::First,

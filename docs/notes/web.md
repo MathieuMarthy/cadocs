@@ -46,6 +46,7 @@ What a change to the front end or its tests must know.
 - A page whose access ends while it reconnects after a `4409` shows `page not found`, as REST answers `404`. Tests that revoke after a role change wait for `synced … read only` first.
 - A screen's `status` role is not unique (the tree has one while loading): tests look in `banner` or `main`. The notice's `status` exists only while there is a notice, mounted once in `App.svelte`.
 - A `4409` reads the role over REST before the socket reconnects, and the new socket's mode is not reported to the client: a second role change landing between that read and the reconnection leaves the editor in the first one's mode (the server still refuses the writes). Tests that change a role twice wait for `synced` between the two (`settings.spec.ts`, group grant test).
+- `duplicate` in the page menu shows for anyone who writes in some space, and opens `DuplicatePage.svelte` above the title: a space picker over the spaces the user edits, its own space first. In its own space the copy goes right after the page (`{ parent_id, after }`), elsewhere last at the root (`{ space_id }`); the screen then opens the copy. There is no `<dialog>` in the app yet, so the form takes the `.banner` box.
 - Left open: presence counts awareness clients, so one person in two tabs shows two avatars; edits typed between a demotion and its `4409` stay in that tab until a reload.
 
 ## Editor

@@ -307,6 +307,35 @@ async fn a_move_across_spaces_is_sent_to_both() {
 }
 
 #[tokio::test]
+async fn a_copy_is_announced_once_in_the_space_it_lands_in() {
+    let wiki = wiki().await;
+    let bob = wiki.bob().await;
+    let other = wiki.new_space("Archive", json!("viewer")).await;
+    let page = wiki.new_page_in(&wiki.space, &wiki.ada).await;
+    let path = format!("/spaces/{}/pages", wiki.space);
+    let reply = wiki.call("POST", &path, json!({ "parent_id": page })).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let mut bob_socket = wiki.socket(&bob).await;
+
+    let body = json!({ "space_id": other });
+    let reply = wiki
+        .call("POST", &format!("/pages/{page}/duplicate"), body)
+        .await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let copy = id(&reply);
+    assert_eq!(
+        event(&mut bob_socket).await,
+        page_event("page.created", &other, &copy)
+    );
+    // One event covers the subtree: the next one is about something else.
+    let next = wiki.new_page_in(&wiki.space, &wiki.ada).await;
+    assert_eq!(
+        event(&mut bob_socket).await,
+        page_event("page.created", &wiki.space, &next)
+    );
+}
+
+#[tokio::test]
 async fn a_socket_hears_nothing_of_a_space_its_user_cannot_read() {
     let wiki = wiki().await;
     let bob = wiki.bob().await;

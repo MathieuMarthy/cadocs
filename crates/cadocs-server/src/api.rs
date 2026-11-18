@@ -4,6 +4,7 @@ mod admin;
 pub(crate) mod attachments;
 pub mod auth;
 mod comments;
+mod copies;
 mod groups;
 mod invitations;
 mod markdown;
@@ -425,6 +426,7 @@ where
         .merge(groups::routes(state))
         .merge(spaces::routes(state))
         .merge(pages::routes(state))
+        .merge(copies::routes(state))
         .merge(attachments::routes(state))
         .merge(markdown::routes(state))
         .merge(search::routes(state))

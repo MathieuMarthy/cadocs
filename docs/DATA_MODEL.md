@@ -227,6 +227,8 @@ CREATE INDEX page_shares_page ON page_shares(page_id);
 
 **Moving.** A move within a space changes one row. A move to another space also rewrites `space_id` on every descendant, trashed ones included, in the same transaction. The server refuses to move a page under itself or under one of its descendants, using a recursive query on `parent_id`. A move across workspaces is refused.
 
+**Copying.** A copy creates the rows of a page and its live descendants in one transaction: the top one placed like a moved page, the others under their copied parent with the `position` of their source, unique there as among the source's siblings. `pages.title` starts as the source's, then follows the copy's document at its first flush. Contents are written afterwards, one page at a time, through the rooms. A copied attachment is a new row and a new file, referenced by the first copy that shows it ([API.md](API.md#pages)).
+
 **Trash.** Trashing a page sets the same `deleted_at` on the page and on every descendant that is not already trashed, in one transaction, so `deleted_at IS NULL` is enough to filter any read. Restoring brings back the rows with that exact `deleted_at` in the subtree, so a page trashed separately earlier stays in the trash. A trash date is later than any date already in the subtree, so two trashes in one millisecond stay apart. If the parent of the restored page is still trashed, the page goes last at the root of its space.
 
 **Purge.** Deleting a trashed page cascades to all that is under it, including pages trashed separately before it: they have no parent left to return to.

@@ -687,6 +687,18 @@
   font-size: 13px;
 }
 
+/* The copy of a page takes the same box, its fields one under the other. */
+
+.banner.duplicate {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.duplicate .field,
+.duplicate .meta {
+  margin: 0;
+}
+
 /* Comments (ADR 0012): passages in `mark` with their `[n]` in the margin, threads in a panel. */
 
 .page-layout {

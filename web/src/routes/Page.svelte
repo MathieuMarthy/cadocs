@@ -7,6 +7,7 @@
   import { onMount, tick, untrack } from "svelte";
 
   import Comments from "../components/Comments.svelte";
+  import DuplicatePage from "../components/DuplicatePage.svelte";
   import Icon from "../components/Icon.svelte";
   import Menu, { type MenuItem } from "../components/Menu.svelte";
   import Share from "../components/Share.svelte";
@@ -102,9 +103,12 @@
     void tick().then(() => document.querySelector<HTMLElement>(".page-actions")?.focus());
   });
 
+  /** The form that copies the page shows above it. */
+  let duplicating = $state(false);
+
   /**
-   * The top bar's menu: copy link, history, export and print for anyone; public links and move to
-   * trash for those who may write.
+   * The top bar's menu: copy link, history, export and print for anyone, duplicate for those who
+   * write in some space, public links and move to trash for those who may write here.
    */
   const actions = $derived.by<MenuItem[]>(() => {
     const items: MenuItem[] = [
@@ -117,6 +121,13 @@
     ];
     const page = row;
     const held = nav;
+    if (page && held?.spaces.some((space) => canEdit(space.role))) {
+      items.splice(2, 0, {
+        icon: "copy",
+        label: t("page.duplicate"),
+        select: () => (duplicating = true),
+      });
+    }
     if (page && held && canEdit(page.role)) {
       items.push({
         icon: "trash-2",
@@ -318,6 +329,9 @@
     {/snippet}
     <div class="page-layout">
       <main class="page">
+        {#if duplicating && row && nav}
+          <DuplicatePage {nav} page={row} onclose={() => (duplicating = false)} />
+        {/if}
         {#if stale}
           <div class="banner" role="alert">
             <span>{t("page.stale")}</span>

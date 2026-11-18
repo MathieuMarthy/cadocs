@@ -332,6 +332,13 @@ pub fn move_allowed(source: Scope, destination: Scope, same_workspace: bool) -> 
         && destination.allows(SpaceAction::EditPage)
 }
 
+/// A copy only reads its source, and creates pages in its destination, in the same workspace.
+pub fn duplicate_allowed(source: Scope, destination: Scope, same_workspace: bool) -> bool {
+    same_workspace
+        && source.allows(SpaceAction::ReadPage)
+        && destination.allows(SpaceAction::EditPage)
+}
+
 /// A download needs read access to at least one page that references the file.
 pub fn download_allowed(referencing_pages: impl IntoIterator<Item = Scope>) -> bool {
     referencing_pages

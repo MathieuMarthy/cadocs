@@ -86,6 +86,17 @@ fn write_replaces_what_the_fragment_held() {
 }
 
 #[test]
+fn the_state_size_is_what_its_encoding_takes() {
+    use yrs::{ReadTxn, StateVector};
+    let doc = written(&every_node());
+    let encoded = doc
+        .transact()
+        .encode_state_as_update_v1(&StateVector::default());
+    assert_eq!(yjs::state_len(&doc), encoded.len());
+    assert!(yjs::state_len(&Doc::new()) < 8);
+}
+
+#[test]
 fn layout_matches_what_the_editor_writes() {
     let doc = written(&every_node());
     let fragment = doc.get_or_insert_xml_fragment(yjs::FRAGMENT);
