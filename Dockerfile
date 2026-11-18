@@ -6,7 +6,7 @@
 
 # The front end, which the binary embeds. Its build checks the editor schema against fixtures of
 # cadocs-content.
-FROM node:26-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS web
+FROM node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS web
 WORKDIR /src
 COPY web/package.json web/package-lock.json web/
 RUN npm --prefix web ci
@@ -15,7 +15,7 @@ COPY crates/cadocs-content/tests crates/cadocs-content/tests
 RUN npm --prefix web run build
 
 # Bookworm's glibc 2.36, the oldest a release binary asks for. The toolchain is the one CI pins.
-FROM rust:1.99.1-slim-bookworm@sha256:f2c004e3d2d8b547e8cf7ffbc29205385f4e71d23e53e4e383065db5e9f822cd AS build
+FROM rust:1.100.0-slim-bookworm@sha256:7c7d4eb4d05b7781187a327809466cfddf29753f6defdc3d19a0e291951b7a37 AS build
 ARG FEATURES=""
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
@@ -28,7 +28,7 @@ RUN cargo build --release --locked -p cadocs-server --features "$FEATURES" \
 FROM scratch AS binary
 COPY --from=build /cadocs /cadocs
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cc66d222f0a7ec996b78a99fe76a969bc80b539a5016ad866c14d1949bc6d0ab
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2
 COPY --from=build /cadocs /usr/local/bin/cadocs
 # Owned by the image's user, so a new named volume is too.
 COPY --from=build --chown=nonroot:nonroot /data /data
