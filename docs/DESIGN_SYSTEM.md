@@ -100,6 +100,7 @@ One set: **Lucide** 0.460.0 (ISC license, compatible with AGPL-3.0), redrawn wit
 | `download`, `upload` | export, import |
 | `printer` | print |
 | `message-square` | comments (opens the panel) |
+| `globe` | share publicly (opens the share dialog) |
 
 ## Layout
 
@@ -187,6 +188,19 @@ The icons, the action menu, the drawer and the lowercase labels come from ADR 00
 - A refusal shows below it in `accent-text`, mono 12px, and turns the border `accent-text`.
 - Focus as for buttons.
 
+### Checkbox
+
+A 14px square with a 1px `ink` border on `bg`, filled with `ink` inside a 2px `bg` ring when on, before its label in mono 13px, the row `control-height` tall. The whole row is the label. Focus as for buttons. In forced colors, the system's own box, since the fill would not show.
+
+### Dialog
+
+A modal surface for a task that needs the page to wait, such as the share dialog.
+
+- The command menu's surface: `bg`, 1px `ink` border, `shadow-offset`, centered, at most 560px wide and the window's width less `space-4` on each side.
+- Behind it, the page under a 70% wash of `bg`, and inert. The notice sits behind too, so the dialog says what its actions did in its own `status` line at its foot.
+- A head with its title in `label` style and an `x` icon button (`close`), above a `line` rule. Escape closes it too, and focus goes back to what opened it.
+- Inside, the usual pieces: `meta` text, bordered blocks in `line` for listed items, fields and a primary button for its form below a `line` rule.
+
 ### Tree item
 
 - A sidebar row for a space or a page, `row-height` tall, `space-2` horizontal padding.
@@ -248,6 +262,13 @@ Passage highlighted in `mark`, with a `[2]` counter in `accent-text` in the righ
 - In it, in mono: the `label` heading, `open · 2` and `resolved · 1` as secondary buttons (the shown one in `ink`), the composer's button (`comment on the selection` or `comment on the page`), then one bordered block per thread, `ink` border for the one picked.
 - A thread starts with its quote after a 3px `accent` rule, a button that scrolls to the passage. A passage no longer in the page keeps its quote struck in `muted`, with a `line` rule and `passage removed`. A comment on the whole page says `on the page`.
 - Comments: the author at 600, the date in `meta`, the body in sans 15px. Replies sit under a 1px `line` rule on their left. Text verbs below (`reply`, `resolve`, `reopen`); `edit` and `delete` in the `ellipsis` menu of one's own comments.
+
+### Share dialog
+
+The dialog `share publicly` opens from the page's action menu, for editors and admins only.
+
+- One bordered block per public link, oldest first: the address in mono with a `copy` icon button, then its facts in `meta` joined by ` · ` (`with subpages` or `this page only`, `indexed by search engines` or `hidden from search engines`, `no expiry`, `until <date>` or `expired` in `accent-text`, the address then struck in `muted`), and `revoke` in `danger`, confirmed by `revoke the link`.
+- Below a `line` rule, `new link`: two checkboxes (`include subpages`, `let search engines index it`), a date field `valid until (optional)` that offers no day before today, and `create link`. A link valid until a day works through that day.
 
 ## Tone
 

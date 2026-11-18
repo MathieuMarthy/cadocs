@@ -307,6 +307,19 @@ for (const theme of ["light", "dark"] as const) {
       const name = path.replace(/[^a-z]+/g, "-").replace(/^-|-$/g, "") || "page";
       await page.screenshot({ path: test.info().outputPath(`${theme}-${name}.png`), fullPage: true });
     }
+    // The share dialog, with one link, wide and at phone width.
+    await server.call("POST", `/pages/${id}/shares`, { include_children: true });
+    await page.goto(`${server.url}/?page=${id}`);
+    await page.getByRole("banner").getByRole("button", { name: "more actions for Notes" }).click();
+    await page.getByRole("menuitem", { name: "share publicly" }).click();
+    const dialog = page.getByRole("dialog", { name: "public links" });
+    await expect(dialog.getByText("with subpages")).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath(`${theme}-share.png`) });
+    await page.setViewportSize({ width: 375, height: 700 });
+    const box = (await dialog.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(375);
+    await page.screenshot({ path: test.info().outputPath(`${theme}-share-phone.png`) });
     // One background per theme, whatever the system says.
     expect(backgrounds.size).toBe(1);
     const [background] = backgrounds;

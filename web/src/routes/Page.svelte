@@ -9,6 +9,7 @@
   import Comments from "../components/Comments.svelte";
   import Icon from "../components/Icon.svelte";
   import Menu, { type MenuItem } from "../components/Menu.svelte";
+  import Share from "../components/Share.svelte";
   import Shell from "../components/Shell.svelte";
   import { openPage } from "../editor/collab";
   import { copy, pageLink, showPage, trashPage } from "../lib/actions";
@@ -91,10 +92,24 @@
     return home ? { href: `/w/${home.slug}`, label: t("page.openWorkspace") } : null;
   });
 
-  /** The top bar's menu: copy link, history, export and print for anyone, move to trash for those who may write. */
+  /** The share dialog shows, for those who may write (PERMISSIONS.md). */
+  let sharing = $state(false);
+  // A role that drops below editor closes it, and a role given back does not open it again. The
+  // open dialog goes without `close()`, so focus would fall to the body: it goes back to the menu.
+  $effect(() => {
+    if (editable || !untrack(() => sharing)) return;
+    sharing = false;
+    void tick().then(() => document.querySelector<HTMLElement>(".page-actions")?.focus());
+  });
+
+  /**
+   * The top bar's menu: copy link, history, export and print for anyone; public links and move to
+   * trash for those who may write.
+   */
   const actions = $derived.by<MenuItem[]>(() => {
     const items: MenuItem[] = [
       { icon: "link", label: t("page.copyLink"), select: () => void copy(pageLink(id)) },
+      ...(editable ? [{ icon: "globe" as const, label: t("page.share"), select: () => (sharing = true) }] : []),
       { icon: "history", label: t("history.title"), href: `/?page=${id}&history` },
       { icon: "download", label: t("page.export"), href: exportUrl(id, false) },
       { icon: "download", label: t("page.exportAll"), href: exportUrl(id, true) },
@@ -299,7 +314,7 @@
         <Icon name="message-square" />
         {#if comments.open.length > 0}<span class="comments-count" aria-hidden="true">{comments.open.length}</span>{/if}
       </button>
-      <Menu label={t("menu.moreFor", { name: shownTitle })} items={actions} />
+      <Menu label={t("menu.moreFor", { name: shownTitle })} items={actions} class="page-actions" />
     {/snippet}
     <div class="page-layout">
       <main class="page">
@@ -334,5 +349,8 @@
         />
       {/if}
     </div>
+    {#if sharing && editable}
+      <Share page={id} onclose={() => (sharing = false)} />
+    {/if}
   </Shell>
 {/if}

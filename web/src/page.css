@@ -950,6 +950,74 @@
   }
 }
 
+/* The share dialog (step 46): one bordered block per public link, then the form of a new one. */
+.share-list {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.share-row {
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+}
+
+.share-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.share-link code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.share-row.expired code {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.share-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.share-facts {
+  flex: 1;
+  margin: 0;
+}
+
+.share-facts span + span::before {
+  content: " · ";
+}
+
+.share-expired {
+  color: var(--accent-text);
+}
+
+.share-new {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.share-new .field {
+  margin: var(--space-2) 0 var(--space-3);
+}
+
+.share-said {
+  min-height: 1.4em;
+  margin: var(--space-3) 0 0;
+}
+
 @media print {
   .comments-panel,
   .comments-toggle,
