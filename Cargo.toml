@@ -50,17 +50,17 @@ hmac = { version = "0.12", default-features = false }
 lettre = { version = "0.11", default-features = false, features = ["builder", "ring", "rustls-native-certs", "smtp-transport", "tokio1-rustls"] }
 percent-encoding = { version = "2", default-features = false, features = ["std"] }
 # Timestamps for S3 signatures and listings: the version `rusty-s3` takes, so no second copy.
-jiff = { version = "0.2", default-features = false, features = ["std"] }
+jiff = { version = "1", default-features = false, features = ["std"] }
 # Markdown import (ADR 0008). No `html` or `getopts`: cadocs renders HTML from its own AST.
 pulldown-cmark = { version = "0.13", default-features = false }
 # S3 transport (ADR 0020), behind the `s3` feature: rustls, the system roots, streamed bodies.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "rustls-native-certs", "stream"] }
 rust-embed = "8"
 # Snowball stemmers for search (ADR 0007). MIT and BSD-3-Clause.
 rust-stemmers = "1.2"
 # S3 request signing and listing parsing, with no I/O of its own (ADR 0020). BSD-2-Clause.
 # `full` brings the listing parser, `rustcrypto` the pure Rust signing backend.
-rusty-s3 = { version = "0.11", default-features = false, features = ["full", "rustcrypto"] }
+rusty-s3 = { version = "0.12", default-features = false, features = ["full", "rustcrypto"] }
 serde = { version = "1", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 # TOTP codes: the copy axum and tungstenite already ship. Moves with them.
@@ -72,6 +72,8 @@ tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", default-features = false }
 tokio-tungstenite = "0.29"
+# The rustls of `lettre`, with `ring`: the S3 store installs it as the provider of reqwest 0.13.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 tokio-util = { version = "0.7", default-features = false }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 # The version axum uses: `ws.rs` reads its error type, and a second copy would not match.
@@ -83,7 +85,7 @@ url = { version = "2", default-features = false, features = ["std"] }
 uuid = { version = "1", default-features = false, features = ["std", "v7"] }
 yrs = { version = "0.28", features = ["sync"] }
 # Revisions, compressed (docs/DATA_MODEL.md#documents). No legacy formats or dictionary builder.
-zstd = { version = "0.13", default-features = false }
+zstd = { version = "0.14", default-features = false }
 
 # Tests must see the yrs that ships: its overflow checks and debug assertions only fire in dev
 # builds, on crafted frames, and would hide what the release binary does with them.
