@@ -71,7 +71,7 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 - A store with `download_url` gets a `302` after the access check, never cached, for `INLINE_TYPES` only: other files stream with the sandbox CSP and `nosniff`, which S3 cannot send. The router adds the store's origin to `img-src`.
 - `S3FileStore` (`cadocs-files/src/s3.rs`, `s3` feature): every request is a presigned `rusty-s3` URL sent with `reqwest`, which follows no redirect. Keys are the disk paths under the prefix, and `list` skips other keys, so a shared prefix is safe. `valid_prefix` and `new` refuse a prefix or endpoint that could leave the bucket. Neither `Debug` nor errors show the secret or a presigned URL, which works for 5 minutes.
 - `tests/s3.rs` runs one contract on an in-memory S3 that ignores signatures, and on a real one with `CADOCS_TEST_S3_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`. MinIO no longer publishes community images: use `bitnamilegacy/minio:2025.4.22`.
-- `rusty-s3` 0.11 parses listings with `instant-xml`, which needs the S3 namespace on `ListBucketResult` (real servers send it, a fake must too). It addresses the bucket as `/bucket/` and writes spaces in the query as `+`, which MinIO accepts.
+- `rusty-s3` 0.12 parses listings with `instant-xml`, which needs the S3 namespace on `ListBucketResult` (real servers send it, a fake must too). It addresses the bucket as `/bucket/` and writes spaces in the query as `+`, which MinIO accepts.
 - Left open: the startup check needs the bucket to answer `HEAD` (`s3:ListBucket`).
 
 ## Revisions, export, import, backup

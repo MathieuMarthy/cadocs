@@ -14,7 +14,7 @@ What a change to the front end or its tests must know.
 - Sidebar: sticky, only `.sidebar-scroll` scrolls, its `scrollTop` kept in a module variable since each screen mounts its own shell. Under 840px it is a drawer with `display: none` until `drawer-open`, so a test sees no `complementary` while it is closed.
 - `.icon-button` sets `display` late in `base.css`, so a rule that hides one needs two classes (`.icon-button.drawer-button`).
 - Logo: `.logo` caret is `aria-hidden`, so a test reads `cadocs`. `public/favicon.svg` carries its own colors. The README images in `docs/assets/` are captures of the real binary at 1280 by 640, 2x, both themes, seeded through `e2e/server.ts`: retake them when the shell changes visibly.
-- Type checks: `tsc` skips `.svelte` files, and `svelte-check` needs TypeScript 5 or 6. Run it by hand after changing a component, from `web/`: `npx -y -p typescript@6 -p svelte-check@4.7.8 -p svelte@5.57.3 svelte-check --workspace . --tsconfig ./tsconfig.json`.
+- Type checks: `tsc` skips `.svelte` files, and `svelte-check` needs TypeScript 5 or 6. Run it by hand after changing a component, from `web/`: `npx -y -p typescript@6 -p svelte-check@4.7.8 -p svelte@5.59.0 svelte-check --workspace . --tsconfig ./tsconfig.json`.
 
 ## Words
 

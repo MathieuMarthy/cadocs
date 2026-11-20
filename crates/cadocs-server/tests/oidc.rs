@@ -451,9 +451,13 @@ async fn a_callback_with_nothing_to_check_or_trade_spends_nothing() {
     let started = api.start_oidc(&fake).await;
     let state = started.state();
     // No code to trade, and a planted cookie whose empty state matches an empty one.
-    let reply = api.callback(&started.cookie, &format!("state={state}")).await;
+    let reply = api
+        .callback(&started.cookie, &format!("state={state}"))
+        .await;
     refused_with(&reply, "failed");
-    let reply = api.callback("__Host-oidc=fake...", "code=code&state=").await;
+    let reply = api
+        .callback("__Host-oidc=fake...", "code=code&state=")
+        .await;
     refused_with(&reply, "failed");
     assert_eq!(fake.tokens.load(Ordering::SeqCst), 0);
 }

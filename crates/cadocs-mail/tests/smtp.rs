@@ -59,11 +59,10 @@ async fn a_message_reaches_the_relay() {
     // A relay scores a message whose id names no real host as spam.
     let id = header(data, "Message-ID").unwrap();
     assert!(id.ends_with("@example.org>"), "{id}");
-    // lettre ends every message with one more line break, which no reader shows.
     let body = data.split_once("\r\n\r\n").unwrap().1;
     assert_eq!(
         body,
-        "Your code is 123456.\r\n.a line that starts with a dot\r\n\r\n"
+        "Your code is 123456.\r\n.a line that starts with a dot\r\n"
     );
     // The relay is greeted with a name, not with the default `[127.0.0.1]`.
     assert_eq!(relay.commands()[0], "EHLO example.org");
