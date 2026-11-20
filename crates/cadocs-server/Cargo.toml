@@ -19,6 +19,7 @@ async_zip.workspace = true
 argon2.workspace = true
 axum.workspace = true
 base64.workspace = true
+bytes.workspace = true
 cadocs-collab.workspace = true
 cadocs-content.workspace = true
 cadocs-core.workspace = true
@@ -31,25 +32,31 @@ data-encoding.workspace = true
 futures-util = { workspace = true, features = ["io"] }
 getrandom.workspace = true
 hmac.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
 percent-encoding.workspace = true
+ring.workspace = true
 rust-embed.workspace = true
+rustls-native-certs.workspace = true
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-rustls.workspace = true
 tokio-util = { workspace = true, features = ["compat", "io"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tungstenite.workspace = true
+url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
 cadocs-mail = { workspace = true, features = ["fake"] }
 async_zip.workspace = true
-bytes.workspace = true
-serde_json.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true
 tokio-tungstenite.workspace = true

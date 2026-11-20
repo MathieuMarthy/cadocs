@@ -18,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use accounts::{
     AccountStore, ActiveSession, AdminChanges, CodeAttempt, CodePurpose, Credentials, FirstUser,
-    MAX_CODE_TRIES, Membership, NewEmailCode, NewPasswordReset, NewSession, NewUser,
+    IdentityUser, MAX_CODE_TRIES, Membership, NewEmailCode, NewPasswordReset, NewSession, NewUser,
     SessionStanding, TotpProof, UpdateBasis, User, UserChanges, UserRecord,
 };
 pub use attachments::{Attachment, AttachmentStore, NewAttachment, UploadTarget};

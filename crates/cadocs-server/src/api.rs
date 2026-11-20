@@ -8,6 +8,7 @@ mod copies;
 mod groups;
 mod invitations;
 mod markdown;
+mod oidc;
 mod pages;
 mod revisions;
 mod search;
@@ -420,6 +421,7 @@ where
     let routes = Router::new()
         .route("/", any(not_found))
         .merge(auth::routes(state))
+        .merge(oidc::routes(state))
         .merge(admin::routes(state))
         .merge(workspaces::routes(state))
         .merge(invitations::routes(state))

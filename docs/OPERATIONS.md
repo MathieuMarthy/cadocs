@@ -85,9 +85,31 @@ Each account can also turn on a second factor in its account screen, once a code
 | `CADOCS_SMTP_USERNAME` | | For a relay that asks for a login. Needs a password, and is refused with `CADOCS_SMTP_TLS=none` |
 | `CADOCS_SMTP_PASSWORD` | | The password, unless the next one is set. Never both |
 | `CADOCS_SMTP_PASSWORD_FILE` | | A file holding the password, for container secrets. A final newline is ignored |
-| `CADOCS_REGISTRATION` | `open` | `open`: with mail on, anyone can make an account. `closed`: no one can, and mail serves recovery. Without mail no one registers, whatever this says |
+| `CADOCS_REGISTRATION` | `open` | `open`: with mail on, anyone can make an account, and anyone an OIDC provider lets in makes one at their first login. `closed`: no one can, mail serves recovery, and a provider only logs into accounts already linked to it. Without mail or a provider no one registers, whatever this says |
 
 A Postfix on the same Docker network that relays for it needs only `CADOCS_SMTP_HOST=postfix`, `CADOCS_SMTP_TLS=none` and `CADOCS_SMTP_FROM`.
+
+### Single sign-on (OIDC)
+
+Logins through OpenID Connect providers, such as Authentik or Keycloak, beside passwords (ADR 0028). None unless `CADOCS_OIDC_PROVIDERS` names one. Each provider has an id, of lowercase letters and digits, which names its settings and its routes. Register cadocs at the provider as a confidential client using the authorization code flow, with this redirect URI:
+
+```
+<CADOCS_PUBLIC_URL>/api/v1/auth/oidc/<id>/callback
+```
+
+The provider must sign ID tokens with RS256, and give the `email` claim: cadocs asks for the `openid email profile` scopes and sends the secret with HTTP Basic (`client_secret_basic`). It reaches the provider over HTTPS, checked against the system roots, or over plain HTTP only on a loopback address. A login fetches the discovery document and the keys each time, so nothing stays in memory between logins, and a provider that is down only fails its own logins.
+
+A person is the provider's subject (`sub`), not an address. At their first login, someone with no account gets one, with no password and no workspace, unless `CADOCS_REGISTRATION=closed` or setup is pending: the provider decides who gets in, so let it admit only the people the wiki is for. Someone whose address an account already holds is sent back to the login screen: they log in as before and link the provider from their account. A login through a provider asks for no code by mail and no authenticator app: the provider's own second factor applies. A disabled account stays shut whatever the provider says.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CADOCS_OIDC_PROVIDERS` | unset | The ids of the providers, separated by commas, as `keycloak,authentik`. Unset or empty turns OIDC off |
+| `CADOCS_OIDC_<ID>_ISSUER` | | Required. The issuer, exactly as the provider's discovery document names it, with no query: `https://sso.example.org/realms/main` for Keycloak, `https://sso.example.org/application/o/<slug>/` for Authentik |
+| `CADOCS_OIDC_<ID>_CLIENT_ID` | | Required. The client id the provider gave |
+| `CADOCS_OIDC_<ID>_CLIENT_SECRET` | | The client secret, unless the next one is set. Never both |
+| `CADOCS_OIDC_<ID>_CLIENT_SECRET_FILE` | | A file holding the secret, for container secrets. A final newline is ignored |
+
+`<ID>` is the id in capitals: `keycloak` reads `CADOCS_OIDC_KEYCLOAK_ISSUER`. A failed login logs why at `warn`, and the person lands on `/login?oidc=failed`; `taken` and `closed` are the two refusals above.
 
 ## Commands
 
