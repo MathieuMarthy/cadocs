@@ -336,6 +336,9 @@ fn inlines<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Vec<Inline> {
                 "mention" => found.push(Inline::Mention {
                     id: string_attr(txn, &inline, "id").unwrap_or_default(),
                 }),
+                "inlineMath" => found.push(Inline::Math {
+                    latex: string_attr(txn, &inline, "latex").unwrap_or_default(),
+                }),
                 other => {
                     warn_unknown("node", other);
                     push_inline(
@@ -532,7 +535,8 @@ fn write_block<P: XmlFragment>(txn: &mut TransactionMut, parent: &P, block: &Blo
         Block::Details { summary, content } => {
             let details = element(txn, parent, "details");
             let head = element(txn, &details, "detailsSummary");
-            // `text*`: breaks become spaces, and page links and mentions are left out.
+            // `text*`: breaks become spaces, math its source, and page links and mentions are
+            // left out.
             let text: Vec<Inline> = summary.iter().fold(Vec::new(), |mut list, inline| {
                 let inline = match inline {
                     Inline::Text { .. } => inline.clone(),
@@ -541,6 +545,10 @@ fn write_block<P: XmlFragment>(txn: &mut TransactionMut, parent: &P, block: &Blo
                         marks: Marks::default(),
                     },
                     Inline::PageLink { .. } | Inline::Mention { .. } => return list,
+                    Inline::Math { latex } => Inline::Text {
+                        text: latex.clone(),
+                        marks: Marks::default(),
+                    },
                 };
                 push_inline(&mut list, inline);
                 list
@@ -670,6 +678,11 @@ fn write_inlines(txn: &mut TransactionMut, parent: &XmlElementRef, content: &[In
                 if !id.is_empty() {
                     node.insert_attribute(txn, "id", Any::from(id.as_str()));
                 }
+            }
+            Inline::Math { latex } => {
+                text = None;
+                let node = element(txn, parent, "inlineMath");
+                node.insert_attribute(txn, "latex", Any::from(latex.as_str()));
             }
         }
     }

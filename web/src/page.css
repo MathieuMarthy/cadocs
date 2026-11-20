@@ -232,6 +232,36 @@
   font-size: inherit;
 }
 
+/* A formula or diagram drawn below its source, which readers do not see. */
+.code-preview {
+  margin: calc(-1 * var(--space-2)) 0 var(--space-4);
+  overflow-x: auto;
+  text-align: center;
+}
+
+.code-preview:empty {
+  display: none;
+}
+
+.tiptap[contenteditable="false"] pre:has(+ .code-preview:not(.error)) {
+  display: none;
+}
+
+.code-preview svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.tiptap span[data-type="inlineMath"] input {
+  width: 16ch;
+  font-family: var(--font-mono);
+  font-size: 15px;
+}
+
+.tiptap span[data-type="inlineMath"].ProseMirror-selectednode {
+  outline: 2px solid var(--selection);
+}
+
 /* A checklist in plain text: `[ ]` and `[x]`, over a checkbox kept for keyboards and readers. */
 
 .tiptap ul[data-type="taskList"] {

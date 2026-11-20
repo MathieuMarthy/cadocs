@@ -153,6 +153,13 @@ pub fn every_node() -> Document {
                 language: Some("rust".into()),
                 code: "fn main() {\n    println!(\"``\");\n}".into(),
             },
+            Block::Paragraph(vec![
+                text("where "),
+                Inline::Math {
+                    latex: r"e^{i\pi} + 1 = 0".into(),
+                },
+                text("."),
+            ]),
             Block::Blockquote(vec![para("quoted")]),
             Block::HorizontalRule,
             Block::Callout {

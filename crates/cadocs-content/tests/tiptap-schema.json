@@ -103,6 +103,15 @@
         "id": null
       }
     },
+    "inlineMath": {
+      "content": "",
+      "group": "inline",
+      "inline": true,
+      "atom": true,
+      "attrs": {
+        "latex": ""
+      }
+    },
     "listItem": {
       "content": "paragraph block*",
       "group": "",

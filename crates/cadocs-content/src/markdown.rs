@@ -8,6 +8,7 @@
 //! | table of contents | `[TOC]` alone in a paragraph |
 //! | link to a page | `[title](/?page=<id>)` |
 //! | mention of a user | `@name`, or `@someone` for a name the reader may not see |
+//! | inline math | `$latex$`, and display math `$$latex$$` alone in a paragraph imports as a `math` code block |
 //! | image | `![alt](/api/v1/attachments/<id>)` alone in a paragraph |
 //! | file | `[name](/api/v1/attachments/<id>)` alone in a paragraph |
 //! | underline | `<u>` and `</u>` |
@@ -17,7 +18,8 @@
 //!
 //! What is lost: a plugin block becomes its text, a table's spans and its first row's header
 //! flags (the first row is always the header), several blocks in a table cell become one line
-//! joined by `<br>`, an ordered list's `type`, a mention, which reads back as its text. Import reads `[!TIP]` and `[!IMPORTANT]` as notes,
+//! joined by `<br>`, an ordered list's `type`, a mention, which reads back as its text, and in inline
+//! math a bare `$`, spaces at the edges and line breaks. Import reads `[!TIP]` and `[!IMPORTANT]` as notes,
 //! headings below level 3 as level 3, any other image as its alternative text, and any other HTML
 //! as text. A link whose address [`crate::url::allowed`] refuses keeps only its text both ways.
 
@@ -423,7 +425,9 @@ fn escape(text: &str, line_start: bool, out: &mut String) {
     let mut digits = 0;
     for c in text.chars() {
         let escaped = match c {
-            '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~' | '|' | '&' | '!' | '#' => true,
+            '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~' | '|' | '&' | '!' | '#' | '$' => {
+                true
+            }
             '-' | '+' | '=' => at_start,
             '.' | ')' => digits > 0 && digits == out_digits_prefix(out, digits),
             _ => false,
@@ -465,6 +469,28 @@ fn code_span(text: &str, flow: Flow) -> String {
         || (text.starts_with(' ') && text.ends_with(' ') && !text.trim().is_empty());
     let space = if pad { " " } else { "" };
     format!("{fence}{space}{text}{space}{fence}")
+}
+
+/// Inline math, whose source Markdown keeps as is: a `$` it holds would close it, and spaces at
+/// its edges would stop it opening, so both are lost. In a table cell, `|` is escaped as in code.
+/// shortcut: a source ending in a backslash escapes the closing `$`, unhandled until one shows up.
+fn math_span(latex: &str, flow: Flow) -> String {
+    let mut out = String::from("$");
+    let mut backslashes = 0;
+    for c in latex.trim().chars() {
+        match c {
+            '$' if backslashes % 2 == 0 => out.push_str("\\$"),
+            '|' if flow == Flow::Cell => out.push_str("\\|"),
+            '\n' => out.push(' '),
+            c => out.push(c),
+        }
+        backslashes = if c == '\\' { backslashes + 1 } else { 0 };
+    }
+    if out.len() == 1 {
+        return String::new();
+    }
+    out.push('$');
+    out
 }
 
 const SPACE: [char; 2] = [' ', '\t'];
@@ -535,6 +561,7 @@ fn flanks(
             Some(Inline::HardBreak) => Some('\n'),
             Some(Inline::PageLink { .. }) => Some('['),
             Some(Inline::Mention { .. }) => Some('@'),
+            Some(Inline::Math { .. }) => Some('$'),
             None => None,
         },
     };
@@ -628,6 +655,7 @@ fn inlines(ctx: &Writer<'_>, content: &[Inline], flow: Flow) -> String {
                 escape(&title, false, &mut out);
                 let _ = write!(out, "]({})", destination(&ctx.links.page(id)));
             }
+            Inline::Math { latex } => out.push_str(&math_span(latex, flow)),
             Inline::Mention { id } => {
                 let name = ctx.titles.name(id);
                 out.push('@');
@@ -671,6 +699,7 @@ pub fn from_markdown_with(markdown: &str, links: &dyn Links) -> Document {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_MATH
         | Options::ENABLE_GFM;
     let mut reader = Reader {
         addresses: Some(links),
@@ -746,6 +775,8 @@ struct Reader<'a> {
     code_language: Option<String>,
     /// The paragraph being read is `[TOC]`, unescaped.
     toc: bool,
+    /// The paragraph being read holds display math.
+    display_math: bool,
     bold: usize,
     italic: usize,
     strike: usize,
@@ -825,6 +856,7 @@ impl Reader<'_> {
             self.inline = Some(Inlines::default());
             self.implicit = true;
             self.in_paragraph = false;
+            self.display_math = false;
         }
         if let Some(current) = &mut self.inline {
             push_inline(&mut current.content, inline);
@@ -851,8 +883,14 @@ impl Reader<'_> {
 
     fn paragraph(&mut self, content: Vec<Inline>) {
         let toc = std::mem::take(&mut self.toc);
+        let display = std::mem::take(&mut self.display_math);
         let block = if toc {
             Block::TableOfContents
+        } else if let (true, [Inline::Math { latex }]) = (display, content.as_slice()) {
+            Block::CodeBlock {
+                language: Some("math".into()),
+                code: latex.trim().into(),
+            }
         } else if let Some((id, alt)) = self.lone_image.take() {
             if content.is_empty() {
                 let alt = (!alt.is_empty()).then_some(alt);
@@ -890,6 +928,15 @@ impl Reader<'_> {
                 }
             }
             Event::Code(code) => self.text(&code, true),
+            Event::InlineMath(latex) => self.inline(Inline::Math {
+                latex: latex.into_string(),
+            }),
+            Event::DisplayMath(latex) => {
+                self.display_math = true;
+                self.inline(Inline::Math {
+                    latex: latex.into_string(),
+                });
+            }
             Event::SoftBreak => self.text(" ", false),
             Event::HardBreak => self.inline(Inline::HardBreak),
             Event::Html(html) => {
@@ -943,6 +990,7 @@ impl Reader<'_> {
             Tag::Paragraph | Tag::Heading { .. } | Tag::TableCell => {
                 self.in_paragraph = matches!(tag, Tag::Paragraph);
                 self.lone_image = None;
+                self.display_math = false;
                 self.inline = Some(Inlines::default());
             }
             Tag::CodeBlock(kind) => {

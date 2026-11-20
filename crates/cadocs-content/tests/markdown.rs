@@ -160,6 +160,7 @@ fn every_node_writes_its_convention() {
         "3. three\n4. four",
         "- [x] done\n- [ ] to do",
         "```rust\nfn main() {\n    println!(\"``\");\n}\n```",
+        "where $e^{i\\pi} + 1 = 0$.",
         "> quoted",
         "---",
         "> [!WARNING]\n> careful",
@@ -251,6 +252,65 @@ fn links_keep_titles_and_odd_addresses() {
             ..Marks::default()
         },
     )])]);
+}
+
+#[test]
+fn math_is_written_between_dollars_and_read_back() {
+    let math = |latex: &str| Inline::Math {
+        latex: latex.into(),
+    };
+    round_trip(vec![
+        para("costs $5 or $6, not $x$"),
+        Block::Paragraph(vec![math(r"a\$b"), math("c"), text("5 and "), math("x^2")]),
+        Block::CodeBlock {
+            language: Some("math".into()),
+            code: r"\int_0^1 x\,dx".into(),
+        },
+        Block::CodeBlock {
+            language: Some("mermaid".into()),
+            code: "graph TD\n  A --> B".into(),
+        },
+        Block::Table(vec![
+            TableRow {
+                cells: vec![cell(true, "a")],
+            },
+            TableRow {
+                cells: vec![TableCell {
+                    blocks: vec![Block::Paragraph(vec![math("|x|")])],
+                    ..cell(false, "")
+                }],
+            },
+        ]),
+    ]);
+    // A dollar or a line break the source cannot hold, and spaces at the edges, are not kept.
+    assert_eq!(
+        md(vec![Block::Paragraph(vec![math(" a$b\nc ")])]),
+        "$a\\$b c$\n"
+    );
+    // Display math alone in a paragraph is a block, as `math` code blocks are written.
+    assert_eq!(
+        from_markdown("$$\nx^2\n$$\n\na $$y$$ b").blocks,
+        [
+            Block::CodeBlock {
+                language: Some("math".into()),
+                code: "x^2".into(),
+            },
+            Block::Paragraph(vec![text("a "), math("y"), text(" b")]),
+        ]
+    );
+    // Display math in a heading leaves the next paragraph's inline math inline.
+    assert_eq!(
+        from_markdown("# a $$x$$\n\n$y$").blocks[1],
+        Block::Paragraph(vec![math("y")])
+    );
+    assert_eq!(
+        from_markdown("# a $$x$$\n\n- $y$").blocks[1],
+        Block::BulletList(vec![ListItem {
+            blocks: vec![Block::Paragraph(vec![math("y")])]
+        }])
+    );
+    // Braces that LaTeX leaves open, as in a piecewise function.
+    round_trip(vec![Block::Paragraph(vec![math(r"\left\{ x \right.")])]);
 }
 
 #[test]

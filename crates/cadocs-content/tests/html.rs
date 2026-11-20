@@ -45,6 +45,7 @@ fn every_node_renders() {
         r#"<ul class="tasks"><li class="task" data-checked="true"><input type="checkbox" checked disabled> <div><p>done</p></div></li>"#,
         r#"<pre><code class="language-rust">fn main() {"#,
         "println!(&quot;``&quot;);",
+        r#"<p>where <code class="math">e^{i\pi} + 1 = 0</code>.</p>"#,
         "<blockquote><p>quoted</p></blockquote>",
         "<hr>",
         r#"<aside class="callout" data-kind="warning"><p>careful</p></aside>"#,
@@ -58,6 +59,24 @@ fn every_node_renders() {
     ] {
         assert!(out.contains(part), "missing {part}\nin {out}");
     }
+}
+
+#[test]
+fn math_and_mermaid_render_as_their_source() {
+    let out = html(vec![
+        Block::Paragraph(vec![Inline::Math {
+            latex: "a<b".into(),
+        }]),
+        Block::CodeBlock {
+            language: Some("mermaid".into()),
+            code: "graph TD\n  A --> B".into(),
+        },
+    ]);
+    assert_eq!(
+        out,
+        "<p><code class=\"math\">a&lt;b</code></p>\
+         <pre><code class=\"language-mermaid\">graph TD\n  A --&gt; B</code></pre>"
+    );
 }
 
 #[test]

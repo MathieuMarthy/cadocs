@@ -319,6 +319,11 @@ fn inlines(context: &Context, content: &[Inline], out: &mut String) {
                 None => out
                     .push_str(r#"<span class="page-link page-link-missing">page not found</span>"#),
             },
+            Inline::Math { latex } => {
+                out.push_str(r#"<code class="math">"#);
+                escape(latex, out);
+                out.push_str("</code>");
+            }
             Inline::Mention { id } => match context.titles.name(id) {
                 Some(name) => {
                     out.push_str(r#"<span class="mention">@"#);
