@@ -283,6 +283,25 @@
       ]
     },
     {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "where "
+        },
+        {
+          "type": "inlineMath",
+          "attrs": {
+            "latex": "e^{i\\pi} + 1 = 0"
+          }
+        },
+        {
+          "type": "text",
+          "text": "."
+        }
+      ]
+    },
+    {
       "type": "blockquote",
       "content": [
         {

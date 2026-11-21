@@ -13,6 +13,7 @@ fn every_node_gives_its_text() {
         "three\nfour",
         "done\nto do",
         "println!",
+        r"where e^{i\pi} + 1 = 0.",
         "quoted",
         "careful",
         "more\nhidden",

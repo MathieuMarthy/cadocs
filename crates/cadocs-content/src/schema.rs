@@ -74,6 +74,10 @@ pub const NODES: &[NodeSpec] = &[
         attrs: &[("id", Default::Null)],
         ..inline("mention")
     },
+    NodeSpec {
+        attrs: &[("latex", Default::Str(""))],
+        ..inline("inlineMath")
+    },
     block("heading", "inline*", "block", &[("level", Default::Int(1))]),
     block("bulletList", "listItem+", "block list", &[]),
     block(

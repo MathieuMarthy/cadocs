@@ -233,6 +233,10 @@ pub enum Inline {
     Mention {
         id: String,
     },
+    /// A formula in LaTeX, which only the browser renders: every other renderer gives its source.
+    Math {
+        latex: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

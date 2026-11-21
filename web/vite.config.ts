@@ -5,13 +5,13 @@ import { defineConfig, type Plugin } from "vite";
 
 import packageJson from "./package.json" with { type: "json" };
 
-// Fontsource lists woff beside woff2. Every browser cadocs supports takes woff2 first, so the
-// woff files would only make the binary larger.
+// Fontsource lists woff beside woff2, and KaTeX also ttf. Every browser cadocs supports takes
+// woff2 first, so the others would only make the binary larger.
 const dropWoff: Plugin = {
   name: "drop-woff",
   generateBundle(_options, bundle) {
     for (const name of Object.keys(bundle)) {
-      if (name.endsWith(".woff")) delete bundle[name];
+      if (name.endsWith(".woff") || name.endsWith(".ttf")) delete bundle[name];
     }
   },
 };

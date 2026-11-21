@@ -238,6 +238,7 @@ fn take_title(document: &mut Document) -> Option<String> {
         .map(|inline| match inline {
             Inline::Text { text, .. } => text.as_str(),
             Inline::HardBreak => " ",
+            Inline::Math { latex } => latex.as_str(),
             Inline::PageLink { .. } | Inline::Mention { .. } => "",
         })
         .collect();

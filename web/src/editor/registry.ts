@@ -4,6 +4,7 @@
 // `npm run schema` writes this one where its test compares them (ADR 0008).
 
 import { type AnyExtension, type ChainedCommands, type Editor, InputRule } from "@tiptap/core";
+import { NodeSelection } from "@tiptap/pm/state";
 import Blockquote from "@tiptap/extension-blockquote";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import Heading from "@tiptap/extension-heading";
@@ -17,6 +18,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { FileBlock, ImageBlock } from "./attachments";
 import { Callout, PluginBlock, TableOfContents, Toggle } from "./blocks";
 import { lowlight } from "./code";
+import { CodePreview, InlineMath } from "./math";
 import { Mention } from "./mention";
 import { PageLink } from "./pagelink";
 import { TableMenuOnRightClick, TableWithControls } from "./table";
@@ -173,6 +175,46 @@ export const entries: Entry[] = [
         hint: "```",
         keywords: ["snippet", "pre"],
         apply: (chain) => chain.clearNodes().setCodeBlock(),
+      },
+    ],
+  },
+  {
+    // Formulas and diagrams: code blocks in `math` and `mermaid`, drawn below their source, and
+    // the `inlineMath` node. Each library loads when the first one shows (`math.ts`).
+    name: "math",
+    extensions: [quietInSource(InlineMath), CodePreview],
+    commands: [
+      {
+        get label() {
+          return t("slash.mathBlock");
+        },
+        hint: "```math", // i18n-ignore
+        keywords: ["latex", "katex", "equation", "formula", "display"],
+        apply: (chain) => chain.clearNodes().setCodeBlock({ language: "math" }),
+      },
+      {
+        get label() {
+          return t("slash.inlineMath");
+        },
+        hint: "$",
+        keywords: ["latex", "katex", "equation", "formula"],
+        // The empty formula is selected, which opens its field.
+        apply: (chain) =>
+          chain.insertContent({ type: "inlineMath" }).command(({ tr }) => {
+            const pos = tr.selection.from - 1;
+            if (tr.doc.nodeAt(pos)?.type.name === "inlineMath") {
+              tr.setSelection(NodeSelection.create(tr.doc, pos));
+            }
+            return true;
+          }),
+      },
+      {
+        get label() {
+          return t("slash.diagram");
+        },
+        hint: "```mermaid", // i18n-ignore
+        keywords: ["mermaid", "chart", "flowchart", "graph", "sequence"],
+        apply: (chain) => chain.clearNodes().setCodeBlock({ language: "mermaid" }),
       },
     ],
   },
