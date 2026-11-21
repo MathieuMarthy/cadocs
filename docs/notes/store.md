@@ -12,6 +12,10 @@ What a change to the stores, roles or the workspace, space and page routes must 
 
 - The app (`user_totp`, `user_recovery_codes`, step 47) sits beside `users.email_2fa`. `User::totp` comes from an `EXISTS` on an enabled row in every query that feeds `user(&row)`: a new one must select it too. `check_basis` is the password and session check of `update_user` for the other writes that follow a password check (`start_totp`, `replace_recovery_codes`). Turning the app off is `UserChanges::totp_off` through `update_user`, or `turn_totp_off` for the command line.
 
+## Identities (step 48)
+
+- `user_identities` maps `(provider, subject)` to an account. `identity_user` reads it like `credentials`, through `SELECT_CREDENTIALS`; `create_identity_session` opens a session with no password for an enabled user; `register_identity` makes the account, its identity and its session in one transaction, refuses before setup (`NotAllowed`) and on an address in use (`EmailTaken`), never linking to that account.
+
 ## Documents
 
 - The room assigns `seq` from `StoredDoc::last_seq() + 1`, and must flush its queue before it compacts. `compact` refuses an older snapshot (`StaleSnapshot`). `append_updates` can be replayed after a lost commit, and answers `SeqConflict` for a `seq` the snapshot covers or that holds other data. It takes a `DocEdit` (title and author for the `pages` row), and answers `PageNotFound` without that row: a test on `SqliteStore` inserts one.

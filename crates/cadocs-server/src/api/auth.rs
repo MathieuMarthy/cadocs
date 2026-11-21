@@ -53,7 +53,7 @@ pub const TOTP_REFILL: Duration = Duration::from_secs(60);
 
 /// Far above any of these bodies. Routes before a session must not buffer the default 2 MB.
 pub(super) const MAX_BODY_BYTES: usize = 16 * 1024;
-const MAX_NAME_CHARS: usize = 100;
+pub(super) const MAX_NAME_CHARS: usize = 100;
 const MAX_EMAIL_BYTES: usize = 254;
 const MIN_PASSWORD_CHARS: usize = 8;
 const MAX_PASSWORD_CHARS: usize = 1024;

@@ -193,6 +193,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
     );
     state.workspace_creation = config.workspace_creation;
     state.registration = config.registration;
+    state.oidc = config.oidc.into();
     if let Some(smtp) = config.mail {
         let relay = format!("{}:{}", smtp.host, smtp.port);
         let mailer = Arc::new(SmtpMailer::new(smtp)?);

@@ -165,6 +165,7 @@ async fn start_custom_in(
     );
     state.workspace_creation = config.workspace_creation;
     state.registration = config.registration;
+    state.oidc = config.oidc.into();
     // As `main` does it, without the check of the relay at start.
     if let Some(smtp) = config.mail {
         state.mail = Some(Outbox::start(Arc::new(SmtpMailer::new(smtp).unwrap())));

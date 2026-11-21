@@ -43,6 +43,10 @@ cadocs-store = { path = "crates/cadocs-store" }
 data-encoding = { version = "2", default-features = false, features = ["alloc"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 getrandom = "0.4"
+# OIDC (ADR 0028): a client made of the hyper, rustls and ring the binary already holds.
+http-body-util = { version = "0.1", default-features = false }
+hyper = { version = "1", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 # HMAC-SHA-1 of TOTP codes (RFC 6238). The 0.12 line, over the `digest` 0.10 that `sha1` brings.
 hmac = { version = "0.12", default-features = false }
 # SMTP to the operator's relay (ADR 0026). No pool: a connection per message, none at idle.
@@ -55,7 +59,11 @@ jiff = { version = "1", default-features = false, features = ["std"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 # S3 transport (ADR 0020), behind the `s3` feature: rustls, the system roots, streamed bodies.
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "rustls-native-certs", "stream"] }
+# RS256 signatures of OIDC ID tokens (ADR 0028): the copy rustls already links.
+ring = { version = "0.17", default-features = false, features = ["alloc"] }
 rust-embed = "8"
+# The system roots, as `lettre` reads them (ADR 0026, 0028).
+rustls-native-certs = "0.8"
 # Snowball stemmers for search (ADR 0007). MIT and BSD-3-Clause.
 rust-stemmers = "1.2"
 # S3 request signing and listing parsing, with no I/O of its own (ADR 0020). BSD-2-Clause.
@@ -73,6 +81,7 @@ thiserror = "2"
 tokio = { version = "1", default-features = false }
 tokio-tungstenite = "0.29"
 # The rustls of `lettre`, with `ring`: the S3 store installs it as the provider of reqwest 0.13.
+# TLS of OIDC requests (ADR 0028): the version `lettre` uses, with `ring`.
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 tokio-util = { version = "0.7", default-features = false }
 tower = { version = "0.5", default-features = false, features = ["util"] }

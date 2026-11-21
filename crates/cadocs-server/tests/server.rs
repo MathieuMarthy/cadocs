@@ -24,14 +24,14 @@ use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, CodeAttempt,
     CommentChange, CommentStore, Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant,
-    Group, GroupStore, IndexTarget, Invitation, InvitationPreview, InvitedUser, Member, Membership,
-    MovedPage, NewAttachment, NewComment, NewEmailCode, NewGrant, NewGroup, NewInvitation, NewPage,
-    NewPasswordReset, NewRevision, NewSession, NewShare, NewSpace, NewUser, NewWorkspace, PageCopy,
-    PageCrumb, PageIndex, PageMove, PageRecord, PageSite, PageStore, Revision, RevisionStore,
-    RevisionSummary, SearchHit, SearchStore, SessionStanding, Share, ShareStore, SharedPage,
-    SharedView, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc,
-    StoredUpdate, SubtreePage, Thread, TotpProof, UpdateBasis, UploadTarget, UserChanges,
-    UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
+    Group, GroupStore, IdentityUser, IndexTarget, Invitation, InvitationPreview, InvitedUser,
+    Member, Membership, MovedPage, NewAttachment, NewComment, NewEmailCode, NewGrant, NewGroup,
+    NewInvitation, NewPage, NewPasswordReset, NewRevision, NewSession, NewShare, NewSpace, NewUser,
+    NewWorkspace, PageCopy, PageCrumb, PageIndex, PageMove, PageRecord, PageSite, PageStore,
+    Revision, RevisionStore, RevisionSummary, SearchHit, SearchStore, SessionStanding, Share,
+    ShareStore, SharedPage, SharedView, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore,
+    StoreError, StoredDoc, StoredUpdate, SubtreePage, Thread, TotpProof, UpdateBasis, UploadTarget,
+    UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -934,6 +934,26 @@ impl AccountStore for FlakyStore {
 
     async fn turn_totp_off(&self, user_id: &str) -> Result<(), StoreError> {
         self.inner.turn_totp_off(user_id).await
+    }
+
+    async fn identity_user(
+        &self,
+        provider: &str,
+        subject: &str,
+    ) -> Result<Option<Credentials>, StoreError> {
+        self.inner.identity_user(provider, subject).await
+    }
+
+    async fn create_identity_session(&self, session: &NewSession) -> Result<bool, StoreError> {
+        self.inner.create_identity_session(session).await
+    }
+
+    async fn register_identity(
+        &self,
+        user: &IdentityUser,
+        session: &NewSession,
+    ) -> Result<(), StoreError> {
+        self.inner.register_identity(user, session).await
     }
 }
 
