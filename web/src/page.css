@@ -1071,3 +1071,17 @@
     background: none;
   }
 }
+
+.backlinks {
+  margin-top: var(--space-6);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-4);
+}
+.backlinks h2 {
+  font-size: 0.875rem;
+  margin: 0 0 var(--space-2);
+}
+.backlinks ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}

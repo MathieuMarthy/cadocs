@@ -6,6 +6,7 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
 
+  import Backlinks from "../components/Backlinks.svelte";
   import Comments from "../components/Comments.svelte";
   import DuplicatePage from "../components/DuplicatePage.svelte";
   import Icon from "../components/Icon.svelte";
@@ -348,6 +349,7 @@
           spellcheck="false"
         ></textarea>
         <div bind:this={editor}></div>
+        <Backlinks page={id} />
       </main>
       {#if panelOpen && app.session}
         <Comments

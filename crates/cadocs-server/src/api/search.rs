@@ -27,12 +27,38 @@ where
 {
     Router::new()
         .route("/workspaces/{ws}/search", get(search))
+        .route("/pages/{page}/backlinks", get(backlinks))
         .route_layer(from_fn_with_state(state.clone(), session::require::<S, A>))
 }
 
 #[derive(Serialize)]
-struct Results {
-    items: Vec<Hit>,
+struct Backlink {
+    id: String,
+    space_id: String,
+    title: String,
+}
+
+/// The pages the caller can read that link to the page, by title: what the last index found.
+async fn backlinks<S: SearchStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    PathParam(page): PathParam<String>,
+) -> Result<Json<Results<Backlink>>, ApiError> {
+    let pages = state.store.backlinks(&page, &current.user.id).await?;
+    let items = pages
+        .into_iter()
+        .map(|page| Backlink {
+            id: page.id,
+            space_id: page.space_id,
+            title: page.title,
+        })
+        .collect();
+    Ok(Json(Results { items }))
+}
+
+#[derive(Serialize)]
+struct Results<T = Hit> {
+    items: Vec<T>,
 }
 
 #[derive(Serialize)]

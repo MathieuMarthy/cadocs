@@ -5,8 +5,10 @@ use super::pages::{self, SELECT_PAGE};
 use super::spaces::{HAS_ROLE, space_access};
 use super::workspaces::authorize as authorize_workspace;
 use super::{BEGIN_WRITE, SqliteStore};
-use crate::{IndexTarget, PageIndex, REINDEX_PAGE, SearchHit, SearchStore, StoreError, now_ms};
-use cadocs_core::permissions::WorkspaceAction;
+use crate::{
+    IndexTarget, PageIndex, PageRecord, REINDEX_PAGE, SearchHit, SearchStore, StoreError, now_ms,
+};
+use cadocs_core::permissions::{SpaceAction, WorkspaceAction};
 
 /// Queues a reindex, due at `run_at`, of each page `p` that `filter` keeps, with `?1` bound to
 /// `value`. A page with one waiting keeps it. Answers whether any job was added.
@@ -111,8 +113,42 @@ impl SearchStore for SqliteStore {
         };
         let author = last_editor.as_deref();
         mentions::replace(&mut tx, &body, index.mentions, author, now_ms()).await?;
+        let links = serde_json::to_string(index.links).expect("strings make JSON");
+        sqlx::query("DELETE FROM page_links WHERE source_id = ?1")
+            .bind(index.page_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO page_links (source_id, target_id)
+             SELECT ?1, id FROM pages
+             WHERE workspace_id = ?2 AND id <> ?1 AND id IN (SELECT value FROM json_each(?3))",
+        )
+        .bind(index.page_id)
+        .bind(&workspace)
+        .bind(links)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(true)
+    }
+
+    async fn backlinks(&self, page_id: &str, actor: &str) -> Result<Vec<PageRecord>, StoreError> {
+        let mut reader = self.reader.acquire().await?;
+        pages::authorize(&mut reader, page_id, actor, SpaceAction::ReadPage).await?;
+        let rows = sqlx::query(AssertSqlSafe(format!(
+            "{SELECT_PAGE} JOIN page_links l ON l.source_id = p.id
+             WHERE l.target_id = ?2 AND p.deleted_at IS NULL AND s.deleted_at IS NULL
+             ORDER BY p.title, p.id"
+        )))
+        .bind(actor)
+        .bind(page_id)
+        .fetch_all(&mut *reader)
+        .await?;
+        Ok(rows
+            .iter()
+            .filter(|row| pages::scope(row).allows(SpaceAction::ReadPage))
+            .filter_map(pages::page)
+            .collect())
     }
 
     async fn search(

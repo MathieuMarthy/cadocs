@@ -443,9 +443,22 @@ Migrations are kept in one folder per engine, so each can use its own syntax. Th
 
 ## Planned tables
 
+## Backlinks
+
+```sql
+CREATE TABLE page_links (
+    source_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    PRIMARY KEY (source_id, target_id)
+) WITHOUT ROWID;
+CREATE INDEX page_links_target ON page_links(target_id);
+```
+
+One row per page linked by another page's body, as the last index found it: the indexing job replaces the rows of the page it indexes with its `pageLink` nodes, keeping targets of the same workspace and never the page itself. Nothing says whether the reader can read the source: the route filters ([API.md](API.md#search)).
+
 Specified when their stage starts, following the same conventions.
 
 | Stage | Tables |
 | --- | --- |
-| V1 | `page_links` (backlinks), `notifications`, `templates` |
+| V1 | `notifications`, `templates` (`page_links` is below) |
 | V2 | `page_labels`, `audit_log`, `api_tokens`, `webhooks`, `workspace_plugins` (content plugins offered, and enabled per member), `user_plugins` (user plugins, per user for the whole instance) (ADR 0016) |

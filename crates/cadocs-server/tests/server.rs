@@ -280,6 +280,10 @@ impl SearchStore for FlakyStore {
         self.inner.index_page(index).await
     }
 
+    async fn backlinks(&self, page_id: &str, actor: &str) -> Result<Vec<PageRecord>, StoreError> {
+        self.inner.backlinks(page_id, actor).await
+    }
+
     async fn search(
         &self,
         workspace_id: &str,

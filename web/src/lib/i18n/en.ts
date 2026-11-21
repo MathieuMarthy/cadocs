@@ -233,6 +233,7 @@ export const en = {
   "page.trash": "move to trash",
   "page.trashed": "moved to trash",
   "page.titleField": "page title",
+  "page.backlinks": "linked from",
   "page.export": "export as markdown",
   "page.exportAll": "export with attachments",
   "page.print": "print",
