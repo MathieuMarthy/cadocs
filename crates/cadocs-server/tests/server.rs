@@ -610,6 +610,19 @@ impl CommentStore for FlakyStore {
             .resolve_comment(comment_id, actor, resolved, now)
             .await
     }
+
+    async fn notifications(&self, user: &str) -> Result<cadocs_store::Inbox, StoreError> {
+        self.inner.notifications(user).await
+    }
+
+    async fn read_notifications(
+        &self,
+        user: &str,
+        ids: Option<&[String]>,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        self.inner.read_notifications(user, ids, now).await
+    }
 }
 
 impl WorkspaceStore for FlakyStore {

@@ -67,7 +67,48 @@ pub struct NewComment {
 pub struct CommentChange {
     pub comment: Comment,
     pub site: PageSite,
+    /// The notifications the change made, for the event each user gets.
+    pub notified: Vec<Notified>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notified {
+    pub id: String,
+    pub user_id: String,
+}
+
+/// Why a user is told: they are mentioned, someone replied to their comment, or someone
+/// commented on their page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationKind {
+    Mention,
+    Reply,
+    Comment,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notification {
+    pub id: String,
+    pub kind: NotificationKind,
+    pub page_id: String,
+    pub space_id: String,
+    pub page_title: String,
+    /// `None` for a mention in the page's body.
+    pub comment_id: Option<String>,
+    pub actor: Option<CommentUser>,
+    pub read: bool,
+    pub created_at: i64,
+}
+
+/// The newest notifications of a user, and how many of them are unread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Inbox {
+    pub items: Vec<Notification>,
+    pub unread: usize,
+}
+
+/// How many notifications an inbox holds, the newest ones.
+pub const INBOX_SIZE: u32 = 100;
 
 pub trait CommentStore: Send + Sync + 'static {
     /// At most `limit` threads of the page, oldest first, after the one with the id `after`, each
@@ -117,4 +158,17 @@ pub trait CommentStore: Send + Sync + 'static {
         resolved: bool,
         now: i64,
     ) -> impl Future<Output = Result<CommentChange, StoreError>> + Send;
+
+    /// The newest `INBOX_SIZE` notifications of `user`, newest first, among those whose page the
+    /// user can still read. `unread` counts those.
+    fn notifications(&self, user: &str) -> impl Future<Output = Result<Inbox, StoreError>> + Send;
+
+    /// Marks the notifications `ids` of `user` as read, or all of theirs for `None`. Ids of
+    /// other users are ignored.
+    fn read_notifications(
+        &self,
+        user: &str,
+        ids: Option<&[String]>,
+        now: i64,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }

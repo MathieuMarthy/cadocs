@@ -117,6 +117,8 @@ export class Nav {
   version = $state(0);
   /** Bumped by every `comment` event of a page, for the comments panel. */
   readonly comments = new SvelteMap<string, number>();
+  /** Bumped by every `notification` event, and by what makes the inbox worth reading again. */
+  notifications = $state(0);
   /** Bumped when events may have been lost: whatever shows reads again. */
   reloads = $state(0);
 
@@ -208,6 +210,9 @@ export class Nav {
       case "comment":
         if (event.page) this.comments.set(event.page, (this.comments.get(event.page) ?? 0) + 1);
         break;
+      case "notification":
+        this.notifications += 1;
+        break;
       case "page.created":
       case "page.moved":
       case "page.renamed":
@@ -224,11 +229,13 @@ export class Nav {
         void this.loadSpaces();
         break;
       case "access.changed":
+        this.notifications += 1;
         void this.loadSpaces();
         // The workspace role, which the session carries, may be what changed.
         void refreshSession().catch(() => {});
         break;
       case "resync":
+        this.notifications += 1;
         void this.reloadAll();
         break;
     }

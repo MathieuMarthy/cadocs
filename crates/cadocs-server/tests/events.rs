@@ -282,6 +282,37 @@ async fn each_change_to_a_comment_has_its_event() {
 }
 
 #[tokio::test]
+async fn a_notification_is_sent_to_its_user_alone() {
+    let wiki = wiki().await;
+    let bob = wiki.bob().await;
+    let page = wiki.new_page_in(&wiki.space, &wiki.ada).await;
+    let mut ada_socket = wiki.socket(&wiki.ada).await;
+    let mut bob_socket = wiki.socket(&bob).await;
+    let comment = page_event("comment", &wiki.space, &page);
+    let path = format!("/pages/{page}/comments");
+
+    // Bob is mentioned, and Ada wrote it: only Bob hears of a notification.
+    let body = json!({ "body": format!("Hi <user:{BOB}>") });
+    let reply = wiki.call("POST", &path, body).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let thread = id(&reply);
+    assert_eq!(event(&mut ada_socket).await, comment);
+    assert_eq!(event(&mut bob_socket).await, comment);
+    let told = event(&mut bob_socket).await;
+    let inbox = wiki.api.get(&bob, "/me/notifications").await;
+    let notification = inbox.body["items"][0]["id"].clone();
+    assert_eq!(told, json!({ "type": "notification", "id": notification }));
+
+    // Bob answers: Ada owns the page, so she hears of it, and Bob does not.
+    let body = json!({ "body": "Hello", "parent_id": thread });
+    let reply = wiki.api.send("POST", &path, &bob.headers(), body).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    assert_eq!(event(&mut ada_socket).await, comment);
+    assert_eq!(event(&mut ada_socket).await["type"], "notification");
+    assert_eq!(event(&mut bob_socket).await, comment);
+}
+
+#[tokio::test]
 async fn a_move_across_spaces_is_sent_to_both() {
     let wiki = wiki().await;
     let bob = wiki.bob().await;

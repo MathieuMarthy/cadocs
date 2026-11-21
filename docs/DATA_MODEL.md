@@ -321,6 +321,24 @@ A comment's anchor is a pair of Yjs relative positions stored here, so it follow
 
 A mention row is one user named in one place: the page body (`comment_id` is `NULL`) or one comment. The indexing job diffs the body's `mention` nodes, and a comment's create and edit diff its `<user:ID>` tokens ([API.md](API.md#comments)). A user no longer named loses their row, a user named anew gets one, and a user still named keeps theirs, `read_at` included. Only members of the page's workspace are recorded. A new body mention is put down to the page's `updated_by`, since the job does not know who wrote it; a comment's to whoever wrote the comment or the edit. A row says nothing of whether its user can read the page: what shows mentions to their user (step 41) checks that when it reads them.
 
+## Notifications
+
+```sql
+CREATE TABLE notifications (
+    id          TEXT PRIMARY KEY,           -- random, as `mentions`: order by rowid
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,              -- mention, reply, comment
+    page_id     TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+    comment_id  TEXT REFERENCES comments(id) ON DELETE CASCADE,  -- NULL: a mention in the body
+    actor_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+    read_at     BIGINT,
+    created_at  BIGINT NOT NULL
+);
+CREATE INDEX notifications_user ON notifications(user_id, read_at);
+```
+
+One row per user told, written in the transaction of what told them: `mentions::replace` for a new mention (a comment's, or the body's by the indexing job), and `create_comment` for a reply to the author of the thread and a comment on the page's creator. Where one comment would tell a user twice, the first of mention, reply, comment stays. Like `mentions`, a row says nothing of whether its user can read the page: the route filters. `mentions.read_at` is not used: read state lives here.
+
 ## Attachments
 
 ```sql
@@ -460,5 +478,5 @@ Specified when their stage starts, following the same conventions.
 
 | Stage | Tables |
 | --- | --- |
-| V1 | `notifications`, `templates` (`page_links` is below) |
+| V1 | `templates` (`notifications` and `page_links` are below) |
 | V2 | `page_labels`, `audit_log`, `api_tokens`, `webhooks`, `workspace_plugins` (content plugins offered, and enabled per member), `user_plugins` (user plugins, per user for the whole instance) (ADR 0016) |

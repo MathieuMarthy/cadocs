@@ -201,8 +201,8 @@ The role in `GET /pages/{page}` tells the front end whether to make the editor r
 | POST | `/pages/{page}/comments` | commenter | Create a comment or a reply, with an optional anchor (ADR 0012) |
 | PATCH, DELETE | `/comments/{id}` | author, or space admin | Edit or delete |
 | POST | `/comments/{id}/resolve` | commenter | Resolve or reopen |
-| GET | `/me/mentions` | user | Unread mentions |
-| POST | `/me/mentions/{id}/read` | user | Mark a mention as read |
+| GET | `/me/notifications` | user | Notifications: mentions, replies and comments on one's pages |
+| POST | `/me/notifications/read` | user | Mark some or all as read |
 
 Bodies and answers:
 - A comment is `{ id, page_id, parent_id, author, body, anchor, resolved_at, resolved_by, created_at, updated_at }`. `author` and `resolved_by` are `{ id, name }`, or `null` once the account is deleted. `parent_id` is `null` for a thread. `anchor` is `{ start, end, text }` or `null` for a reply and a comment on the whole page: `start` and `end` are base64 of encoded Yjs `RelativePosition` values, stored as sent (ADR 0012), and `text` is the quoted text.
@@ -211,7 +211,12 @@ Bodies and answers:
 - `PATCH /comments/{id}` takes `{ body }` and answers the comment with a new `updated_at`. `DELETE` answers `204`, and deleting a thread deletes its replies. Each needs `commenter` for one's own comment, a space `admin` for another's.
 - `POST /comments/{id}/resolve` takes `{ resolved }` and answers the comment. Resolving a resolved thread keeps who resolved it first, and neither leaves `updated_at` changed. A reply cannot be resolved: `409`.
 - Every change sends the `comment` event to the readers of the space.
-- A body is plain text, stored and answered as sent, which a client shows as text, never as HTML or Markdown. In it, `<user:ID>` mentions a user and `<page:ID>` a page, where `ID` is 1 to 64 ASCII letters, digits, `-` or `_`; anything else, a malformed token included, is text. A client shows a user mention as `@` and the member's name, and a page mention as a link with the page's title, each as the reader may see it (`GET /workspaces/{ws}/members`, `GET /pages/{page}`), and someone else as `@someone` or `page not found`. Creating or editing a comment records a mention of each member of the page's workspace its body names, and drops those it no longer names. `GET /me/mentions` and its `read` are not served yet: in-app notifications (step 41) decide how mentions reach their user.
+- A body is plain text, stored and answered as sent, which a client shows as text, never as HTML or Markdown. In it, `<user:ID>` mentions a user and `<page:ID>` a page, where `ID` is 1 to 64 ASCII letters, digits, `-` or `_`; anything else, a malformed token included, is text. A client shows a user mention as `@` and the member's name, and a page mention as a link with the page's title, each as the reader may see it (`GET /workspaces/{ws}/members`, `GET /pages/{page}`), and someone else as `@someone` or `page not found`. Creating or editing a comment records a mention of each member of the page's workspace its body names, and drops those it no longer names. Each user newly named, the author apart, gets a notification (below).
+
+Notifications (step 41):
+- `GET /me/notifications` answers `{ items, unread }`: the newest 100 notifications of the caller, newest first, among those whose page the caller can still read and that is not in the trash. `unread` counts those items, not older ones. An item is `{ id, kind, page: { id, space_id, title }, comment_id, actor, read, created_at }`. `kind` is `mention` (the caller is named in a comment, or in a page body as the last index found it, `comment_id` then `null`), `reply` (someone answered the caller's thread) or `comment` (someone commented on the caller's page: the one they created). A user gets one notification per comment, the first of those in that order, and never one for their own action. `actor` is `{ id, name }`, `null` once the account is deleted.
+- `POST /me/notifications/read` takes `{ ids? }` and answers `204`: it marks those of the caller that are unread as read, or all of theirs without `ids`. An id of someone else is ignored. There is no way to mark one unread again.
+- A notification goes when its comment or page does, and a mention notification when an edit stops naming its user. A comment's `notification` event follows its `comment` event; a body mention reaches the user at the next `GET`, since the indexing job publishes no event.
 
 ### Attachments
 
@@ -370,5 +375,5 @@ Events are hints. The client refetches through REST, and refetches the tree afte
 | `space.created`, `space.updated`, `space.trashed`, `space.restored`, `space.purged` | `space` | The space list changed. A reader of a new space may also get `access.changed` |
 | `access.changed` | none | The user's permissions changed, reload the space list |
 | `comment` | `space`, `page` | A comment of the page was written, edited, resolved, reopened or deleted |
-| `notification` | `id` | A new notification (V1) |
+| `notification` | `id` | A new notification, sent to its user alone (a socket of the workspace of the page it is about) |
 | `resync` | none | Events were dropped because the client lagged, reload everything shown |
