@@ -438,3 +438,49 @@ async fn the_reindex_records_the_members_the_body_mentions() {
     assert_eq!(wiki.api.number(&recorded).await, 1);
     assert_eq!(wiki.api.number("SELECT count(*) FROM mentions").await, 1);
 }
+
+fn link_to(page: &str) -> Block {
+    Block::Paragraph(vec![cadocs_content::ast::Inline::PageLink {
+        id: page.to_owned(),
+    }])
+}
+
+#[tokio::test]
+async fn backlinks_list_the_readable_pages_that_link_to_a_page() {
+    let wiki = wiki().await;
+    let open = wiki.space("Handbook", json!("viewer")).await;
+    let private = wiki.space("Private", Value::Null).await;
+    let target = wiki.page(&open).await;
+    let seen = wiki.page(&open).await;
+    let hidden = wiki.page(&private).await;
+    wiki.write(&seen, "Seen", vec![link_to(&target)]).await;
+    wiki.write(&hidden, "Hidden", vec![link_to(&target)]).await;
+
+    let path = format!("/pages/{target}/backlinks");
+    let deadline = Instant::now() + PATIENCE;
+    let ids = loop {
+        let reply = wiki.api.get(&wiki.ada, &path).await;
+        assert_eq!(reply.status, 200, "{reply:?}");
+        let items = reply.body["items"].as_array().unwrap().clone();
+        if items.len() == 2 || Instant::now() > deadline {
+            break items;
+        }
+        sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(ids.len(), 2);
+    assert_eq!(ids[0]["title"], "Hidden");
+    assert_eq!(ids[1]["space_id"], open);
+    // Bob reads the open space only.
+    let reply = wiki.api.get(&wiki.bob, &path).await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert_eq!(
+        reply.body["items"],
+        json!([{ "id": seen, "space_id": open, "title": "Seen" }])
+    );
+    // Nobody reads the links of a page they cannot read.
+    let reply = wiki
+        .api
+        .get(&wiki.bob, &format!("/pages/{hidden}/backlinks"))
+        .await;
+    assert_eq!(reply.status, 404, "{reply:?}");
+}

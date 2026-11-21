@@ -47,6 +47,7 @@ impl<S: DocStore + SearchStore> Index<S> {
         let body = analyzer.index_text(&plain_text);
         let attachments = document.attachments();
         let mentions = document.mentions();
+        let links = document.page_links();
         self.store
             .index_page(&PageIndex {
                 page_id,
@@ -55,6 +56,7 @@ impl<S: DocStore + SearchStore> Index<S> {
                 plain_text: &plain_text,
                 attachments: &attachments,
                 mentions: &mentions,
+                links: &links,
             })
             .await?;
         Ok(())

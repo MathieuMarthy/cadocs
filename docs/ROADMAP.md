@@ -55,7 +55,7 @@ Steps. The rules of the MVP steps apply, and every new screen takes its strings 
 - [x] Step 37: comments, server. Migration, REST routes, resolve and reopen, one level of replies, anchors stored as given (ADR 0012), a `comment` event on the events socket, permission tests.
 - [x] Step 38: comments, screens. The side panel, anchors from the selection, highlights as decorations, lost anchors shown with their quote, resolve and reopen.
 - [x] Step 39: mentions. A user mention node in the editor and in `cadocs-content`, mentions of users and pages in comments, body mentions diffed by the reindex job into `mentions`.
-- [ ] Step 40: backlinks. `page_links` filled by the reindex job, a route and a panel listing the pages that link here.
+- [x] Step 40: backlinks. `page_links` filled by the reindex job, a route and a panel listing the pages that link here.
 - [ ] Step 41: in-app notifications. `notifications` for mentions, replies and comments on one's pages, the `notification` event, a list with unread count and read state.
 - [ ] Step 42: mail notifications. Through the relay only, a setting per user, grouped by a job so one burst sends one message. Done when, with no relay, nothing of it answers.
 - [x] Step 43: math and Mermaid. Block and inline math, Mermaid blocks, loaded on demand in the editor. `cadocs-content` writes their source to Markdown and as a code block in HTML.

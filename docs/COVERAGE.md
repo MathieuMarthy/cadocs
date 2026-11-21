@@ -42,6 +42,7 @@ Plugins have no route before V2: their rows are tested in the rules only, and th
 | Print stylesheet | `e2e/transfer` `printing shows the page alone` |
 | Attachments on disk or S3, limits | `server/attachments.rs`, `files/local.rs`, `files/s3.rs` (fake S3, and MinIO in CI), `e2e/attachments` |
 | Full-text search, stemming | `server/search.rs`, `search/analyzer.rs`, `store/search.rs`, `e2e/search` |
+| Backlinks | `store/search.rs`, `server/search.rs`, `e2e/blocks` |
 | Revisions: list, view, restore, retention | `server/revisions.rs`, `store/revisions.rs` (thinning), `e2e/revisions` |
 | Brut interface, themes, phone | `e2e/screens` (each screen in both themes), `e2e/shell` (theme, phone width), `e2e/navigation` (drawer) |
 | Source code link | `e2e/shell` `every screen links to the source code` |

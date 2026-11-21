@@ -91,6 +91,7 @@ fn index<'a>(page: &'a str, body: &'a str, attachments: &'a [String]) -> PageInd
         plain_text: body,
         attachments,
         mentions: &[],
+        links: &[],
     }
 }
 
@@ -445,4 +446,33 @@ async fn enqueue_wakes_through_jobs_added() {
     timeout(Duration::from_secs(1), added.notified())
         .await
         .expect("enqueue must wake the worker");
+}
+
+#[tokio::test]
+async fn backlinks_list_the_live_pages_that_link_here_as_the_last_index_says() {
+    let (store, dir) = open().await;
+    let ids = |ids: &[&str]| -> Vec<String> { ids.iter().map(|id| id.to_string()).collect() };
+    let names = |pages: Vec<cadocs_store::PageRecord>| -> Vec<String> {
+        pages.into_iter().map(|page| page.id).collect()
+    };
+    // `doc` links to `next`, to itself, to `away` (another workspace) and to `gone`.
+    let first = ids(&["next", "doc", "away", "gone"]);
+    let links = PageIndex {
+        links: &first,
+        ..index("doc", "text", &[])
+    };
+    store.index_page(&links).await.unwrap();
+    assert_eq!(
+        names(store.backlinks("next", "ada").await.unwrap()),
+        ["doc"]
+    );
+    // Neither itself nor another workspace's page is a backlink.
+    assert!(store.backlinks("doc", "ada").await.unwrap().is_empty());
+    // A new index replaces the links.
+    store.index_page(&index("doc", "text", &[])).await.unwrap();
+    assert!(store.backlinks("next", "ada").await.unwrap().is_empty());
+    // A page in the bin is not listed.
+    store.index_page(&links).await.unwrap();
+    sql(&dir, "UPDATE pages SET deleted_at = 2 WHERE id = 'doc';").await;
+    assert!(store.backlinks("next", "ada").await.unwrap().is_empty());
 }

@@ -31,6 +31,9 @@ pub struct PageIndex<'a> {
     /// The users the content mentions. Those of the page's workspace become its body mentions,
     /// by whoever wrote last.
     pub mentions: &'a [String],
+    /// The pages the content links to. Those of the page's workspace, itself apart, become its
+    /// links, the backlinks of their targets.
+    pub links: &'a [String],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +57,14 @@ pub trait SearchStore: Send + Sync + 'static {
         &self,
         index: &PageIndex<'_>,
     ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
+    /// The live pages that link to `page_id`, as their last index says, among those the user can
+    /// read, by title. `PageNotFound` or `NotAllowed` unless the user can read `page_id`.
+    fn backlinks(
+        &self,
+        page_id: &str,
+        actor: &str,
+    ) -> impl Future<Output = Result<Vec<PageRecord>, StoreError>> + Send;
 
     /// At most `limit` live pages matching `fts`, an FTS5 expression, best first, among those the
     /// user can read, in `space` only if given. Refused with `WorkspaceNotFound` for a stranger.

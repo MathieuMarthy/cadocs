@@ -139,6 +139,26 @@ test("a link to a page is picked by its title, shows its title, and opens it", a
   await expect(right.getByLabel("page title")).toHaveValue("Deploy notes");
 });
 
+test("a page lists the pages that link to it, once they are indexed", async ({ left, server }) => {
+  const target = await server.page("target");
+  await server.call("PATCH", `/pages/${target}`, { title: "Deploy notes" });
+  await server.titleStored(target, "Deploy notes");
+  await expect(status(left)).toContainText("synced");
+  await editor(left).click();
+  await left.keyboard.type("[[depl");
+  await expect(pages(left).getByRole("option")).toHaveText(["Deploy notes"]);
+  await left.keyboard.press("Enter");
+  await expect(editor(left).locator("a.page-link")).toHaveText("Deploy notes");
+
+  await left.goto(`${server.url}/?page=${target}`);
+  const backlinks = left.getByRole("navigation", { name: "linked from" });
+  // The index follows an edit after a short delay, so the page is read again until it does.
+  await expect(async () => {
+    await left.reload();
+    await expect(backlinks.getByRole("link")).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 20_000 });
+});
+
 test("the arrows still move the caret while the page picker finds nothing", async ({ left }) => {
   await expect(status(left)).toContainText("synced");
   await editor(left).click();
