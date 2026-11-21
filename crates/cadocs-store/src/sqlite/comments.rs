@@ -6,8 +6,8 @@ use super::mentions::{self, Place};
 use super::pages;
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
-    Anchor, Comment, CommentChange, CommentStore, CommentUser, NewComment, PageSite, StoreError,
-    Thread,
+    Anchor, Comment, CommentChange, CommentStore, CommentUser, INBOX_SIZE, Inbox, NewComment,
+    Notification, NotificationKind, Notified, PageSite, StoreError, Thread,
 };
 
 /// A comment with the names of its author and of who resolved it, while their accounts exist.
@@ -46,6 +46,28 @@ fn comment(row: &SqliteRow) -> Comment {
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }
+}
+
+/// The notifications a comment made at `now`.
+async fn notified(
+    conn: &mut SqliteConnection,
+    comment_id: &str,
+    now: i64,
+) -> Result<Vec<Notified>, StoreError> {
+    let rows = sqlx::query(
+        "SELECT id, user_id FROM notifications WHERE comment_id = ?1 AND created_at = ?2",
+    )
+    .bind(comment_id)
+    .bind(now)
+    .fetch_all(conn)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|row| Notified {
+            id: row.get("id"),
+            user_id: row.get("user_id"),
+        })
+        .collect())
 }
 
 async fn select_comment(
@@ -192,9 +214,36 @@ impl CommentStore for SqliteStore {
             workspace_id: &site.workspace_id,
         };
         mentions::replace(&mut tx, &place, &new.mentions, Some(&new.actor), new.now).await?;
+        // A user mentioned is told of that alone, then the author of the thread, then the page's.
+        for (kind, owner) in [
+            ("reply", "SELECT author_id FROM comments WHERE id = ?3"),
+            ("comment", "SELECT created_by FROM pages WHERE id = ?2"),
+        ] {
+            sqlx::query(AssertSqlSafe(format!(
+                "INSERT INTO notifications (id, user_id, kind, page_id, comment_id, actor_id, created_at)
+                 SELECT lower(hex(randomblob(16))), u.id, ?6, ?2, ?1, ?4, ?5
+                 FROM users u
+                 WHERE u.id = ({owner}) AND u.id <> ?4
+                   AND NOT EXISTS (SELECT 1 FROM notifications n
+                                   WHERE n.comment_id = ?1 AND n.user_id = u.id)"
+            )))
+            .bind(&new.id)
+            .bind(&new.page_id)
+            .bind(&new.parent_id)
+            .bind(&new.actor)
+            .bind(new.now)
+            .bind(kind)
+            .execute(&mut *tx)
+            .await?;
+        }
+        let notified = notified(&mut tx, &new.id, new.now).await?;
         let comment = select_comment(&mut tx, &new.id).await?;
         tx.commit().await?;
-        Ok(CommentChange { comment, site })
+        Ok(CommentChange {
+            comment,
+            site,
+            notified,
+        })
     }
 
     async fn edit_comment(
@@ -219,11 +268,13 @@ impl CommentStore for SqliteStore {
             workspace_id: &target.site.workspace_id,
         };
         mentions::replace(&mut tx, &place, users, Some(actor), now).await?;
+        let notified = notified(&mut tx, comment_id, now).await?;
         let comment = select_comment(&mut tx, comment_id).await?;
         tx.commit().await?;
         Ok(CommentChange {
             comment,
             site: target.site,
+            notified,
         })
     }
 
@@ -244,6 +295,7 @@ impl CommentStore for SqliteStore {
         Ok(CommentChange {
             comment,
             site: target.site,
+            notified: Vec::new(),
         })
     }
 
@@ -277,6 +329,78 @@ impl CommentStore for SqliteStore {
         Ok(CommentChange {
             comment,
             site: target.site,
+            notified: Vec::new(),
         })
+    }
+
+    async fn notifications(&self, user: &str) -> Result<Inbox, StoreError> {
+        let mut reader = self.reader.acquire().await?;
+        let columns = pages::SELECT_PAGE
+            .strip_prefix("SELECT ")
+            .expect("SELECT_PAGE is a SELECT");
+        // The window is cut before the access filter: a page lost since hides its rows, and
+        // takes no place from the others only once they are older than the window.
+        let rows = sqlx::query(AssertSqlSafe(format!(
+            "WITH latest AS (
+                 SELECT rowid, id, kind, page_id, comment_id, actor_id, read_at, created_at
+                 FROM notifications WHERE user_id = ?2 ORDER BY rowid DESC LIMIT ?3
+             )
+             SELECT n.id AS notification_id, n.kind, n.comment_id, n.read_at, n.created_at AS sent_at,
+                    a.id AS actor_id, a.name AS actor_name, {columns}
+             JOIN latest n ON n.page_id = p.id
+             LEFT JOIN users a ON a.id = n.actor_id
+             WHERE p.deleted_at IS NULL AND s.deleted_at IS NULL
+             ORDER BY n.rowid DESC"
+        )))
+        .bind(user)
+        .bind(user)
+        .bind(INBOX_SIZE)
+        .fetch_all(&mut *reader)
+        .await?;
+        let items: Vec<Notification> = rows
+            .iter()
+            .filter(|row| pages::scope(row).allows(SpaceAction::ReadPage))
+            .filter_map(|row| {
+                let page = pages::page(row)?;
+                let kind = match row.get::<String, _>("kind").as_str() {
+                    "mention" => NotificationKind::Mention,
+                    "reply" => NotificationKind::Reply,
+                    _ => NotificationKind::Comment,
+                };
+                Some(Notification {
+                    id: row.get("notification_id"),
+                    kind,
+                    page_id: page.id,
+                    space_id: page.space_id,
+                    page_title: page.title,
+                    comment_id: row.get("comment_id"),
+                    actor: self::user(row, "actor_id", "actor_name"),
+                    read: row.get::<Option<i64>, _>("read_at").is_some(),
+                    created_at: row.get("sent_at"),
+                })
+            })
+            .collect();
+        let unread = items.iter().filter(|item| !item.read).count();
+        Ok(Inbox { items, unread })
+    }
+
+    async fn read_notifications(
+        &self,
+        user: &str,
+        ids: Option<&[String]>,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let ids = ids.map(|ids| serde_json::to_string(ids).expect("strings make JSON"));
+        sqlx::query(
+            "UPDATE notifications SET read_at = ?3
+             WHERE user_id = ?1 AND read_at IS NULL
+               AND (?2 IS NULL OR id IN (SELECT value FROM json_each(?2)))",
+        )
+        .bind(user)
+        .bind(ids)
+        .bind(now)
+        .execute(&self.writer)
+        .await?;
+        Ok(())
     }
 }

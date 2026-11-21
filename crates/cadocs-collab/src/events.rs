@@ -65,6 +65,8 @@ impl SpaceEvent {
 pub struct Event {
     space: String,
     frame: String,
+    /// The one user the event is for, `None` for every reader of the space.
+    user: Option<String>,
 }
 
 impl Event {
@@ -73,6 +75,7 @@ impl Event {
         Self {
             space: space.to_owned(),
             frame: frame.to_string(),
+            user: None,
         }
     }
 
@@ -82,6 +85,17 @@ impl Event {
         Self {
             space: space.to_owned(),
             frame: frame.to_string(),
+            user: None,
+        }
+    }
+
+    /// A new notification for `user`, who reads `space`, the one of the page it is about.
+    pub fn notification(space: &str, user: &str, id: &str) -> Self {
+        let frame = json!({ "type": "notification", "id": id });
+        Self {
+            space: space.to_owned(),
+            frame: frame.to_string(),
+            user: Some(user.to_owned()),
         }
     }
 
@@ -90,6 +104,7 @@ impl Event {
         Self {
             space: space.to_owned(),
             frame: frame.to_string(),
+            user: None,
         }
     }
 }
@@ -235,6 +250,7 @@ impl EventHubs {
             hubs: self.clone(),
             workspace: workspace.to_owned(),
             id,
+            user: user.to_owned(),
             events: hub.events.subscribe(),
             standing: watching,
             told: 0,
@@ -315,6 +331,7 @@ pub struct EventConnection {
     hubs: Arc<EventHubs>,
     workspace: String,
     id: u64,
+    user: String,
     events: broadcast::Receiver<Arc<Event>>,
     standing: watch::Receiver<Standing>,
     /// The value of `Standing::changes` the client knows of.
@@ -356,7 +373,8 @@ impl EventConnection {
                 }
                 event = self.events.recv() => match event {
                     Ok(event) => {
-                        if self.reads(&event.space) {
+                        let for_me = event.user.as_ref().is_none_or(|user| *user == self.user);
+                        if for_me && self.reads(&event.space) {
                             return EventOutbound::Text(event.frame.clone());
                         }
                     }

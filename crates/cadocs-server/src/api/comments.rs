@@ -14,8 +14,8 @@ use base64::engine::general_purpose::STANDARD;
 use cadocs_collab::{Authorizer, Event};
 use cadocs_content::comment::mentioned_users;
 use cadocs_store::{
-    AccountStore, Anchor, Comment, CommentChange, CommentStore, CommentUser, DocStore, NewComment,
-    Thread, now_ms,
+    AccountStore, Anchor, Comment, CommentChange, CommentStore, CommentUser, DocStore, Inbox,
+    NewComment, NotificationKind, Thread, now_ms,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -43,6 +43,8 @@ where
         .route("/pages/{page}/comments", get(list).post(create))
         .route("/comments/{comment}", patch(edit).delete(delete_comment))
         .route("/comments/{comment}/resolve", post(resolve))
+        .route("/me/notifications", get(notifications))
+        .route("/me/notifications/read", post(read_notifications))
         .route_layer(from_fn_with_state(state.clone(), session::require::<S, A>))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES))
 }
@@ -182,6 +184,10 @@ fn clean_anchor(anchor: &AnchorBody) -> Result<Option<Anchor>, &'static str> {
 fn announce<S: DocStore, A>(state: &AppState<S, A>, change: &CommentChange) {
     let event = Event::comment(&change.site.space_id, &change.comment.page_id);
     state.registry.publish(&change.site.workspace_id, event);
+    for told in &change.notified {
+        let event = Event::notification(&change.site.space_id, &told.user_id, &told.id);
+        state.registry.publish(&change.site.workspace_id, event);
+    }
 }
 
 async fn list<S: DocStore + CommentStore, A>(
@@ -276,4 +282,82 @@ async fn resolve<S: DocStore + CommentStore, A>(
         .await?;
     announce(&state, &change);
     Ok(Json(change.comment.into()))
+}
+
+#[derive(Serialize)]
+struct PageRef {
+    id: String,
+    space_id: String,
+    title: String,
+}
+
+#[derive(Serialize)]
+struct NotificationBody {
+    id: String,
+    kind: &'static str,
+    page: PageRef,
+    comment_id: Option<String>,
+    actor: Option<UserBody>,
+    read: bool,
+    created_at: i64,
+}
+
+#[derive(Serialize)]
+struct InboxBody {
+    items: Vec<NotificationBody>,
+    unread: usize,
+}
+
+impl From<Inbox> for InboxBody {
+    fn from(inbox: Inbox) -> Self {
+        let items = inbox.items.into_iter().map(|n| NotificationBody {
+            id: n.id,
+            kind: match n.kind {
+                NotificationKind::Mention => "mention",
+                NotificationKind::Reply => "reply",
+                NotificationKind::Comment => "comment",
+            },
+            page: PageRef {
+                id: n.page_id,
+                space_id: n.space_id,
+                title: n.page_title,
+            },
+            comment_id: n.comment_id,
+            actor: n.actor.map(Into::into),
+            read: n.read,
+            created_at: n.created_at,
+        });
+        Self {
+            items: items.collect(),
+            unread: inbox.unread,
+        }
+    }
+}
+
+async fn notifications<S: DocStore + CommentStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+) -> Result<Json<InboxBody>, ApiError> {
+    Ok(Json(
+        state.store.notifications(&current.user.id).await?.into(),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadRequest {
+    /// `None`: all of them.
+    #[serde(default)]
+    ids: Option<Vec<String>>,
+}
+
+async fn read_notifications<S: DocStore + CommentStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    JsonBody(request): JsonBody<ReadRequest>,
+) -> Result<StatusCode, ApiError> {
+    let ids = request.ids.as_deref();
+    let user = &current.user.id;
+    state.store.read_notifications(user, ids, now_ms()).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

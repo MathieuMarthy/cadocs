@@ -21,6 +21,7 @@
   import { nextTheme, theme } from "../lib/theme.svelte";
   import type { IconName } from "./icons";
   import IconButton from "./IconButton.svelte";
+  import Notifications from "./Notifications.svelte";
   import Menu, { type MenuItem } from "./Menu.svelte";
   import NewWorkspace from "./NewWorkspace.svelte";
   import Source from "./Source.svelte";
@@ -231,6 +232,8 @@
     <div class="sidebar-scroll" {@attach keepScroll}>
       {#if nav}<Tree {nav} />{/if}
     </div>
+
+    {#if nav}<Notifications {nav} />{/if}
 
     {#if current || session.user.is_instance_admin}
       <nav class="sidebar-group" aria-label={t("shell.settings")}>
