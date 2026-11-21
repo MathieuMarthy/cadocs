@@ -110,6 +110,8 @@ impl S3FileStore {
         let bucket =
             Bucket::new(endpoint, UrlStyle::Path, config.bucket, config.region).map_err(invalid)?;
         let origin = bucket.base_url().origin().ascii_serialization();
+        // reqwest 0.13 has no provider of its own here: use ring, as the rest of the binary does.
+        let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
         let mut client = Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(READ_TIMEOUT)
@@ -254,7 +256,10 @@ impl Inner {
             }
             // With no date, the file counts as new, so the cleanup never takes it for an old stray.
             let modified = match object.last_modified {
-                Some(date) => SystemTime::from(date.parse::<jiff::Timestamp>().map_err(invalid)?),
+                Some(date) => {
+                    SystemTime::try_from(date.parse::<jiff::Timestamp>().map_err(invalid)?)
+                        .map_err(invalid)?
+                }
                 None => SystemTime::now(),
             };
             files.push(StoredFile {

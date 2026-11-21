@@ -14,6 +14,7 @@ use cadocs_mail::{MailError, Security, SmtpConfig, SmtpMailer};
 use cadocs_store::RevisionTiming;
 
 use crate::client_ip::TrustedProxies;
+use crate::oidc::{self, Provider};
 use crate::privileges::RunAs;
 
 /// Far above any sensible value, and small enough for timers and semaphores not to overflow.
@@ -56,8 +57,10 @@ pub struct Config {
     pub workspace_creation: WorkspaceCreation,
     /// The relay mail goes through, or `None` for an instance that sends none (ADR 0026).
     pub mail: Option<SmtpConfig>,
-    /// Whether people register by themselves, which needs mail (ADR 0026).
+    /// Whether people register by themselves: by mail (ADR 0026), or through `oidc`.
     pub registration: Registration,
+    /// The OpenID Connect providers people log in with (ADR 0028).
+    pub oidc: Vec<Provider>,
     /// Retired settings that are set, which the server names at start and otherwise ignores.
     pub ignored: Vec<&'static str>,
 }
@@ -249,6 +252,7 @@ impl Config {
             workspace_creation: read.workspace_creation()?,
             mail: read.mail()?,
             registration: read.registration()?,
+            oidc: read.oidc()?,
             ignored: RETIRED
                 .iter()
                 .copied()
@@ -549,6 +553,55 @@ impl<F: Fn(&str) -> Option<String>> Reader<F> {
             );
         }
         Ok(Some(config))
+    }
+
+    /// `CADOCS_OIDC_PROVIDERS` names them, and each has its `CADOCS_OIDC_<ID>_*` (ADR 0028).
+    fn oidc(&self) -> anyhow::Result<Vec<Provider>> {
+        let set = |name: &str| (self.0)(name).filter(|value| !value.is_empty());
+        let list = set("CADOCS_OIDC_PROVIDERS").unwrap_or_default();
+        let mut providers = Vec::<Provider>::new();
+        for id in list.split(',').map(str::trim).filter(|_| !list.is_empty()) {
+            let valid = (1..=32).contains(&id.len())
+                && id
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+            ensure!(
+                valid,
+                "invalid CADOCS_OIDC_PROVIDERS: {id:?}, expected names of lowercase letters and \
+                 digits, separated by commas"
+            );
+            ensure!(
+                providers.iter().all(|provider| provider.id != id),
+                "CADOCS_OIDC_PROVIDERS names {id} twice"
+            );
+            let name = |setting: &str| format!("CADOCS_OIDC_{}_{setting}", id.to_uppercase());
+            let required = |setting: &str| {
+                let name = name(setting);
+                set(&name).with_context(|| format!("{name} is required"))
+            };
+            let issuer = required("ISSUER")?;
+            let checked = oidc::check_url(&issuer).and_then(|url| {
+                ensure!(
+                    url.query().is_none() && url.fragment().is_none(),
+                    "it has a query"
+                );
+                Ok(())
+            });
+            if let Err(error) = checked {
+                bail!("invalid {}: {issuer:?}, {error}", name("ISSUER"));
+            }
+            let secret = name("CLIENT_SECRET");
+            let file = name("CLIENT_SECRET_FILE");
+            providers.push(Provider {
+                id: id.to_owned(),
+                issuer,
+                client_id: required("CLIENT_ID")?,
+                client_secret: self
+                    .secret(&secret, &file)?
+                    .with_context(|| format!("{secret} or {file} is required"))?,
+            });
+        }
+        Ok(providers)
     }
 
     fn session_lifetime(&self) -> anyhow::Result<Duration> {
@@ -1007,6 +1060,130 @@ mod tests {
             let error = config(&[("CADOCS_WORKSPACE_CREATION", refused)]).unwrap_err();
             let message = error.to_string();
             assert!(message.contains("CADOCS_WORKSPACE_CREATION"), "{message}");
+        }
+    }
+
+    const KEYCLOAK: [(&str, &str); 4] = [
+        ("CADOCS_OIDC_PROVIDERS", "keycloak"),
+        (
+            "CADOCS_OIDC_KEYCLOAK_ISSUER",
+            "https://sso.example.org/realms/main",
+        ),
+        ("CADOCS_OIDC_KEYCLOAK_CLIENT_ID", "wiki"),
+        ("CADOCS_OIDC_KEYCLOAK_CLIENT_SECRET", "s3cret"),
+    ];
+
+    #[test]
+    fn no_oidc_provider_unless_one_is_named() {
+        assert!(config(&[]).unwrap().oidc.is_empty());
+        assert!(
+            config(&[("CADOCS_OIDC_PROVIDERS", "")])
+                .unwrap()
+                .oidc
+                .is_empty()
+        );
+        // Its other settings alone turn nothing on.
+        assert!(config(&KEYCLOAK[1..]).unwrap().oidc.is_empty());
+    }
+
+    #[test]
+    fn every_oidc_setting_is_read() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "other secret\n").unwrap();
+        let mut vars = KEYCLOAK.to_vec();
+        vars[0].1 = "keycloak, authentik2";
+        vars.extend([
+            (
+                "CADOCS_OIDC_AUTHENTIK2_ISSUER",
+                "http://127.0.0.1:9000/application/o/wiki/",
+            ),
+            ("CADOCS_OIDC_AUTHENTIK2_CLIENT_ID", "abc"),
+            (
+                "CADOCS_OIDC_AUTHENTIK2_CLIENT_SECRET_FILE",
+                file.path().to_str().unwrap(),
+            ),
+        ]);
+        let providers = config(&vars).unwrap().oidc;
+        let read: Vec<_> = providers
+            .iter()
+            .map(|p| (&*p.id, &*p.issuer, &*p.client_id, &*p.client_secret))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                (
+                    "keycloak",
+                    "https://sso.example.org/realms/main",
+                    "wiki",
+                    "s3cret"
+                ),
+                (
+                    "authentik2",
+                    "http://127.0.0.1:9000/application/o/wiki/",
+                    "abc",
+                    "other secret"
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_oidc_setting_that_cannot_work_is_refused_and_named() {
+        let with = |name: &'static str, value: &'static str| {
+            let mut vars = KEYCLOAK.to_vec();
+            vars.retain(|(key, _)| *key != name);
+            if !value.is_empty() {
+                vars.push((name, value));
+            }
+            config(&vars).unwrap_err().to_string()
+        };
+        for (name, value, named) in [
+            ("CADOCS_OIDC_PROVIDERS", "Keycloak", "CADOCS_OIDC_PROVIDERS"),
+            (
+                "CADOCS_OIDC_PROVIDERS",
+                "key-cloak",
+                "CADOCS_OIDC_PROVIDERS",
+            ),
+            (
+                "CADOCS_OIDC_PROVIDERS",
+                "keycloak,,",
+                "CADOCS_OIDC_PROVIDERS",
+            ),
+            ("CADOCS_OIDC_PROVIDERS", "keycloak,keycloak", "twice"),
+            (
+                "CADOCS_OIDC_KEYCLOAK_ISSUER",
+                "",
+                "CADOCS_OIDC_KEYCLOAK_ISSUER is required",
+            ),
+            (
+                "CADOCS_OIDC_KEYCLOAK_ISSUER",
+                "sso.example.org",
+                "CADOCS_OIDC_KEYCLOAK_ISSUER",
+            ),
+            // A code and a token in clear, unless they never leave this machine.
+            (
+                "CADOCS_OIDC_KEYCLOAK_ISSUER",
+                "http://sso.example.org",
+                "https",
+            ),
+            (
+                "CADOCS_OIDC_KEYCLOAK_ISSUER",
+                "https://sso.example.org/?a=b",
+                "query",
+            ),
+            (
+                "CADOCS_OIDC_KEYCLOAK_CLIENT_ID",
+                "",
+                "CADOCS_OIDC_KEYCLOAK_CLIENT_ID is required",
+            ),
+            (
+                "CADOCS_OIDC_KEYCLOAK_CLIENT_SECRET",
+                "",
+                "CADOCS_OIDC_KEYCLOAK_CLIENT_SECRET",
+            ),
+        ] {
+            let error = with(name, value);
+            assert!(error.contains(named), "{name}={value:?}: {error}");
         }
     }
 

@@ -6,9 +6,9 @@ use sqlx::{AssertSqlSafe, Row, SqliteConnection, SqliteExecutor};
 
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
-    AccountStore, ActiveSession, AdminChanges, CodeAttempt, Credentials, FirstUser, MAX_CODE_TRIES,
-    Membership, NewEmailCode, NewPasswordReset, NewSession, NewUser, SessionStanding, StoreError,
-    TotpProof, UpdateBasis, User, UserChanges, UserRecord,
+    AccountStore, ActiveSession, AdminChanges, CodeAttempt, Credentials, FirstUser, IdentityUser,
+    MAX_CODE_TRIES, Membership, NewEmailCode, NewPasswordReset, NewSession, NewUser,
+    SessionStanding, StoreError, TotpProof, UpdateBasis, User, UserChanges, UserRecord,
 };
 
 pub(super) const INSERT_SESSION: &str =
@@ -196,6 +196,20 @@ async fn insert_recovery_codes(
     Ok(())
 }
 
+const SELECT_CREDENTIALS: &str =
+    "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.language,
+            u.password_hash, u.disabled_at, t.secret AS totp_secret, t.secret IS NOT NULL AS totp
+     FROM users u LEFT JOIN user_totp t ON t.user_id = u.id AND t.enabled_at IS NOT NULL";
+
+fn credentials(row: &SqliteRow) -> Credentials {
+    Credentials {
+        user: user(row),
+        password_hash: row.get("password_hash"),
+        disabled: row.get::<Option<i64>, _>("disabled_at").is_some(),
+        totp_secret: row.get("totp_secret"),
+    }
+}
+
 fn user(row: &SqliteRow) -> User {
     User {
         id: row.get("id"),
@@ -273,22 +287,13 @@ impl AccountStore for SqliteStore {
     }
 
     async fn credentials(&self, email: &str) -> Result<Option<Credentials>, StoreError> {
-        let row = sqlx::query(
-            "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.language,
-                    u.password_hash, u.disabled_at, t.secret AS totp_secret,
-                    t.secret IS NOT NULL AS totp
-             FROM users u LEFT JOIN user_totp t ON t.user_id = u.id AND t.enabled_at IS NOT NULL
-             WHERE u.email = ?1",
-        )
+        let row = sqlx::query(AssertSqlSafe(format!(
+            "{SELECT_CREDENTIALS} WHERE u.email = ?1"
+        )))
         .bind(email)
         .fetch_optional(&self.reader)
         .await?;
-        Ok(row.map(|row| Credentials {
-            user: user(&row),
-            password_hash: row.get("password_hash"),
-            disabled: row.get::<Option<i64>, _>("disabled_at").is_some(),
-            totp_secret: row.get("totp_secret"),
-        }))
+        Ok(row.as_ref().map(credentials))
     }
 
     async fn password_hash(&self, user_id: &str) -> Result<Option<String>, StoreError> {
@@ -1005,6 +1010,86 @@ impl AccountStore for SqliteStore {
     async fn turn_totp_off(&self, user_id: &str) -> Result<(), StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
         turn_totp_off(&mut tx, user_id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn identity_user(
+        &self,
+        provider: &str,
+        subject: &str,
+    ) -> Result<Option<Credentials>, StoreError> {
+        let row = sqlx::query(AssertSqlSafe(format!(
+            "{SELECT_CREDENTIALS} JOIN user_identities i ON i.user_id = u.id
+             WHERE i.provider = ?1 AND i.subject = ?2"
+        )))
+        .bind(provider)
+        .bind(subject)
+        .fetch_optional(&self.reader)
+        .await?;
+        Ok(row.as_ref().map(credentials))
+    }
+
+    async fn create_identity_session(&self, session: &NewSession) -> Result<bool, StoreError> {
+        let created = sqlx::query(
+            "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at)
+             SELECT ?1, id, ?3, ?3, ?4 FROM users WHERE id = ?2 AND disabled_at IS NULL",
+        )
+        .bind(&session.token_hash)
+        .bind(&session.user_id)
+        .bind(session.now)
+        .bind(session.expires_at)
+        .execute(&self.writer)
+        .await?
+        .rows_affected();
+        Ok(created == 1)
+    }
+
+    async fn register_identity(
+        &self,
+        user: &IdentityUser,
+        session: &NewSession,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        // First-run setup makes the first account, with the code only the operator sees.
+        let set_up: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users)")
+            .fetch_one(&mut *tx)
+            .await?;
+        if !set_up {
+            return Err(StoreError::NotAllowed);
+        }
+        sqlx::query(
+            "INSERT INTO users (id, email, name, email_verified_at, created_at, updated_at)
+             VALUES (?1, ?2, ?3, CASE WHEN ?4 THEN ?5 END, ?5, ?5)",
+        )
+        .bind(&user.id)
+        .bind(&user.email)
+        .bind(&user.name)
+        .bind(user.email_verified)
+        .bind(session.now)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| match error.as_database_error() {
+            Some(database) if database.is_unique_violation() => StoreError::EmailTaken,
+            _ => error.into(),
+        })?;
+        sqlx::query(
+            "INSERT INTO user_identities (provider, subject, user_id, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(&user.provider)
+        .bind(&user.subject)
+        .bind(&user.id)
+        .bind(session.now)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(INSERT_SESSION)
+            .bind(&session.token_hash)
+            .bind(&session.user_id)
+            .bind(session.now)
+            .bind(session.expires_at)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
     }

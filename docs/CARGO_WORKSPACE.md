@@ -59,10 +59,11 @@ Costs are qualitative until measured. "Binary" is the effect on the release bina
 | `base64` 0.22 (`alloc` only), MIT or Apache-2.0 | Comment anchors, two Yjs relative positions, travel as base64 strings in JSON (ADR 0012) | None | None: sqlx already links this version |
 | `tokio-util` (`compat`, `io`), `tempfile` in `cadocs-files`, `futures-util` `io` | Bridging async_zip's `futures` traits to tokio, reading a stream into a body, and the anonymous scratch file of an import, in `data/tmp`. `tempfile` was already in the tree | None | Low |
 | `serde_json` in `cadocs-store` | Revision authors stored and read as JSON arrays. Already in the tree | None | None |
-| `rusty-s3` 0.11 (`full`, `rustcrypto`), BSD-2-Clause, with `jiff` and `url` at its own versions. 0.11 parses with `instant-xml`, which replaced the `quick-xml` of 0.8 and its two advisories | S3 signatures and listing parsing, with no I/O of its own (ADR 0020). Only with the `s3` feature | None at rest | With the next row, 2.7 MB in a release binary, and nothing in a default build |
-| `reqwest` (`rustls-tls-native-roots`, `stream`, no default features), MIT or Apache-2.0 | Sends the S3 requests, with rustls and `ring`, the system roots and streamed bodies. Only with the `s3` feature | 1.4 MB of idle RSS once linked, 2.7 MB with S3 in use: the system roots and a pool of at most 2 idle connections (see step 20b in [benchmark notes](notes/benchmark.md)) | See `rusty-s3` |
+| `rusty-s3` 0.12 (`full`, `rustcrypto`), BSD-2-Clause, with `jiff` 1 and `url` at its own versions. It parses with `instant-xml`, which replaced the `quick-xml` of 0.8 and its two advisories | S3 signatures and listing parsing, with no I/O of its own (ADR 0020). Only with the `s3` feature | None at rest | With the next row, 2.7 MB in a release binary, and nothing in a default build |
+| `reqwest` 0.13 (`rustls-no-provider`, `rustls-native-certs`, `stream`, no default features), MIT or Apache-2.0 | Sends the S3 requests, with rustls and `ring`, installed as the process default before the client is built (0.13 otherwise wants `aws-lc-rs`), the system roots and streamed bodies. Only with the `s3` feature | 1.4 MB of idle RSS once linked, 2.7 MB with S3 in use: the system roots and a pool of at most 2 idle connections (see step 20b in [benchmark notes](notes/benchmark.md)) | See `rusty-s3` |
 | `lettre` 0.11 (`builder`, `smtp-transport`, `tokio1-rustls`, `ring`, `rustls-native-certs`, no default features: no pool, no `hostname`, no `native-tls`), MIT | The SMTP client of `cadocs-mail` (ADR 0026), in every build. Brings rustls with `ring` and the system roots, as `reqwest` does in the S3 build, and `url` with `idna`, `nom`, `email_address`, `email-encoding`, `quoted_printable` (0BSD), `mime`, `httpdate`, `async-trait` | 0.5 MB of idle RSS with mail off, 1.3 MB with a relay set: the system roots are read for each TLS connection, and nothing stays connected (step 28 in [benchmark notes](notes/benchmark.md)) | 1.7 MB |
 | `hmac` 0.12, `sha1` 0.10, `data-encoding` (`alloc`), all MIT or Apache-2.0 | The codes of an authenticator app (RFC 6238, step 47) and the base32 of its secret and recovery codes. `sha1` 0.10, `digest` 0.10 and `data-encoding` were already in the binary through axum and tungstenite, so only `hmac` 0.12 is new, a few KB. The `s3` build then has `hmac` 0.12 beside the 0.13 of `rusty-s3`. When axum moves to `sha1` 0.11, move both to 0.11 and 0.13 | None: one HMAC per code checked | A few KB |
+| `hyper` (`client`, `http1`), `hyper-util` (`tokio`), `http-body-util`, `tokio-rustls` (`ring`), `rustls-native-certs`, `ring` (`alloc`), `url`, all MIT, Apache-2.0 or ISC | The OIDC client of `oidc.rs` (ADR 0028): one connection per request, the system roots read for each, RS256 checked with `ring`. All were already in the binary through axum, `lettre` and sqlx: only hyper's `client` code is new | None at idle: nothing is cached between logins, anonymous RSS unchanged | 0.4 MB with the routes and checks |
 | `tungstenite` (no default features) | Only to recognise the frame-limit error behind axum's socket and answer `1009`. Same version as axum's, so it adds no code | None | None |
 
 ### Dev tools only
@@ -85,10 +86,7 @@ The editor adds, all MIT except `highlight.js` (BSD-3-Clause): the TipTap block 
 
 ### Planned
 
-| Crate | Stage | Why | Cost note |
-| --- | --- | --- | --- |
-| `totp-lite` | V1 | TOTP codes | Very low |
-| `openidconnect` or a smaller client | V1 | OIDC, optional feature. To evaluate against a hand-written flow | Pulls an HTTP client |
+None for now: TOTP (step 47) and OIDC (ADR 0028) were written over crates already in the binary.
 
 Fractional indexing, rate limiting, the data folder lock (`std::fs::File::try_lock`) and parsing `CADOCS_PUBLIC_URL` (`http::Uri`) are small enough to write without a dependency.
 
@@ -101,6 +99,7 @@ Fractional indexing, rate limiting, the data folder lock (`std::fs::File::try_lo
 | `diesel`, `sea-orm` | ORM machinery for a small set of hand-written queries |
 | `redis`, `apalis` | Replaced by the in-process design (ADR 0006) |
 | `aws-sdk-s3` | Very large dependency tree (ADR 0005) |
+| `openidconnect`, `jsonwebtoken`, `reqwest` outside the `s3` build | OIDC needs three requests and one RS256 check, which the hyper, rustls and ring already linked do (ADR 0028) |
 | `async-graphql` | REST covers the need |
 | `actix-web` | Fine, but axum shares the tokio and tower ecosystem already in use |
 | `mimalloc`, `jemallocator` | glibc and `malloc_trim` hold the targets (ADR 0015). mimalloc was measured and lost, jemalloc was not needed |

@@ -8,6 +8,7 @@ pub mod client_ip;
 pub mod config;
 pub mod data_dir;
 pub mod memory;
+pub mod oidc;
 pub mod password;
 pub mod privileges;
 pub mod public;
@@ -69,8 +70,10 @@ pub struct AppState<S, A> {
     /// Where mail goes, set after `new` and before the router is built. `None` on an instance
     /// that sends none: the routes that need mail are then not even registered (ADR 0026).
     pub mail: Option<Outbox>,
-    /// Whether `mail` also lets people register, set after `new` like it.
+    /// Whether people register by themselves, through `mail` or `oidc`, set after `new` like it.
     pub registration: Registration,
+    /// The OpenID Connect providers, set after `new` like `mail`: none by default (ADR 0028).
+    pub oidc: Arc<[oidc::Provider]>,
     /// Keys the hash of the codes sent by mail, new at each start: a copy of the database tells
     /// nothing about a code, and a restart kills the codes, which live 10 minutes anyway.
     pub code_key: Arc<[u8; 32]>,
@@ -104,6 +107,7 @@ impl<S, A> Clone for AppState<S, A> {
             workspace_creation: self.workspace_creation,
             mail: self.mail.clone(),
             registration: self.registration,
+            oidc: self.oidc.clone(),
             code_key: self.code_key.clone(),
             mail_requests: self.mail_requests.clone(),
             mail_addresses: self.mail_addresses.clone(),
@@ -145,6 +149,7 @@ impl<S, A> AppState<S, A> {
             workspace_creation: WorkspaceCreation::default(),
             mail: None,
             registration: Registration::default(),
+            oidc: Arc::default(),
             code_key: Arc::new(session::new_key().expect("the system's random source")),
             mail_requests: Arc::new(RateLimiter::new(
                 api::auth::MAIL_BURST,

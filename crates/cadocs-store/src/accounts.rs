@@ -139,6 +139,19 @@ pub struct NewUser {
     pub password_hash: String,
 }
 
+/// The account an OpenID Connect provider's first login makes: no password, no workspace, no
+/// instance role, and the identity that logs into it from then on.
+#[derive(Debug, Clone)]
+pub struct IdentityUser {
+    pub id: String,
+    pub email: String,
+    pub name: String,
+    /// Whether the provider says it proved the address.
+    pub email_verified: bool,
+    pub provider: String,
+    pub subject: String,
+}
+
 /// Wrong tries that kill a code (ADR 0026).
 pub const MAX_CODE_TRIES: i64 = 5;
 
@@ -425,4 +438,26 @@ pub trait AccountStore: Send + Sync + 'static {
 
     /// Turns the app off with no password, for the command line.
     fn turn_totp_off(&self, user_id: &str) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// The account the subject `subject` of `provider` logs into, disabled or not.
+    fn identity_user(
+        &self,
+        provider: &str,
+        subject: &str,
+    ) -> impl Future<Output = Result<Option<Credentials>, StoreError>> + Send;
+
+    /// Opens a session with no password, unless the user is disabled: for a login a provider
+    /// vouched for. Returns whether the session exists.
+    fn create_identity_session(
+        &self,
+        session: &NewSession,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Makes the account, its identity and its session in one transaction. An address another
+    /// account holds is an `EmailTaken`, and before first-run setup it is a `NotAllowed`.
+    fn register_identity(
+        &self,
+        user: &IdentityUser,
+        session: &NewSession,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }

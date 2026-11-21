@@ -34,6 +34,15 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 - `cadocs reset-totp <email>` is the way back for someone who lost the app and the codes. A reset link leaves the app on, on purpose.
 - Left open: turning the app on ends no other session, as for the code by mail; no screen shows how many recovery codes are left; a setup abandoned without `DELETE` keeps its pending row until the next setup or `DELETE`; the per-account limit counts right codes too, so someone who holds the password can keep the owner at `429` (they could log in anyway).
 
+## OIDC (step 48, ADR 0028)
+
+- `oidc.rs` holds the protocol and its client (`check_url`, `discover`, `authorization_url`, `identify`, `check_id_token`); `api/oidc.rs` the two routes, which answer redirects, never JSON, except `404` for an unknown provider. `AppState::oidc` is set after `new`, as `mail`.
+- Every outbound request goes through `send`: `check_url` first, one connection, no redirect followed, 10 s, 256 KiB. `Endpoints::check` adds that an https issuer names https endpoints only. Keep both the only way out.
+- The flow cookie holds `id.state.nonce.verifier`. The callback checks it and the state before any request to the provider: `tests/oidc.rs` counts token requests to prove it.
+- `tests/oidc.rs` runs a fake provider (axum on loopback, plain HTTP) that signs with `tests/oidc-key.der`, a 2048-bit RSA test key, and checks Basic auth, `redirect_uri` and the PKCE verifier. The unit tests of `oidc.rs` use the same key for the claim and signature checks.
+- Step 49 needs, beside the screens: a way for a logged-in user to link a provider (and unlink it), the list of providers for the login buttons (`GET /auth/setup` would carry ids and names; a display name setting does not exist yet), and the messages of `/login?oidc=failed|taken|closed`.
+- Left open: no test reaches a provider over TLS (step 49 checks Authentik and Keycloak by hand); only RS256; an account made by a provider has no password, so the routes that need the current one are closed to it; a closed instance answers `closed` even when the address belongs to an account, where `taken` would tell its owner to link; two first logins of one new subject at once answer `taken` to the second (a retry works); an address the provider did not verify still makes an account, unverified, as an invitation does; the system roots are read synchronously on a runtime worker for each request, as `lettre` does.
+
 ## Sockets
 
 - Page and events sockets sit behind `api::check_origin` then `session::require` as route layers, so refusals are the JSON ones of REST and the upgrade touches the session.
@@ -62,7 +71,7 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 - A store with `download_url` gets a `302` after the access check, never cached, for `INLINE_TYPES` only: other files stream with the sandbox CSP and `nosniff`, which S3 cannot send. The router adds the store's origin to `img-src`.
 - `S3FileStore` (`cadocs-files/src/s3.rs`, `s3` feature): every request is a presigned `rusty-s3` URL sent with `reqwest`, which follows no redirect. Keys are the disk paths under the prefix, and `list` skips other keys, so a shared prefix is safe. `valid_prefix` and `new` refuse a prefix or endpoint that could leave the bucket. Neither `Debug` nor errors show the secret or a presigned URL, which works for 5 minutes.
 - `tests/s3.rs` runs one contract on an in-memory S3 that ignores signatures, and on a real one with `CADOCS_TEST_S3_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`. MinIO no longer publishes community images: use `bitnamilegacy/minio:2025.4.22`.
-- `rusty-s3` 0.11 parses listings with `instant-xml`, which needs the S3 namespace on `ListBucketResult` (real servers send it, a fake must too). It addresses the bucket as `/bucket/` and writes spaces in the query as `+`, which MinIO accepts.
+- `rusty-s3` 0.12 parses listings with `instant-xml`, which needs the S3 namespace on `ListBucketResult` (real servers send it, a fake must too). It addresses the bucket as `/bucket/` and writes spaces in the query as `+`, which MinIO accepts.
 - Left open: the startup check needs the bucket to answer `HEAD` (`s3:ListBucket`).
 
 ## Revisions, export, import, backup
