@@ -207,6 +207,10 @@ impl From<StoreError> for ApiError {
             StoreError::UserDisabled => conflict.with_message("This account is disabled"),
             StoreError::TotpOn => conflict.with_message("The authenticator app is on already"),
             StoreError::TotpOff => conflict.with_message("The authenticator app is off"),
+            StoreError::IdentityTaken => {
+                conflict.with_message("This provider or this identity is tied to an account")
+            }
+            StoreError::LastLogin => conflict.with_message("This is the only way into the account"),
             StoreError::GroupNameTaken => conflict
                 .with_message("Another group of this workspace has this name")
                 .with_field("name", "taken"),

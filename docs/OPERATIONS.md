@@ -111,6 +111,21 @@ A person is the provider's subject (`sub`), not an address. At their first login
 
 `<ID>` is the id in capitals: `keycloak` reads `CADOCS_OIDC_KEYCLOAK_ISSUER`. A failed login logs why at `warn`, and the person lands on `/login?oidc=failed`; `taken` and `closed` are the two refusals above.
 
+The login screen shows one button per provider, labelled with its id. Someone who has an account links a provider on the account screen, which also unlinks it, except when it is their only way in: an account made by a provider has no password until it gets one through a reset link. A person with the authenticator app on skips it through a provider, whose own factors apply, and the account screen says so.
+
+#### Manual check against a real provider
+
+No test reaches a provider over TLS, so check each one you deploy against, with the redirect URI above registered:
+
+1. Start cadocs with the four settings, and open `/login`: the provider's button shows.
+2. Log in as a new person: an account exists with no password, then log out and in again: the same account.
+3. As an account with a password, link the provider on the account screen and log in through it: the same account, not a new one.
+4. With the address of an existing account and no link: the login screen says `taken`.
+5. Unlink it, and check that an account with no password refuses (`409`).
+6. A wrong secret and a wrong issuer log a `warn` line and land on `/login?oidc=failed`.
+
+Results so far: Authentik not checked, Keycloak not checked.
+
 ## Commands
 
 | Command | Purpose |

@@ -3,23 +3,31 @@
 //! opens a session. Both are browser navigations, so both answer with a redirect: to `/` once
 //! logged in, or to `/login?oidc=<problem>`.
 
+use axum::Json;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{ConnectInfo, Extension, State};
 use axum::http::header::{COOKIE, LOCATION, SET_COOKIE};
+use std::net::SocketAddr;
+
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use cadocs_collab::Authorizer;
 use cadocs_store::{AccountStore, DocStore, IdentityUser, StoreError};
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
-use super::auth::{MAX_NAME_CHARS, clean_email, clean_name, new_session};
-use super::{ApiError, ErrorCode, PathParam, rate_limit};
+use super::auth::{
+    MAX_NAME_CHARS, PasswordRequest, clean_email, clean_name, new_session, require_password,
+};
+use super::{ApiError, ErrorCode, JsonBody, PathParam, rate_limit};
 use crate::config::{HttpConfig, Registration};
 use crate::oidc::{self, Flow, Provider};
+use crate::session::CurrentSession;
 use crate::{AppState, session};
+use cadocs_store::now_ms;
+use serde_json::json;
 
 /// Time to log in at the provider.
 const FLOW_SECS: u32 = 10 * 60;
@@ -36,6 +44,15 @@ enum Problem {
     Closed,
 }
 
+/// How a link ends, as the account screen is told.
+#[derive(Debug, Clone, Copy)]
+enum Link {
+    Linked,
+    /// The subject, or a subject of this provider, is tied to an account already.
+    Taken,
+    Failed,
+}
+
 pub fn routes<S, A>(state: &AppState<S, A>) -> Router<AppState<S, A>>
 where
     S: DocStore + AccountStore,
@@ -46,10 +63,20 @@ where
         (state.password_guesses.clone(), state.http.clone()),
         rate_limit,
     );
-    Router::new()
+    let public = Router::new()
         .route("/auth/oidc/{provider}", get(start))
         .route("/auth/oidc/{provider}/callback", get(callback))
-        .route_layer(limit)
+        .route_layer(limit.clone());
+    // Starting a link is a write, so it is a POST with the CSRF token: a page of another site
+    // cannot send a browser to tie its own identity to the account.
+    let me = Router::new()
+        .route("/me/identities", get(identities))
+        .route(
+            "/me/identities/{provider}",
+            post(start_link).route_layer(limit).delete(unlink),
+        )
+        .route_layer(from_fn_with_state(state.clone(), session::require::<S, A>));
+    public.merge(me)
 }
 
 fn provider<'a, S, A>(state: &'a AppState<S, A>, id: &str) -> Result<&'a Provider, ApiError> {
@@ -89,12 +116,15 @@ fn redirect(to: &str) -> Response {
     (StatusCode::SEE_OTHER, [(LOCATION, location)]).into_response()
 }
 
-async fn start<S: AccountStore, A>(
-    State(state): State<AppState<S, A>>,
-    PathParam(id): PathParam,
-) -> Result<Response, ApiError> {
-    let provider = provider(&state, &id)?;
-    let flow = Flow::new().map_err(ApiError::internal)?;
+/// Where to send the browser, and the cookie that binds the login (or the link, when `link` names
+/// the user it is for) to it. `None` when the provider cannot be reached or is misconfigured.
+async fn begin<S, A>(
+    state: &AppState<S, A>,
+    provider: &Provider,
+    link: Option<&str>,
+) -> Option<(String, HeaderValue)> {
+    let id = &provider.id;
+    let flow = Flow::new().ok()?;
     let redirect_uri = redirect_uri(&state.http, provider);
     let found = oidc::discover(provider).await;
     let url = found
@@ -103,7 +133,7 @@ async fn start<S: AccountStore, A>(
         Ok(url) => url,
         Err(error) => {
             tracing::warn!(provider = id, "an OIDC login could not start: {error:#}");
-            return Ok(back(&state.http, Problem::Failed));
+            return None;
         }
     };
     let Flow {
@@ -111,11 +141,70 @@ async fn start<S: AccountStore, A>(
         nonce,
         verifier,
     } = &flow;
-    let value = format!("{id}.{secret_state}.{nonce}.{verifier}");
+    let mut value = format!("{id}.{secret_state}.{nonce}.{verifier}");
+    if let Some(user) = link {
+        value = format!("{value}.{user}");
+    }
+    Some((url, flow_cookie(&state.http, &value, FLOW_SECS)))
+}
+
+async fn start<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    PathParam(id): PathParam,
+) -> Result<Response, ApiError> {
+    let provider = provider(&state, &id)?;
+    let Some((url, cookie)) = begin(&state, provider, None).await else {
+        return Ok(back(&state.http, Problem::Failed));
+    };
     let mut response = redirect(&url);
-    let cookie = flow_cookie(&state.http, &value, FLOW_SECS);
     response.headers_mut().insert(SET_COOKIE, cookie);
     Ok(response)
+}
+
+/// The logged-in user asks to tie `provider` to their account: the front end sends the browser
+/// to the `url` it gets.
+async fn start_link<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    PathParam(id): PathParam,
+    JsonBody(body): JsonBody<PasswordRequest>,
+) -> Result<Response, ApiError> {
+    let provider = provider(&state, &id)?;
+    // A provider is a way in that skips this account's factors: a stolen session must not tie its
+    // own. An account with no password has none to give, and only its provider to prove it by.
+    let (_, has_password) = state.store.identities(&current.user.id).await?;
+    if has_password {
+        require_password(&state, &current, (peer, &headers), body.current_password).await?;
+    }
+    let Some((url, cookie)) = begin(&state, provider, Some(&current.user.id)).await else {
+        return Err(
+            ApiError::new(ErrorCode::Unavailable).with_message("The provider cannot be reached")
+        );
+    };
+    let mut response = Json(json!({ "url": url })).into_response();
+    response.headers_mut().insert(SET_COOKIE, cookie);
+    Ok(response)
+}
+
+async fn identities<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+) -> Result<Response, ApiError> {
+    let (providers, password) = state.store.identities(&current.user.id).await?;
+    Ok(Json(json!({ "providers": providers, "password": password })).into_response())
+}
+
+async fn unlink<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    PathParam(id): PathParam,
+) -> Result<StatusCode, ApiError> {
+    match state.store.unlink_identity(&current.user.id, &id).await? {
+        true => Ok(StatusCode::NO_CONTENT),
+        false => Err(ApiError::new(ErrorCode::NotFound)),
+    }
 }
 
 /// To the login screen, with the login's cookie gone.
@@ -139,7 +228,20 @@ async fn callback<S: AccountStore, A>(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let provider = provider(&state, &id)?;
-    match log_in(&state, provider, &uri, &headers).await {
+    let (identity, link) = match exchange(&state, provider, &uri, &headers).await {
+        Ok(found) => found,
+        Err(Problem::Failed)
+            if flow_of(&headers, &state.http, provider).is_some_and(|f| f.1.is_some()) =>
+        {
+            return Ok(back_to_account(&state.http, Link::Failed));
+        }
+        Err(problem) => return Ok(back(&state.http, problem)),
+    };
+    if let Some(user_id) = link {
+        let outcome = link_to(&state, provider, &headers, &user_id, &identity.subject).await;
+        return Ok(back_to_account(&state.http, outcome));
+    }
+    match log_in(&state, provider, identity).await {
         Ok(token) => {
             let mut response = redirect("/");
             let cookies = response.headers_mut();
@@ -151,8 +253,56 @@ async fn callback<S: AccountStore, A>(
     }
 }
 
+/// To the account screen, with the link's cookie gone.
+fn back_to_account(http: &HttpConfig, outcome: Link) -> Response {
+    let outcome = match outcome {
+        Link::Linked => "linked",
+        Link::Taken => "taken",
+        Link::Failed => "failed",
+    };
+    let mut response = redirect(&format!("/account?oidc={outcome}"));
+    response
+        .headers_mut()
+        .insert(SET_COOKIE, flow_cookie(http, "", 0));
+    response
+}
+
+/// Ties the subject to `user_id`, if the browser that comes back is still logged in as them.
+async fn link_to<S: AccountStore, A>(
+    state: &AppState<S, A>,
+    provider: &Provider,
+    headers: &HeaderMap,
+    user_id: &str,
+    subject: &str,
+) -> Link {
+    let current = session::current(state, headers).await;
+    if !matches!(current, Ok(Some(ref found)) if found.user.id == user_id) {
+        tracing::warn!(
+            provider = provider.id,
+            "an OIDC link came back to another session"
+        );
+        return Link::Failed;
+    }
+    match state
+        .store
+        .link_identity(user_id, &provider.id, subject, now_ms())
+        .await
+    {
+        Ok(()) => Link::Linked,
+        Err(StoreError::IdentityTaken) => Link::Taken,
+        Err(error) => {
+            tracing::warn!(provider = provider.id, "an OIDC link failed: {error}");
+            Link::Failed
+        }
+    }
+}
+
 /// The flow this browser started for `provider`, from its cookie.
-fn flow_of(headers: &HeaderMap, http: &HttpConfig, provider: &Provider) -> Option<Flow> {
+fn flow_of(
+    headers: &HeaderMap,
+    http: &HttpConfig,
+    provider: &Provider,
+) -> Option<(Flow, Option<String>)> {
     let prefix = format!("{}=", flow_cookie_name(http));
     let value = headers
         .get_all(COOKIE)
@@ -161,30 +311,35 @@ fn flow_of(headers: &HeaderMap, http: &HttpConfig, provider: &Provider) -> Optio
         .flat_map(|value| value.split(';'))
         .find_map(|pair| pair.trim().strip_prefix(&prefix))?;
     let mut parts = value.split('.');
-    let (Some(id), Some(state), Some(nonce), Some(verifier), None) = (
-        parts.next(),
-        parts.next(),
-        parts.next(),
-        parts.next(),
-        parts.next(),
-    ) else {
+    let (Some(id), Some(state), Some(nonce), Some(verifier)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
         return None;
     };
+    // A fifth part is the user a link is for.
+    let link = parts.next();
+    if parts.next().is_some() || link == Some("") {
+        return None;
+    }
     let filled = [state, nonce, verifier].iter().all(|part| !part.is_empty());
-    (id == provider.id && filled).then(|| Flow {
-        state: state.to_owned(),
-        nonce: nonce.to_owned(),
-        verifier: verifier.to_owned(),
+    (id == provider.id && filled).then(|| {
+        let flow = Flow {
+            state: state.to_owned(),
+            nonce: nonce.to_owned(),
+            verifier: verifier.to_owned(),
+        };
+        (flow, link.map(str::to_owned))
     })
 }
 
-/// Returns the token of the new session.
-async fn log_in<S: AccountStore, A>(
+/// Checks the callback and trades its code: who the provider says logged in, and the user the
+/// flow was a link for.
+async fn exchange<S: AccountStore, A>(
     state: &AppState<S, A>,
     provider: &Provider,
     uri: &Uri,
     headers: &HeaderMap,
-) -> Result<String, Problem> {
+) -> Result<(oidc::Identity, Option<String>), Problem> {
     let failed = |why: &dyn std::fmt::Display| {
         tracing::warn!(provider = provider.id, "an OIDC login failed: {why}");
         Problem::Failed
@@ -196,7 +351,7 @@ async fn log_in<S: AccountStore, A>(
     if let Some(error) = field("error") {
         return Err(failed(&format!("the provider answered {error:?}")));
     }
-    let Some(flow) = flow_of(headers, &state.http, provider) else {
+    let Some((flow, link)) = flow_of(headers, &state.http, provider) else {
         return Err(failed(&"no login of this provider started in this browser"));
     };
     // Login CSRF: the code must come back to the browser that asked for it.
@@ -214,7 +369,19 @@ async fn log_in<S: AccountStore, A>(
     let identity = oidc::identify(&endpoints, provider, &redirect_uri, &flow, &code)
         .await
         .map_err(|e| failed(&format!("{e:#}")))?;
+    Ok((identity, link))
+}
 
+/// Returns the token of the new session.
+async fn log_in<S: AccountStore, A>(
+    state: &AppState<S, A>,
+    provider: &Provider,
+    identity: oidc::Identity,
+) -> Result<String, Problem> {
+    let failed = |why: &dyn std::fmt::Display| {
+        tracing::warn!(provider = provider.id, "an OIDC login failed: {why}");
+        Problem::Failed
+    };
     let store = &state.store;
     let stored = |error: StoreError| failed(&error);
     let found = store.identity_user(&provider.id, &identity.subject).await;

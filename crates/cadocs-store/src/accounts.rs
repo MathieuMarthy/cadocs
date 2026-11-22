@@ -469,4 +469,28 @@ pub trait AccountStore: Send + Sync + 'static {
         user: &IdentityUser,
         session: &NewSession,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// The providers `user_id` logs in with, and whether the account has a password.
+    fn identities(
+        &self,
+        user_id: &str,
+    ) -> impl Future<Output = Result<(Vec<String>, bool), StoreError>> + Send;
+
+    /// Ties the subject of `provider` to the account. A subject of any account, or a provider the
+    /// account already has, is an `IdentityTaken`; a disabled account is a `UserDisabled`.
+    fn link_identity(
+        &self,
+        user_id: &str,
+        provider: &str,
+        subject: &str,
+        now: i64,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Unties `provider`, and says whether it was tied. An account with no password and no other
+    /// identity keeps it: it is a `LastLogin`.
+    fn unlink_identity(
+        &self,
+        user_id: &str,
+        provider: &str,
+    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 }

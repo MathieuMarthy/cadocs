@@ -15,7 +15,7 @@ use axum::routing::{get, post};
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use cadocs_store::now_ms;
-use common::{Api, ORIGIN, Reply, start_tuned};
+use common::{Api, Login, ORIGIN, Reply, start_tuned};
 use ring::rand::SystemRandom;
 use ring::signature::{RSA_PKCS1_SHA256, RsaKeyPair, RsaPublicKeyComponents};
 use serde_json::{Value, json};
@@ -460,4 +460,208 @@ async fn a_callback_with_nothing_to_check_or_trade_spends_nothing() {
         .await;
     refused_with(&reply, "failed");
     assert_eq!(fake.tokens.load(Ordering::SeqCst), 0);
+}
+
+impl Api {
+    /// A logged-in user asks to link the provider: where to send the browser, and the cookie.
+    async fn start_link(&self, fake: &Fake, login: &Login) -> Started {
+        let reply = self
+            .send(
+                "POST",
+                "/me/identities/fake",
+                &login.headers(),
+                json!({ "current_password": common::PASSWORD }),
+            )
+            .await;
+        assert_eq!(reply.status, 200, "{reply:?}");
+        let location = Url::parse(reply.body["url"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            location[..url::Position::AfterPath],
+            format!("{}/authorize", fake.issuer)
+        );
+        let cookie = set_cookie(&reply, "__Host-oidc").expect("a cookie that binds the link");
+        let query = location.query_pairs().into_owned().collect();
+        Started { cookie, query }
+    }
+
+    /// The browser comes back from the provider, with the session cookie it always sends.
+    async fn finish_link(
+        &self,
+        fake: &Fake,
+        login: &Login,
+        started: &Started,
+        subject: &str,
+    ) -> Reply {
+        let claims = claims(fake, started, subject, "grace@example.org");
+        let together = Started {
+            cookie: format!("{}; {}", started.cookie, login.cookie),
+            query: started.query.clone(),
+        };
+        self.finish_oidc(fake, &together, claims).await
+    }
+}
+
+fn linked(reply: &Reply, outcome: &str) {
+    assert_eq!(reply.status, 303, "{reply:?}");
+    assert_eq!(
+        reply.header("location"),
+        Some(format!("/account?oidc={outcome}").as_str())
+    );
+    assert_eq!(set_cookie(reply, common::COOKIE), None, "no new session");
+}
+
+#[tokio::test]
+async fn the_login_screen_learns_the_providers() {
+    let fake = fake_provider().await;
+    let api = server(&fake, &[]).await;
+    let reply = api.raw("GET", "/auth/setup", &[], b"").await;
+    assert_eq!(reply.body["oidc"], json!(["fake"]));
+    let plain = common::start().await;
+    let reply = plain.raw("GET", "/auth/setup", &[], b"").await;
+    assert!(reply.body.get("oidc").is_none(), "{:?}", reply.body);
+}
+
+#[tokio::test]
+async fn an_owner_links_a_provider_and_logs_in_with_it() {
+    let fake = fake_provider().await;
+    let api = server(&fake, &[]).await;
+    let login = Login::from(&api.setup().await);
+    let before = api.get(&login, "/me/identities").await;
+    assert_eq!(before.body, json!({ "providers": [], "password": true }));
+
+    let started = api.start_link(&fake, &login).await;
+    let reply = api.finish_link(&fake, &login, &started, "ada-sso").await;
+    linked(&reply, "linked");
+    assert_eq!(api.identities().await, 1);
+    let after = api.get(&login, "/me/identities").await;
+    assert_eq!(after.body["providers"], json!(["fake"]));
+
+    // The same subject now logs into Ada, not into a new account.
+    let reply = api.oidc_login(&fake, "ada-sso", "other@example.org").await;
+    let cookie = set_cookie(&reply, common::COOKIE).expect("a session");
+    let session = api
+        .raw("GET", "/session", &[("cookie", &cookie)], b"")
+        .await;
+    assert_eq!(session.body["user"]["email"], "ada@example.org");
+    assert_eq!(api.number("SELECT count(*) FROM users").await, 1);
+}
+
+#[tokio::test]
+async fn a_subject_of_another_account_is_refused() {
+    let fake = fake_provider().await;
+    let api = server(&fake, &[]).await;
+    let ada = Login::from(&api.setup().await);
+    let other = api.add_and_login("u2", "two@example.org").await;
+    let started = api.start_link(&fake, &other).await;
+    linked(
+        &api.finish_link(&fake, &other, &started, "shared").await,
+        "linked",
+    );
+
+    let started = api.start_link(&fake, &ada).await;
+    linked(
+        &api.finish_link(&fake, &ada, &started, "shared").await,
+        "taken",
+    );
+    assert_eq!(api.identities().await, 1);
+}
+
+#[tokio::test]
+async fn a_second_subject_of_the_same_provider_is_refused() {
+    let fake = fake_provider().await;
+    let api = server(&fake, &[]).await;
+    let ada = Login::from(&api.setup().await);
+    let started = api.start_link(&fake, &ada).await;
+    linked(
+        &api.finish_link(&fake, &ada, &started, "one").await,
+        "linked",
+    );
+    let started = api.start_link(&fake, &ada).await;
+    linked(
+        &api.finish_link(&fake, &ada, &started, "two").await,
+        "taken",
+    );
+    assert_eq!(api.identities().await, 1);
+}
+
+#[tokio::test]
+async fn a_link_is_for_the_user_who_asked_and_needs_a_session() {
+    let fake = fake_provider().await;
+    let api = server(&fake, &[]).await;
+    let ada = Login::from(&api.setup().await);
+    let other = api.add_and_login("u2", "two@example.org").await;
+    let started = api.start_link(&fake, &ada).await;
+    // Someone else's session holds Ada's cookie: nothing gets linked to either.
+    let reply = api.finish_link(&fake, &other, &started, "mallory").await;
+    linked(&reply, "failed");
+    let reply = api
+        .finish_oidc(&fake, &started, claims(&fake, &started, "x", "x@e.org"))
+        .await;
+    linked(&reply, "failed");
+    assert_eq!(api.identities().await, 0);
+    let reply = api
+        .send("POST", "/me/identities/fake", &[], json!({}))
+        .await;
+    assert_eq!(reply.status, 401);
+    let reply = api
+        .send("POST", "/me/identities/other", &ada.headers(), json!({}))
+        .await;
+    assert_eq!(reply.status, 404);
+}
+
+#[tokio::test]
+async fn an_identity_can_go_unless_it_is_the_only_way_in() {
+    let fake = fake_provider().await;
+    let api = server(&fake, &[]).await;
+    let ada = Login::from(&api.setup().await);
+    let started = api.start_link(&fake, &ada).await;
+    linked(
+        &api.finish_link(&fake, &ada, &started, "ada-sso").await,
+        "linked",
+    );
+    let gone = api
+        .send("DELETE", "/me/identities/fake", &ada.headers(), json!({}))
+        .await;
+    assert_eq!(gone.status, 204, "{gone:?}");
+    assert_eq!(api.identities().await, 0);
+    let again = api
+        .send("DELETE", "/me/identities/fake", &ada.headers(), json!({}))
+        .await;
+    assert_eq!(again.status, 404);
+
+    // An account the provider made has no password: its identity is all it has.
+    let reply = api.oidc_login(&fake, "grace-1", "grace@example.org").await;
+    let cookie = set_cookie(&reply, common::COOKIE).unwrap();
+    let session = api
+        .raw("GET", "/session", &[("cookie", &cookie)], b"")
+        .await;
+    let grace = Login {
+        cookie,
+        csrf: session.body["csrf_token"].as_str().unwrap().to_owned(),
+    };
+    let state = api.get(&grace, "/me/identities").await;
+    assert_eq!(
+        state.body,
+        json!({ "providers": ["fake"], "password": false })
+    );
+    let kept = api
+        .send("DELETE", "/me/identities/fake", &grace.headers(), json!({}))
+        .await;
+    assert_eq!(kept.status, 409, "{kept:?}");
+    assert_eq!(api.identities().await, 1);
+}
+
+#[tokio::test]
+async fn a_stolen_session_cannot_tie_its_own_provider_to_an_account_with_a_password() {
+    let fake = fake_provider().await;
+    let api = server(&fake, &[]).await;
+    let ada = Login::from(&api.setup().await);
+    let path = "/me/identities/fake";
+    let none = api.send("POST", path, &ada.headers(), json!({})).await;
+    assert_eq!(none.status, 400, "{none:?}");
+    assert_eq!(none.body["error"]["fields"]["current_password"], "required");
+    let wrong = json!({ "current_password": "not the password" });
+    let wrong = api.send("POST", path, &ada.headers(), wrong).await;
+    assert_eq!(wrong.status, 400, "{wrong:?}");
+    assert_eq!(set_cookie(&wrong, "__Host-oidc"), None);
 }

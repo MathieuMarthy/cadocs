@@ -77,6 +77,11 @@ export const en = {
   "login.startOver": "use another account",
   "login.totpAsked": "type the code your authenticator app shows, or one of your recovery codes.",
   "login.totpCode": "app or recovery code",
+  "login.oidc.with": "log in with {provider}",
+  "login.oidc.failed": "the login through your provider did not work. try again, or ask an administrator.",
+  "login.oidc.taken":
+    "an account already uses this address. log in with your password, then link the provider on your account screen.",
+  "login.oidc.closed": "this instance does not make accounts for new people. ask an administrator to invite you.",
   "login.forgot": "forgot your password?",
   "login.forgotNoMail": "forgot your password? ask an administrator for a reset link.",
   "login.noAccount": "no account?",
@@ -349,6 +354,16 @@ export const en = {
   "account.totp": "authenticator app",
   "account.totpOff":
     "off: after your password, a login can also ask for a code from an app on your phone",
+  "account.sso": "single sign-on",
+  "account.ssoOff": "not linked",
+  "account.ssoOn": "linked",
+  "account.ssoLink": "link",
+  "account.ssoUnlink": "unlink",
+  "account.ssoLinked": "linked: you can log in with it from now on.",
+  "account.ssoTaken": "this identity, or another one of this provider, is tied to an account already.",
+  "account.ssoFailed": "the link did not work. try again.",
+  "account.ssoNoFactor":
+    "a login through a provider asks for the provider's own factors, not the app above.",
   "account.totpOn": "on: each login needs a code from your app, or a recovery code",
   "account.totpSetUp": "set up",
   "account.totpScan": "scan this QR code with your app, or type the key into it, then type the code it shows",

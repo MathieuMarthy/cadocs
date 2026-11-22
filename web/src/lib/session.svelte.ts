@@ -61,6 +61,8 @@ export interface MailFeatures {
   mail: boolean;
   /** Anyone can make an account. */
   registration: boolean;
+  /** The ids of the single sign-on providers (ADR 0028). */
+  oidc: string[];
 }
 
 /**
@@ -69,10 +71,17 @@ export interface MailFeatures {
  */
 export async function mailFeatures(): Promise<MailFeatures> {
   try {
-    const state = await api<{ mail?: boolean; registration?: boolean }>("GET", "/auth/setup");
-    return { mail: state.mail === true, registration: state.registration === true };
+    const state = await api<{ mail?: boolean; registration?: boolean; oidc?: string[] }>(
+      "GET",
+      "/auth/setup",
+    );
+    return {
+      mail: state.mail === true,
+      registration: state.registration === true,
+      oidc: state.oidc ?? [],
+    };
   } catch {
-    return { mail: false, registration: false };
+    return { mail: false, registration: false, oidc: [] };
   }
 }
 

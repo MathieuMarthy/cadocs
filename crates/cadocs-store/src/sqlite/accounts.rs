@@ -1106,4 +1106,94 @@ impl AccountStore for SqliteStore {
         tx.commit().await?;
         Ok(())
     }
+    async fn identities(&self, user_id: &str) -> Result<(Vec<String>, bool), StoreError> {
+        let providers = sqlx::query_scalar(
+            "SELECT provider FROM user_identities WHERE user_id = ?1 ORDER BY provider",
+        )
+        .bind(user_id)
+        .fetch_all(&self.reader)
+        .await?;
+        let password: Option<bool> =
+            sqlx::query_scalar("SELECT password_hash IS NOT NULL FROM users WHERE id = ?1")
+                .bind(user_id)
+                .fetch_optional(&self.reader)
+                .await?;
+        Ok((providers, password.ok_or(StoreError::UserNotFound)?))
+    }
+
+    async fn link_identity(
+        &self,
+        user_id: &str,
+        provider: &str,
+        subject: &str,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        let disabled: Option<bool> =
+            sqlx::query_scalar("SELECT disabled_at IS NOT NULL FROM users WHERE id = ?1")
+                .bind(user_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        match disabled {
+            None => return Err(StoreError::UserNotFound),
+            Some(true) => return Err(StoreError::UserDisabled),
+            Some(false) => {}
+        }
+        let held: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM user_identities WHERE provider = ?1
+                            AND (subject = ?2 OR user_id = ?3))",
+        )
+        .bind(provider)
+        .bind(subject)
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if held {
+            return Err(StoreError::IdentityTaken);
+        }
+        sqlx::query(
+            "INSERT INTO user_identities (provider, subject, user_id, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(provider)
+        .bind(subject)
+        .bind(user_id)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn unlink_identity(&self, user_id: &str, provider: &str) -> Result<bool, StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        let tied: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM user_identities WHERE user_id = ?1 AND provider = ?2)",
+        )
+        .bind(user_id)
+        .bind(provider)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !tied {
+            return Ok(false);
+        }
+        let other: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM user_identities WHERE user_id = ?1 AND provider <> ?2)
+                 OR (SELECT password_hash IS NOT NULL FROM users WHERE id = ?1)",
+        )
+        .bind(user_id)
+        .bind(provider)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !other {
+            return Err(StoreError::LastLogin);
+        }
+        sqlx::query("DELETE FROM user_identities WHERE user_id = ?1 AND provider = ?2")
+            .bind(user_id)
+            .bind(provider)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
 }

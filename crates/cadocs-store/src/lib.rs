@@ -96,6 +96,10 @@ pub enum StoreError {
     TotpOn,
     #[error("the authenticator app of this account is off")]
     TotpOff,
+    #[error("this provider or subject is tied to an account already")]
+    IdentityTaken,
+    #[error("this is the only way into the account")]
+    LastLogin,
     #[error("this account is disabled")]
     UserDisabled,
     #[error("no such workspace")]
