@@ -9,6 +9,7 @@
   import Backlinks from "../components/Backlinks.svelte";
   import Comments from "../components/Comments.svelte";
   import DuplicatePage from "../components/DuplicatePage.svelte";
+  import NewFromTemplate from "../components/NewFromTemplate.svelte";
   import Icon from "../components/Icon.svelte";
   import Menu, { type MenuItem } from "../components/Menu.svelte";
   import Share from "../components/Share.svelte";
@@ -106,6 +107,8 @@
 
   /** The form that copies the page shows above it. */
   let duplicating = $state(false);
+  /** The form that starts a subpage from a template. */
+  let templating = $state(false);
 
   /**
    * The top bar's menu: copy link, history, export and print for anyone, duplicate for those who
@@ -115,6 +118,12 @@
     const items: MenuItem[] = [
       { icon: "link", label: t("page.copyLink"), select: () => void copy(pageLink(id)) },
       ...(editable ? [{ icon: "globe" as const, label: t("page.share"), select: () => (sharing = true) }] : []),
+      ...(editable
+        ? [
+            { icon: "copy" as const, label: t("page.saveTemplate"), select: () => void saveTemplate() },
+            { icon: "copy" as const, label: t("page.fromTemplate"), select: () => (templating = true) },
+          ]
+        : []),
       { icon: "history", label: t("history.title"), href: `/?page=${id}&history` },
       { icon: "download", label: t("page.export"), href: exportUrl(id, false) },
       { icon: "download", label: t("page.exportAll"), href: exportUrl(id, true) },
@@ -139,6 +148,15 @@
     }
     return items;
   });
+
+  async function saveTemplate() {
+    try {
+      await api("POST", `/pages/${id}/template`);
+      notify(t("page.templateSaved"));
+    } catch (error) {
+      notify(describe(error));
+    }
+  }
 
   /** A string, so that reading the page again does not ask for it again. */
   const spaceId = $derived(row?.space_id ?? null);
@@ -332,6 +350,9 @@
       <main class="page">
         {#if duplicating && row && nav}
           <DuplicatePage {nav} page={row} onclose={() => (duplicating = false)} />
+        {/if}
+        {#if templating && row}
+          <NewFromTemplate page={row} onclose={() => (templating = false)} />
         {/if}
         {#if stale}
           <div class="banner" role="alert">

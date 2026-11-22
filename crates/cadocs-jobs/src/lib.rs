@@ -23,7 +23,9 @@ use uuid::Uuid;
 pub use cleanup::{Cleanup, MAINTAIN_DATABASE, PURGE_EXPIRED, PURGE_ORPHAN_FILES, PURGE_TRASH};
 pub use index::Index;
 pub use mail::MailNotifications;
-pub use revisions::{Decoded, RevisionError, Revisions, capture, decode, decode_bounded, restore};
+pub use revisions::{
+    Decoded, RevisionError, Revisions, capture, decode, decode_bounded, pack, restore,
+};
 
 /// Whatever went wrong, for `last_error`.
 pub type JobError = Box<dyn Error + Send + Sync>;
