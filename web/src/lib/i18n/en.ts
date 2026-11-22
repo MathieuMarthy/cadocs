@@ -314,6 +314,8 @@ export const en = {
   "history.none": "no revision yet. one is kept once editing pauses.",
   "history.list": "revisions",
   "history.revision": "revision {number}",
+  "history.compare": "compare with",
+  "history.compareNone": "nothing",
   "history.restore": "restore",
   "history.restoreConfirm": "restore revision {number}",
   "history.restored": "revision {number} restored",

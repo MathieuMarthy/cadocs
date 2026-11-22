@@ -59,7 +59,7 @@ Steps. The rules of the MVP steps apply, and every new screen takes its strings 
 - [x] Step 41: in-app notifications. `notifications` for mentions, replies and comments on one's pages, the `notification` event, a list with unread count and read state.
 - [x] Step 42: mail notifications. Through the relay only, a setting per user, grouped by a job so one burst sends one message. Done when, with no relay, nothing of it answers.
 - [x] Step 43: math and Mermaid. Block and inline math, Mermaid blocks, loaded on demand in the editor. `cadocs-content` writes their source to Markdown and as a code block in HTML.
-- [ ] Step 44: revision diff. Compare a revision with the current page or another revision, on the screen of revisions.
+- [x] Step 44: revision diff. Compare a revision with the current page or another revision, on the screen of revisions.
 - [x] Step 45: public shares, server. `page_shares`, its routes, `/s/{token}` rendered by the bounded reader, descendants, files, `ETag`, the strict CSP, `X-Robots-Tag` unless indexable, a rate limit. Done when a test shows a script in content cannot run there.
 - [x] Step 46: public shares, screens. A share dialog on the page: children, indexing, expiry, revoke.
 - [x] Step 47: TOTP. `user_totp`, recovery codes, login asking for the code, the account screen. Mail codes (ADR 0026) keep working beside it.

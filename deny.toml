@@ -9,14 +9,7 @@ all-features = true
 # workspace's direct dependencies, which it can act on.
 unmaintained = "workspace"
 yanked = "deny"
-ignore = [
-    # SQLite before 3.54.0 can return stale page-cache bytes when it opens a database beside a
-    # crafted `-wal` file of another page size. cadocs only opens its own data folder, which an
-    # attacker able to plant files there already controls. sqlx 0.9.0, the latest, caps
-    # libsqlite3-sys below 0.38, so the patched 0.39 cannot be taken yet: remove this once sqlx
-    # allows it (docs/notes/store.md).
-    { id = "RUSTSEC-2026-0459", reason = "local only, own files; blocked on sqlx allowing libsqlite3-sys 0.39" },
-]
+ignore = []
 
 [licenses]
 # Compatible with AGPL-3.0 (ADR 0010). A new license must be checked before it is added here.

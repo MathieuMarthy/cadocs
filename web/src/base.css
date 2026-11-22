@@ -1074,3 +1074,15 @@ button.row:hover {
     word-break: break-all;
   }
 }
+
+.revision-content .diff-add {
+  border-left: 3px solid var(--ink);
+  padding-left: var(--space-2);
+}
+
+.revision-content .diff-del {
+  border-left: 3px dashed var(--danger);
+  padding-left: var(--space-2);
+  color: var(--danger);
+  text-decoration: line-through;
+}
