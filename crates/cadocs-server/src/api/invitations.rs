@@ -239,6 +239,7 @@ async fn accept<S: AccountStore + WorkspaceStore, A>(
         name: invited.name,
         is_instance_admin: false,
         email_2fa: false,
+        email_notifications: false,
         totp: false,
         language: None,
     };

@@ -24,6 +24,8 @@ pub struct User {
     pub is_instance_admin: bool,
     /// Whether a login needs a code by mail after the password (ADR 0026).
     pub email_2fa: bool,
+    /// Whether a message by mail tells of the notifications the user has not read (step 42).
+    pub email_notifications: bool,
     /// Whether a login needs a code from an authenticator app (RFC 6238). It replaces the code by
     /// mail when both are on.
     pub totp: bool,
@@ -384,6 +386,13 @@ pub trait AccountStore: Send + Sync + 'static {
         &self,
         user_id: &str,
         attempt: &CodeAttempt<'_>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Turns the mail of notifications on or off for a user.
+    fn set_email_notifications(
+        &self,
+        user_id: &str,
+        on: bool,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// How many enabled accounts have the second factor on, for the notice at start.

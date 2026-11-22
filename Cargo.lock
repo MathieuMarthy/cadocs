@@ -340,6 +340,7 @@ dependencies = [
  "cadocs-collab",
  "cadocs-content",
  "cadocs-files",
+ "cadocs-mail",
  "cadocs-search",
  "cadocs-store",
  "futures-util",

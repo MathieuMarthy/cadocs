@@ -23,8 +23,8 @@ pub use accounts::{
 };
 pub use attachments::{Attachment, AttachmentStore, NewAttachment, UploadTarget};
 pub use comments::{
-    Anchor, Comment, CommentChange, CommentStore, CommentUser, INBOX_SIZE, Inbox, NewComment,
-    Notification, NotificationKind, Notified, Thread,
+    Anchor, Comment, CommentChange, CommentStore, CommentUser, INBOX_SIZE, Inbox,
+    MAIL_NOTIFICATIONS, MailDigest, NewComment, Notification, NotificationKind, Notified, Thread,
 };
 pub use groups::{Group, GroupStore, NewGroup};
 pub use jobs::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob};

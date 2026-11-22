@@ -115,6 +115,14 @@
     }
   }
 
+  // Notifications by mail (step 42), offered only with a relay.
+  const notifying = new Form();
+
+  async function chooseNotifications(enabled: boolean) {
+    const done = await notifying.run(() => api("PUT", "/me/email-notifications", { enabled }));
+    if (done) updateUser({ ...app.session!.user, email_notifications: enabled });
+  }
+
   // The authenticator app (RFC 6238), which needs no relay.
   interface TotpSetup {
     secret: string;
@@ -331,6 +339,27 @@
           </button>
         </div>
       {/if}
+    </section>
+  {/if}
+
+  {#if mail}
+    <section aria-labelledby="notifications-heading">
+      <h2 id="notifications-heading">{t("account.notifications")}</h2>
+      <p class="meta">
+        {t(app.session!.user.email_notifications ? "account.notificationsOn" : "account.notificationsOff")}
+      </p>
+      {#if notifying.problem}<p class="problem" role="alert">{notifying.problem}</p>{/if}
+      <div class="actions">
+        <button
+          class="button"
+          class:secondary={app.session!.user.email_notifications}
+          type="button"
+          disabled={notifying.busy}
+          onclick={() => chooseNotifications(!app.session!.user.email_notifications)}
+        >
+          {t(app.session!.user.email_notifications ? "account.turnOff" : "account.turnOn")}
+        </button>
+      </div>
     </section>
   {/if}
 

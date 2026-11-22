@@ -10,7 +10,7 @@ use axum::http::header::{CACHE_CONTROL, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Extension, Json, Router};
 use cadocs_collab::Authorizer;
 use cadocs_core::permissions::{InstanceAction, instance_allows, instance_role};
@@ -117,6 +117,7 @@ where
                     .route_layer(sends)
                     .merge(delete(disable_email_2fa)),
             )
+            .route("/me/email-notifications", put(set_email_notifications))
             .route("/me/email-2fa/confirm", post(enable_email_2fa))
             .route("/me/email/confirm", post(confirm_email));
     }
@@ -134,6 +135,7 @@ pub(super) struct UserBody {
     name: String,
     is_instance_admin: bool,
     email_2fa: bool,
+    email_notifications: bool,
     totp: bool,
     language: Option<String>,
 }
@@ -146,6 +148,7 @@ impl From<User> for UserBody {
             name: user.name,
             is_instance_admin: user.is_instance_admin,
             email_2fa: user.email_2fa,
+            email_notifications: user.email_notifications,
             totp: user.totp,
             language: user.language,
         }
@@ -292,6 +295,7 @@ async fn setup<S: AccountStore, A>(
         name,
         is_instance_admin: true,
         email_2fa: false,
+        email_notifications: false,
         totp: false,
         language: None,
     };
@@ -631,6 +635,7 @@ async fn update_me<S: AccountStore, A>(
         id: user.id,
         is_instance_admin: user.is_instance_admin,
         email_2fa: user.email_2fa && !unproven,
+        email_notifications: user.email_notifications,
         totp: user.totp,
         language: changes.language.unwrap_or(user.language),
     }))
@@ -811,6 +816,24 @@ async fn enable_email_2fa<S: AccountStore, A>(
 #[derive(Deserialize)]
 struct DisableRequest {
     current_password: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct NotificationsRequest {
+    enabled: bool,
+}
+
+/// Mail of notifications (step 42): only a relay registers this route.
+async fn set_email_notifications<S: AccountStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    JsonBody(body): JsonBody<NotificationsRequest>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .store
+        .set_email_notifications(&current.user.id, body.enabled)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// A stolen session must not take the factor off: it needs the password.
@@ -1230,6 +1253,7 @@ async fn confirm_registration<S: AccountStore, A>(
         name,
         is_instance_admin: false,
         email_2fa: false,
+        email_notifications: false,
         totp: false,
         language: None,
     };

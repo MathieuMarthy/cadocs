@@ -6,8 +6,8 @@ use super::mentions::{self, Place};
 use super::pages;
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
-    Anchor, Comment, CommentChange, CommentStore, CommentUser, INBOX_SIZE, Inbox, NewComment,
-    Notification, NotificationKind, Notified, PageSite, StoreError, Thread,
+    Anchor, Comment, CommentChange, CommentStore, CommentUser, INBOX_SIZE, Inbox, MailDigest,
+    NewComment, Notification, NotificationKind, Notified, PageSite, StoreError, Thread,
 };
 
 /// A comment with the names of its author and of who resolved it, while their accounts exist.
@@ -213,7 +213,16 @@ impl CommentStore for SqliteStore {
             comment_id: Some(&new.id),
             workspace_id: &site.workspace_id,
         };
-        mentions::replace(&mut tx, &place, &new.mentions, Some(&new.actor), new.now).await?;
+        let mail_at = new.now.saturating_add(self.mail_delay.as_millis() as i64);
+        mentions::replace(
+            &mut tx,
+            &place,
+            &new.mentions,
+            Some(&new.actor),
+            new.now,
+            mail_at,
+        )
+        .await?;
         // A user mentioned is told of that alone, then the author of the thread, then the page's.
         for (kind, owner) in [
             ("reply", "SELECT author_id FROM comments WHERE id = ?3"),
@@ -236,9 +245,11 @@ impl CommentStore for SqliteStore {
             .execute(&mut *tx)
             .await?;
         }
+        mentions::queue_mail(&mut tx, new.now, mail_at).await?;
         let notified = notified(&mut tx, &new.id, new.now).await?;
         let comment = select_comment(&mut tx, &new.id).await?;
         tx.commit().await?;
+        self.jobs_added.notify_one();
         Ok(CommentChange {
             comment,
             site,
@@ -267,10 +278,12 @@ impl CommentStore for SqliteStore {
             comment_id: Some(comment_id),
             workspace_id: &target.site.workspace_id,
         };
-        mentions::replace(&mut tx, &place, users, Some(actor), now).await?;
+        let mail_at = now.saturating_add(self.mail_delay.as_millis() as i64);
+        mentions::replace(&mut tx, &place, users, Some(actor), now, mail_at).await?;
         let notified = notified(&mut tx, comment_id, now).await?;
         let comment = select_comment(&mut tx, comment_id).await?;
         tx.commit().await?;
+        self.jobs_added.notify_one();
         Ok(CommentChange {
             comment,
             site: target.site,
@@ -342,10 +355,10 @@ impl CommentStore for SqliteStore {
         // takes no place from the others only once they are older than the window.
         let rows = sqlx::query(AssertSqlSafe(format!(
             "WITH latest AS (
-                 SELECT rowid, id, kind, page_id, comment_id, actor_id, read_at, created_at
+                 SELECT rowid, id, kind, page_id, comment_id, actor_id, read_at, mailed_at, created_at
                  FROM notifications WHERE user_id = ?2 ORDER BY rowid DESC LIMIT ?3
              )
-             SELECT n.id AS notification_id, n.kind, n.comment_id, n.read_at, n.created_at AS sent_at,
+             SELECT n.id AS notification_id, n.kind, n.comment_id, n.read_at, n.mailed_at, n.created_at AS sent_at,
                     a.id AS actor_id, a.name AS actor_name, {columns}
              JOIN latest n ON n.page_id = p.id
              LEFT JOIN users a ON a.id = n.actor_id
@@ -376,12 +389,43 @@ impl CommentStore for SqliteStore {
                     comment_id: row.get("comment_id"),
                     actor: self::user(row, "actor_id", "actor_name"),
                     read: row.get::<Option<i64>, _>("read_at").is_some(),
+                    mailed: row.get::<Option<i64>, _>("mailed_at").is_some(),
                     created_at: row.get("sent_at"),
                 })
             })
             .collect();
         let unread = items.iter().filter(|item| !item.read).count();
         Ok(Inbox { items, unread })
+    }
+
+    async fn mail_digest(&self, user: &str) -> Result<Option<MailDigest>, StoreError> {
+        let account: Option<(String, String)> = sqlx::query_as(
+            "SELECT email, name FROM users
+             WHERE id = ?1 AND email_notifications = 1 AND disabled_at IS NULL",
+        )
+        .bind(user)
+        .fetch_optional(&self.reader)
+        .await?;
+        let Some((email, name)) = account else {
+            return Ok(None);
+        };
+        let mut items = self.notifications(user).await?.items;
+        items.retain(|item| !item.read && !item.mailed);
+        Ok((!items.is_empty()).then_some(MailDigest { email, name, items }))
+    }
+
+    async fn mark_mailed(&self, user: &str, ids: &[String], now: i64) -> Result<(), StoreError> {
+        let ids = serde_json::to_string(ids).expect("strings make JSON");
+        sqlx::query(
+            "UPDATE notifications SET mailed_at = ?3
+             WHERE user_id = ?1 AND id IN (SELECT value FROM json_each(?2))",
+        )
+        .bind(user)
+        .bind(ids)
+        .bind(now)
+        .execute(&self.writer)
+        .await?;
+        Ok(())
     }
 
     async fn read_notifications(

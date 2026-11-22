@@ -2,6 +2,7 @@
 
 mod cleanup;
 mod index;
+mod mail;
 mod revisions;
 
 use std::error::Error;
@@ -10,8 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cadocs_store::{
-    AttachmentStore, CREATE_REVISION, DocStore, Job, JobStore, NewJob, REINDEX_PAGE, RevisionStore,
-    SearchStore, StoreError, THIN_REVISIONS, now_ms,
+    AttachmentStore, CREATE_REVISION, CommentStore, DocStore, Job, JobStore, MAIL_NOTIFICATIONS,
+    NewJob, REINDEX_PAGE, RevisionStore, SearchStore, StoreError, THIN_REVISIONS, now_ms,
 };
 use tokio::sync::Notify;
 use tokio::task::JoinSet;
@@ -21,6 +22,7 @@ use uuid::Uuid;
 
 pub use cleanup::{Cleanup, MAINTAIN_DATABASE, PURGE_EXPIRED, PURGE_ORPHAN_FILES, PURGE_TRASH};
 pub use index::Index;
+pub use mail::MailNotifications;
 pub use revisions::{Decoded, RevisionError, Revisions, capture, decode, decode_bounded, restore};
 
 /// Whatever went wrong, for `last_error`.
@@ -110,24 +112,31 @@ impl<S: JobStore> JobQueue<S> {
     }
 }
 
-/// Every job of the server: the cleanups, the search index and the revisions.
+/// Every job of the server: the cleanups, the search index, the revisions and the mail.
 pub struct ServerJobs<S> {
     cleanup: Cleanup<S>,
     index: Index<S>,
     revisions: Revisions<S>,
+    mail: MailNotifications<S>,
 }
 
 impl<S> ServerJobs<S> {
-    pub fn new(cleanup: Cleanup<S>, index: Index<S>, revisions: Revisions<S>) -> Self {
+    pub fn new(
+        cleanup: Cleanup<S>,
+        index: Index<S>,
+        revisions: Revisions<S>,
+        mail: MailNotifications<S>,
+    ) -> Self {
         Self {
             cleanup,
             index,
             revisions,
+            mail,
         }
     }
 }
 
-impl<S: DocStore + JobStore + AttachmentStore + SearchStore + RevisionStore> Handler
+impl<S: DocStore + JobStore + AttachmentStore + SearchStore + RevisionStore + CommentStore> Handler
     for ServerJobs<S>
 {
     const RECURRING: &'static [&'static str] = &[
@@ -143,6 +152,7 @@ impl<S: DocStore + JobStore + AttachmentStore + SearchStore + RevisionStore> Han
             REINDEX_PAGE => self.index.reindex(job).await,
             CREATE_REVISION => self.revisions.create(job).await,
             THIN_REVISIONS => self.revisions.thin().await,
+            MAIL_NOTIFICATIONS => self.mail.run(job).await,
             _ => self.cleanup.run(job).await,
         }
     }

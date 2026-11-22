@@ -9,6 +9,8 @@ export interface User {
   is_instance_admin: boolean;
   /** A login needs a code by mail after the password (ADR 0026). */
   email_2fa: boolean;
+  /** A message by mail tells of the notifications not read yet (step 42). */
+  email_notifications: boolean;
   /** A login needs a code from an authenticator app, in place of the one by mail. */
   totp: boolean;
   /** The language of the interface, `null` to follow the browser's. */

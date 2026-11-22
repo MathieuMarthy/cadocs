@@ -32,7 +32,9 @@ use axum::routing::{any, get};
 use cadocs_collab::{Authorizer, DocRegistry};
 use cadocs_core::permissions::WorkspaceCreation;
 use cadocs_files::FileStore;
-use cadocs_jobs::{Cleanup, Index, JobConfig, JobQueue, Revisions, ServerJobs, Worker};
+use cadocs_jobs::{
+    Cleanup, Index, JobConfig, JobQueue, MailNotifications, Revisions, ServerJobs, Worker,
+};
 use cadocs_mail::Outbox;
 use cadocs_store::{
     AccountStore, AttachmentStore, CommentStore, DocStore, GroupStore, JobStore, PageStore,
@@ -182,7 +184,10 @@ impl<S, A> AppState<S, A> {
 
 /// Starts the worker, which runs until the process ends: a job it cuts short runs again at the next
 /// start. The queue is for whatever adds jobs.
-pub fn start_jobs<S: DocStore + JobStore + AttachmentStore + SearchStore + RevisionStore, A>(
+pub fn start_jobs<
+    S: DocStore + JobStore + AttachmentStore + SearchStore + RevisionStore + CommentStore,
+    A,
+>(
     state: &AppState<S, A>,
     config: JobConfig,
 ) -> JobQueue<S> {
@@ -200,7 +205,12 @@ pub fn start_jobs<S: DocStore + JobStore + AttachmentStore + SearchStore + Revis
         state.registry.clone(),
         config.revision_retention,
     );
-    let jobs = ServerJobs::new(cleanup, index, revisions);
+    let mail = MailNotifications::new(
+        state.store.clone(),
+        state.mail.clone(),
+        state.http.public_url.origin().to_owned(),
+    );
+    let jobs = ServerJobs::new(cleanup, index, revisions, mail);
     tokio::spawn(Worker::new(queue.clone(), Arc::new(jobs), config).run());
     queue
 }

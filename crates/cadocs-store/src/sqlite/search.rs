@@ -112,7 +112,9 @@ impl SearchStore for SqliteStore {
             workspace_id: &workspace,
         };
         let author = last_editor.as_deref();
-        mentions::replace(&mut tx, &body, index.mentions, author, now_ms()).await?;
+        let now = now_ms();
+        let mail_at = now.saturating_add(self.mail_delay.as_millis() as i64);
+        mentions::replace(&mut tx, &body, index.mentions, author, now, mail_at).await?;
         let links = serde_json::to_string(index.links).expect("strings make JSON");
         sqlx::query("DELETE FROM page_links WHERE source_id = ?1")
             .bind(index.page_id)

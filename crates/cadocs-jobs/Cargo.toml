@@ -9,6 +9,7 @@ publish.workspace = true
 cadocs-collab.workspace = true
 cadocs-content.workspace = true
 cadocs-files.workspace = true
+cadocs-mail.workspace = true
 cadocs-search.workspace = true
 cadocs-store.workspace = true
 futures-util.workspace = true

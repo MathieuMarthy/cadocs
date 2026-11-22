@@ -1,8 +1,8 @@
 //! Mentions of users by a page's body or by a comment, kept in step with what that text names.
 
-use sqlx::SqliteConnection;
+use sqlx::{AssertSqlSafe, SqliteConnection};
 
-use crate::StoreError;
+use crate::{MAIL_NOTIFICATIONS, StoreError};
 
 /// Where mentions come from: the body of a page, or one of its comments.
 pub(super) struct Place<'a> {
@@ -22,6 +22,7 @@ pub(super) async fn replace(
     users: &[String],
     author: Option<&str>,
     now: i64,
+    mail_at: i64,
 ) -> Result<(), StoreError> {
     let users = serde_json::to_string(users).expect("strings make JSON");
     sqlx::query(
@@ -93,6 +94,31 @@ pub(super) async fn replace(
     .bind(author)
     .bind(now)
     .execute(&mut *conn)
+    .await?;
+    queue_mail(conn, now, mail_at).await
+}
+
+/// Queues, for each user who wants mail and has a notification no message told, the job that
+/// mails them, due at `run_at`. One waiting for a user takes the others' place: a burst of
+/// notifications sends one message.
+pub(super) async fn queue_mail(
+    conn: &mut SqliteConnection,
+    now: i64,
+    run_at: i64,
+) -> Result<(), StoreError> {
+    sqlx::query(AssertSqlSafe(format!(
+        "INSERT INTO jobs (id, kind, dedup_key, payload, run_at, created_at)
+         SELECT lower(hex(randomblob(16))), '{MAIL_NOTIFICATIONS}', 'mail:' || u.id,
+                json_object('user', u.id), ?2, ?1
+         FROM users u
+         WHERE u.email_notifications = 1 AND u.disabled_at IS NULL
+           AND EXISTS (SELECT 1 FROM notifications n
+                       WHERE n.user_id = u.id AND n.read_at IS NULL AND n.mailed_at IS NULL)
+         ON CONFLICT DO NOTHING"
+    )))
+    .bind(now)
+    .bind(run_at)
+    .execute(conn)
     .await?;
     Ok(())
 }

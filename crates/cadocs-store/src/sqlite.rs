@@ -49,6 +49,8 @@ const ZSTD_LEVEL: i32 = 3;
 
 /// How long after an edit its page is indexed: the edits of that time share one run.
 const REINDEX_DELAY: Duration = Duration::from_secs(5);
+/// How long a notification waits for others before the message that tells of it goes out.
+const MAIL_DELAY: Duration = Duration::from_secs(60);
 
 /// SQLite allows one writer at a time: a single connection queues writes in the pool instead of
 /// making them wait on `SQLITE_BUSY`, and reads never wait behind them (ADR 0002).
@@ -59,6 +61,7 @@ pub struct SqliteStore {
     /// Told of each job a write adds, the reindex of a flush included.
     jobs_added: Arc<Notify>,
     reindex_delay: Duration,
+    mail_delay: Duration,
     revision_timing: RevisionTiming,
 }
 
@@ -104,11 +107,17 @@ impl SqliteStore {
             reader,
             jobs_added: Arc::default(),
             reindex_delay: REINDEX_DELAY,
+            mail_delay: MAIL_DELAY,
             revision_timing: RevisionTiming::default(),
         }
     }
 
     /// For tests, which cannot wait the default.
+    pub fn with_mail_delay(mut self, delay: Duration) -> Self {
+        self.mail_delay = delay;
+        self
+    }
+
     pub fn with_reindex_delay(mut self, delay: Duration) -> Self {
         self.reindex_delay = delay;
         self
