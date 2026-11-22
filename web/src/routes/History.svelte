@@ -5,6 +5,7 @@
   import Shell from "../components/Shell.svelte";
   import Time from "../components/Time.svelte";
   import { api, ApiError, type Page } from "../lib/api";
+  import { blocksOf, diffBlocks, markup } from "../lib/diff";
   import { describe } from "../lib/form.svelte";
   import { acquireNav, canEdit, type Nav, type PageView } from "../lib/nav.svelte";
   import { notify } from "../lib/notice.svelte";
@@ -84,6 +85,30 @@
     );
   });
 
+  /** The revision `shown` is compared with, or none. */
+  let against = $state<number | null>(null);
+  let other = $state<Shown | null>(null);
+  $effect(() => {
+    const number = against;
+    other = null;
+    if (number === null) return;
+    void api<Shown>("GET", `/pages/${id}/revisions/${number}`).then(
+      (revision) => {
+        if (number === against) other = revision;
+      },
+      (error) => {
+        if (number === against) problem = describe(error);
+      },
+    );
+  });
+  $effect(() => {
+    if (against === current) against = null;
+  });
+  const compared = $derived.by(() => {
+    if (!shown || !other || shown.number !== current) return null;
+    return markup(diffBlocks(blocksOf(other.html), blocksOf(shown.html)));
+  });
+
   onMount(() => {
     void api<PageView>("GET", `/pages/${id}`).then(
       (answer) => (row = answer),
@@ -157,9 +182,24 @@
                 />
               {/if}
             </div>
+            <label class="meta">
+              {t("history.compare")}
+              <select class="select" bind:value={against}>
+                <option value={null}>{t("history.compareNone")}</option>
+                {#each items.filter((item) => item.number !== shown!.number) as item (item.number)}
+                  <option value={item.number}>#{item.number} {item.title || t("page.untitled")}</option>
+                {/each}
+              </select>
+            </label>
             <h2 class="history-title">{shown.title || t("page.untitled")}</h2>
             <!-- The server escapes every text and attribute of this HTML (cadocs-content). -->
-            <div class="tiptap revision-content">{@html shown.html}</div>
+            <div class="tiptap revision-content">
+              {#if compared}
+                {@html compared}
+              {:else}
+                {@html shown.html}
+              {/if}
+            </div>
           </section>
         {:else}
           <p class="meta" role="status">{t("common.loading")}</p>
