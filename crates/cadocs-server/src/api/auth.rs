@@ -241,6 +241,9 @@ struct SetupState {
     /// Whether anyone can make an account, which needs mail. Left out when not.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     registration: bool,
+    /// The ids of the OIDC providers, for the login buttons. Left out when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    oidc: Vec<String>,
 }
 
 /// Tells the front end to show first-run setup, since `GET /session` is a `401` either way.
@@ -256,6 +259,7 @@ async fn setup_state<S: AccountStore, A>(
         required,
         mail,
         registration,
+        oidc: state.oidc.iter().map(|p| p.id.clone()).collect(),
     };
     Ok((no_store, Json(body)).into_response())
 }
@@ -868,12 +872,12 @@ async fn disable_email_2fa<S: AccountStore, A>(
 }
 
 #[derive(Deserialize)]
-struct PasswordRequest {
-    current_password: Option<String>,
+pub(super) struct PasswordRequest {
+    pub(super) current_password: Option<String>,
 }
 
 /// Checks the password a change needs, as a guess, and returns the basis of that change.
-async fn require_password<S: AccountStore, A>(
+pub(super) async fn require_password<S: AccountStore, A>(
     state: &AppState<S, A>,
     current: &CurrentSession,
     client: (SocketAddr, &HeaderMap),

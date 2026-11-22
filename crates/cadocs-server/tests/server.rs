@@ -23,15 +23,16 @@ use cadocs_server::session::{csrf_token, token_hash};
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, CodeAttempt,
-    CommentChange, CommentStore, MailDigest, Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant,
+    CommentChange, CommentStore, Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant,
     Group, GroupStore, IdentityUser, IndexTarget, Invitation, InvitationPreview, InvitedUser,
-    Member, Membership, MovedPage, NewAttachment, NewComment, NewEmailCode, NewGrant, NewGroup,
-    NewInvitation, NewPage, NewPasswordReset, NewRevision, NewSession, NewShare, NewSpace, NewUser,
-    NewWorkspace, PageCopy, PageCrumb, PageIndex, PageMove, PageRecord, PageSite, PageStore,
-    Revision, RevisionStore, RevisionSummary, SearchHit, SearchStore, SessionStanding, Share,
-    ShareStore, SharedPage, SharedView, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore,
-    StoreError, StoredDoc, StoredUpdate, SubtreePage, Thread, TotpProof, UpdateBasis, UploadTarget,
-    UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
+    MailDigest, Member, Membership, MovedPage, NewAttachment, NewComment, NewEmailCode, NewGrant,
+    NewGroup, NewInvitation, NewPage, NewPasswordReset, NewRevision, NewSession, NewShare,
+    NewSpace, NewUser, NewWorkspace, PageCopy, PageCrumb, PageIndex, PageMove, PageRecord,
+    PageSite, PageStore, Revision, RevisionStore, RevisionSummary, SearchHit, SearchStore,
+    SessionStanding, Share, ShareStore, SharedPage, SharedView, Snapshot, Space, SpaceChanges,
+    SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, SubtreePage, Thread, TotpProof,
+    UpdateBasis, UploadTarget, UserChanges, UserRecord, Workspace, WorkspaceChanges,
+    WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -983,6 +984,26 @@ impl AccountStore for FlakyStore {
         session: &NewSession,
     ) -> Result<(), StoreError> {
         self.inner.register_identity(user, session).await
+    }
+
+    async fn identities(&self, user_id: &str) -> Result<(Vec<String>, bool), StoreError> {
+        self.inner.identities(user_id).await
+    }
+
+    async fn link_identity(
+        &self,
+        user_id: &str,
+        provider: &str,
+        subject: &str,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        self.inner
+            .link_identity(user_id, provider, subject, now)
+            .await
+    }
+
+    async fn unlink_identity(&self, user_id: &str, provider: &str) -> Result<bool, StoreError> {
+        self.inner.unlink_identity(user_id, provider).await
     }
 }
 

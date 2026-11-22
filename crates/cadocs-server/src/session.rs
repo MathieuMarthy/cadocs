@@ -225,6 +225,17 @@ fn csrf_matches(headers: &HeaderMap, token: &str) -> bool {
         .is_some_and(|sent| bool::from(sent.as_bytes().ct_eq(expected.as_bytes())))
 }
 
+/// The session of a browser navigation, which carries no CSRF token: only for what a forged
+/// navigation cannot abuse, as the end of a flow whose own cookie binds it to this browser.
+pub async fn current<S: AccountStore, A>(
+    state: &AppState<S, A>,
+    headers: &HeaderMap,
+) -> Result<Option<ActiveSession>, ApiError> {
+    Ok(find(state, headers, now_ms())
+        .await?
+        .map(|(_, session)| session))
+}
+
 /// The first valid session among the cookies of a request.
 async fn find<S: AccountStore, A>(
     state: &AppState<S, A>,

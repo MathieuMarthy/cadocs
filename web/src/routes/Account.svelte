@@ -7,6 +7,7 @@
   import { Form } from "../lib/form.svelte";
   import { app, mailFeatures, signOut, updateUser } from "../lib/session.svelte";
   import { t } from "../lib/i18n";
+  import { route } from "../lib/router.svelte";
 
   const user = app.session!.user;
 
@@ -85,7 +86,36 @@
 
   // The second factor by mail (ADR 0026), offered only with a relay.
   let mail = $state(false);
-  mailFeatures().then((read) => (mail = read.mail));
+  mailFeatures().then((read) => {
+    mail = read.mail;
+    providers = read.oidc;
+  });
+
+  // Single sign-on (ADR 0028): the providers the instance has, and the ones tied to this account.
+  let providers = $state<string[]>([]);
+  let linked = $state<string[]>([]);
+  const sso = new Form();
+  const ssoOutcome = new URLSearchParams(route.search).get("oidc");
+  /** Whether linking asks for the password: a stolen session must not tie its own provider. */
+  let ssoPassword = $state(true);
+  let ssoCurrentPassword = $state("");
+  api<{ providers: string[]; password: boolean }>("GET", "/me/identities").then((read) => {
+    linked = read.providers;
+    ssoPassword = read.password;
+  });
+
+  async function link(provider: string) {
+    const body = ssoPassword ? { current_password: ssoCurrentPassword } : {};
+    await sso.run(async () => {
+      const started = await api<{ url: string }>("POST", `/me/identities/${provider}`, body);
+      location.assign(started.url);
+    });
+  }
+
+  async function unlink(provider: string) {
+    const done = await sso.run(() => api("DELETE", `/me/identities/${provider}`));
+    if (done) linked = linked.filter((id) => id !== provider);
+  }
   let factorCode = $state("");
   let factorSent = $state(false);
   let factorPassword = $state("");
@@ -363,6 +393,46 @@
     </section>
   {/if}
 
+  {#if providers.length > 0 || linked.length > 0}
+    <section aria-labelledby="sso-heading">
+      <h2 id="sso-heading">{t("account.sso")}</h2>
+      {#if ssoOutcome === "linked"}
+        <p class="notice" role="status">{t("account.ssoLinked")}</p>
+      {:else if ssoOutcome === "taken"}
+        <p class="problem" role="alert">{t("account.ssoTaken")}</p>
+      {:else if ssoOutcome}
+        <p class="problem" role="alert">{t("account.ssoFailed")}</p>
+      {/if}
+      {#if sso.problem}<p class="problem" role="alert">{sso.problem}</p>{/if}
+      {#if ssoPassword && providers.some((id) => !linked.includes(id))}
+        <Field
+          label={t("form.currentPassword")}
+          type="password"
+          bind:value={ssoCurrentPassword}
+          autocomplete="current-password"
+          problem={sso.field("current_password")}
+        />
+      {/if}
+      <ul class="providers">
+        {#each new Set([...providers, ...linked]) as provider (provider)}
+          <li>
+            <span>{provider}: {t(linked.includes(provider) ? "account.ssoOn" : "account.ssoOff")}</span>
+            {#if linked.includes(provider)}
+              <button class="button secondary" type="button" disabled={sso.busy} onclick={() => unlink(provider)}>
+                {t("account.ssoUnlink")}
+              </button>
+            {:else if providers.includes(provider)}
+              <button class="button secondary" type="button" disabled={sso.busy} onclick={() => link(provider)}>
+                {t("account.ssoLink")}
+              </button>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+      {#if user.totp && linked.length > 0}<p class="meta">{t("account.ssoNoFactor")}</p>{/if}
+    </section>
+  {/if}
+
   <section aria-labelledby="totp-heading">
     <h2 id="totp-heading">{t("account.totp")}</h2>
     {#if recovery.length > 0}
@@ -463,6 +533,18 @@
 </Shell>
 
 <style>
+  .providers {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .providers li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+  }
   /* Dark on light in both themes: not every app reads a QR code drawn the other way round. */
   .qr {
     width: 200px;

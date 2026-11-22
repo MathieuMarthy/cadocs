@@ -4,7 +4,8 @@
   import { api, ApiError, type Session } from "../lib/api";
   import { describe, Form } from "../lib/form.svelte";
   import { app, mailFeatures, signIn, type MailFeatures } from "../lib/session.svelte";
-  import { t } from "../lib/i18n";
+  import { t, type Key } from "../lib/i18n";
+  import { route } from "../lib/router.svelte";
 
   let email = $state("");
   let password = $state("");
@@ -15,6 +16,8 @@
   let totp = $state("");
   let totpAsked = $state(false);
   const form = new Form();
+  /** Why the server sent a provider's login back here (`/login?oidc=`). */
+  const oidcProblem = new URLSearchParams(route.search).get("oidc");
 
   /** Unknown at first, and nothing shows until then. */
   let features = $state<MailFeatures | null>(null);
@@ -125,6 +128,17 @@
       {#if form.problem}<p class="problem" role="alert">{form.problem}</p>{/if}
       <button class="button" disabled={form.busy}>{t("login.submit")}</button>
     </form>
+    {#if oidcProblem}
+      <p class="problem" role="alert">
+        {t(["taken", "closed"].includes(oidcProblem) ? (`login.oidc.${oidcProblem}` as Key) : "login.oidc.failed")}
+      </p>
+    {/if}
+    {#each features?.oidc ?? [] as provider (provider)}
+      <!-- A navigation, not a call: the server answers with redirects (ADR 0028). -->
+      <a class="button secondary" rel="external" href="/api/v1/auth/oidc/{provider}">
+        {t("login.oidc.with", { provider })}
+      </a>
+    {/each}
     {#if features?.mail}
       <p class="meta" style="margin-top: var(--space-6)">
         <a href="/forgot-password">{t("login.forgot")}</a>
