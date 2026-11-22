@@ -478,9 +478,25 @@ CREATE INDEX page_links_target ON page_links(target_id);
 
 One row per page linked by another page's body, as the last index found it: the indexing job replaces the rows of the page it indexes with its `pageLink` nodes, keeping targets of the same workspace and never the page itself. Nothing says whether the reader can read the source: the route filters ([API.md](API.md#search)).
 
+## Templates
+
+```sql
+CREATE TABLE templates (
+    id         TEXT PRIMARY KEY,
+    space_id   TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    title      TEXT NOT NULL,
+    state      BLOB NOT NULL,                -- zstd-compressed Yjs state
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at BIGINT NOT NULL
+);
+CREATE INDEX templates_space ON templates(space_id, id);
+```
+
+A template keeps what a revision keeps, a title and a full Yjs state, and is read back the same way (`cadocs_jobs::decode`), so it needs neither the page it came from nor its room. A new page from it gets the AST written through its room.
+
 Specified when their stage starts, following the same conventions.
 
 | Stage | Tables |
 | --- | --- |
-| V1 | `templates` (`notifications` and `page_links` are below) |
+| V1 | (`templates`, `notifications` and `page_links` are below) |
 | V2 | `page_labels`, `audit_log`, `api_tokens`, `webhooks`, `workspace_plugins` (content plugins offered, and enabled per member), `user_plugins` (user plugins, per user for the whole instance) (ADR 0016) |

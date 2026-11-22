@@ -14,6 +14,7 @@ mod revisions;
 mod search;
 mod shares;
 mod spaces;
+mod templates;
 mod workspaces;
 
 use std::borrow::Cow;
@@ -34,7 +35,7 @@ use axum::{Json, Router};
 use cadocs_collab::{Authorizer, CollabError};
 use cadocs_store::{
     AccountStore, AttachmentStore, CommentStore, DocStore, GroupStore, PageStore, RevisionStore,
-    SearchStore, ShareStore, SpaceStore, StoreError, WorkspaceStore,
+    SearchStore, ShareStore, SpaceStore, StoreError, TemplateStore, WorkspaceStore,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -247,7 +248,12 @@ impl From<StoreError> for ApiError {
             | StoreError::AttachmentNotFound
             | StoreError::RevisionNotFound
             | StoreError::CommentNotFound => ApiError::new(ErrorCode::NotFound),
-            StoreError::ShareNotFound => ApiError::new(ErrorCode::NotFound),
+            StoreError::ShareNotFound | StoreError::TemplateNotFound => {
+                ApiError::new(ErrorCode::NotFound)
+            }
+            StoreError::TooManyTemplates => {
+                conflict.with_message("A space holds too many templates")
+            }
             error => {
                 tracing::error!(%error, "storage failed");
                 ApiError::new(ErrorCode::Unavailable)
@@ -417,7 +423,8 @@ where
         + SearchStore
         + RevisionStore
         + CommentStore
-        + ShareStore,
+        + ShareStore
+        + TemplateStore,
     A: Authorizer,
 {
     // A nested fallback only sees paths below the root of the nest. `router` in `lib.rs` also
@@ -438,7 +445,8 @@ where
         .merge(search::routes(state))
         .merge(revisions::routes(state))
         .merge(comments::routes(state))
-        .merge(shares::routes(state));
+        .merge(shares::routes(state))
+        .merge(templates::routes(state));
     finish(routes, state.http.clone())
 }
 

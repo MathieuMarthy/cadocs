@@ -10,6 +10,7 @@ mod revisions;
 mod search;
 mod shares;
 mod spaces;
+mod templates;
 mod workspaces;
 
 use std::path::Path;

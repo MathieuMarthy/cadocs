@@ -102,6 +102,20 @@ fn current<T: ReadTxn>(txn: &T) -> Current {
     }
 }
 
+/// The title and the compressed state of a page as it is now, flushed or not, which `decode`
+/// reads back: what a template keeps.
+pub async fn pack<S: DocStore>(
+    registry: &DocRegistry<S>,
+    page_id: &str,
+) -> Result<(String, Vec<u8>), RevisionError> {
+    let page = registry
+        .read(page_id, |doc| current(&doc.transact()))
+        .await?;
+    let state =
+        zstd::bulk::compress(&page.state, ZSTD_LEVEL).map_err(|_| RevisionError::Corrupt)?;
+    Ok((page.title, state))
+}
+
 /// Takes a revision of the page as it is now, flushed or not, unless its title and content are
 /// those of the latest one. Answers the new revision's number. A page with no revision compares
 /// with an empty one, and a page that is gone gets none.

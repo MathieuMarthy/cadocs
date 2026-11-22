@@ -11,6 +11,7 @@ mod search;
 mod shares;
 mod spaces;
 mod sqlite;
+mod templates;
 mod workspaces;
 
 use std::future::Future;
@@ -42,6 +43,7 @@ pub use spaces::{
     Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore, WorkspaceReach,
 };
 pub use sqlite::SqliteStore;
+pub use templates::{MAX_TEMPLATES, NewTemplate, Template, TemplateStore, TemplateToUse};
 pub use workspaces::{
     Invitation, InvitationPreview, InvitedUser, MAX_SLUG_CHARS, Member, NewInvitation,
     NewWorkspace, Workspace, WorkspaceChanges, WorkspaceStore,
@@ -140,6 +142,10 @@ pub enum StoreError {
     AttachmentNotFound,
     #[error("no such share")]
     ShareNotFound,
+    #[error("no such template")]
+    TemplateNotFound,
+    #[error("a space holds at most {} templates", crate::MAX_TEMPLATES)]
+    TooManyTemplates,
     #[error("no such revision")]
     RevisionNotFound,
     #[error("no such comment")]

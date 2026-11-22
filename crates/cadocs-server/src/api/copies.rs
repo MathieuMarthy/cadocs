@@ -136,7 +136,7 @@ async fn duplicate<S: DocStore + PageStore + AttachmentStore, A: Send + Sync + '
 
 /// Moves the pages of a failed copy to the trash, whatever its maker may still do in the target:
 /// a half copy must not stay. A copy whose rows were never made has nothing to trash.
-async fn discard<S: PageStore, A>(state: &AppState<S, A>, ids: &[String], user: &str) {
+pub(super) async fn discard<S: PageStore, A>(state: &AppState<S, A>, ids: &[String], user: &str) {
     let page = &ids[0];
     match state.store.trash_failed_copy(ids, user, now_ms()).await {
         Ok(site) => {
@@ -204,7 +204,7 @@ async fn fill<S: DocStore + PageStore + AttachmentStore, A>(
 /// A copy of the attachment `id` for `page`, or `None` to leave it out: one the user cannot
 /// download, one of another workspace, which a crafted client can write, or one whose file is
 /// gone.
-async fn copy_file<S: PageStore + AttachmentStore, A>(
+pub(super) async fn copy_file<S: PageStore + AttachmentStore, A>(
     state: &AppState<S, A>,
     id: &str,
     page: &str,

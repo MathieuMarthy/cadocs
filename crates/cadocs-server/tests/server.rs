@@ -27,12 +27,12 @@ use cadocs_store::{
     Group, GroupStore, IdentityUser, IndexTarget, Invitation, InvitationPreview, InvitedUser,
     MailDigest, Member, Membership, MovedPage, NewAttachment, NewComment, NewEmailCode, NewGrant,
     NewGroup, NewInvitation, NewPage, NewPasswordReset, NewRevision, NewSession, NewShare,
-    NewSpace, NewUser, NewWorkspace, PageCopy, PageCrumb, PageIndex, PageMove, PageRecord,
-    PageSite, PageStore, Revision, RevisionStore, RevisionSummary, SearchHit, SearchStore,
-    SessionStanding, Share, ShareStore, SharedPage, SharedView, Snapshot, Space, SpaceChanges,
-    SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, SubtreePage, Thread, TotpProof,
-    UpdateBasis, UploadTarget, UserChanges, UserRecord, Workspace, WorkspaceChanges,
-    WorkspaceReach, WorkspaceStore, now_ms,
+    NewSpace, NewTemplate, NewUser, NewWorkspace, PageCopy, PageCrumb, PageIndex, PageMove,
+    PageRecord, PageSite, PageStore, Revision, RevisionStore, RevisionSummary, SearchHit,
+    SearchStore, SessionStanding, Share, ShareStore, SharedPage, SharedView, Snapshot, Space,
+    SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, SubtreePage,
+    Template, TemplateStore, TemplateToUse, Thread, TotpProof, UpdateBasis, UploadTarget,
+    UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -498,6 +498,37 @@ impl ShareStore for FlakyStore {
         self.inner
             .shared_attachment(token, attachment_id, now)
             .await
+    }
+}
+
+impl TemplateStore for FlakyStore {
+    async fn create_template(&self, new: &NewTemplate) -> Result<Template, StoreError> {
+        self.inner.create_template(new).await
+    }
+
+    async fn list_templates(
+        &self,
+        space_id: &str,
+        actor: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<Template>, StoreError> {
+        self.inner
+            .list_templates(space_id, actor, after, limit)
+            .await
+    }
+
+    async fn template_to_use(
+        &self,
+        template_id: &str,
+        target: Option<&str>,
+        actor: &str,
+    ) -> Result<TemplateToUse, StoreError> {
+        self.inner.template_to_use(template_id, target, actor).await
+    }
+
+    async fn delete_template(&self, template_id: &str, actor: &str) -> Result<(), StoreError> {
+        self.inner.delete_template(template_id, actor).await
     }
 }
 

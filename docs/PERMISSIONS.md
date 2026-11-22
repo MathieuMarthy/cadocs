@@ -48,6 +48,8 @@ A workspace always keeps at least one owner. Any change that would remove the la
 | Create, update, move, duplicate, trash or restore a page | no | no | yes | yes |
 | List the trash | no | no | yes | yes |
 | Restore a revision, import | no | no | yes | yes |
+| List the templates of a space | yes | yes | yes | yes |
+| Save a page as a template, delete a template | no | no | yes | yes |
 | Upload or delete an attachment | no | no | yes | yes |
 | List, create or revoke public shares | no | no | yes | yes |
 | Purge a page from the trash | no | no | no | yes |
@@ -58,6 +60,7 @@ A workspace always keeps at least one owner. Any change that would remove the la
 
 - **Move across spaces:** needs `editor` on both spaces. A move across workspaces is refused.
 - **Duplicate:** needs read access to the page and `editor` on the space the copy goes to, so a viewer copies a page into a space where they write. A copy across workspaces is refused. Each attachment the copy brings is one the caller can download.
+- **Template:** starting a page from one needs read access to the template's space and `editor` on the space the page goes to, in the same workspace. Saving needs `editor` on the page's space.
 - **Trashed space:** every action is denied except restoring it, for a space `admin`, who also finds it in the list of trashed spaces of the workspace.
 - **Trashed page:** it behaves as absent for all actions except listing the trash, restoring and purging.
 - **Attachments:** a download needs read access to at least one page that references the file ([DATA_MODEL.md](DATA_MODEL.md#attachments)). A delete removes the file from every page that references it, so it needs `editor` on each of them, a page in the trash included. An attachment id works as a key inside its workspace: an editor who learns one can paste it into a page they edit, and the indexing job then lets that page's readers download the file. Ids are random and only shown to readers of a referencing page, who could keep the file anyway, so this is accepted (step 24).
