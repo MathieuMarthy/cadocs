@@ -23,7 +23,7 @@ use cadocs_server::session::{csrf_token, token_hash};
 use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, CodeAttempt,
-    CommentChange, CommentStore, Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant,
+    CommentChange, CommentStore, MailDigest, Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant,
     Group, GroupStore, IdentityUser, IndexTarget, Invitation, InvitationPreview, InvitedUser,
     Member, Membership, MovedPage, NewAttachment, NewComment, NewEmailCode, NewGrant, NewGroup,
     NewInvitation, NewPage, NewPasswordReset, NewRevision, NewSession, NewShare, NewSpace, NewUser,
@@ -564,6 +564,14 @@ impl GroupStore for FlakyStore {
 }
 
 impl CommentStore for FlakyStore {
+    async fn mail_digest(&self, user: &str) -> Result<Option<MailDigest>, StoreError> {
+        self.inner.mail_digest(user).await
+    }
+
+    async fn mark_mailed(&self, user: &str, ids: &[String], now: i64) -> Result<(), StoreError> {
+        self.inner.mark_mailed(user, ids, now).await
+    }
+
     async fn threads(
         &self,
         page_id: &str,
@@ -737,6 +745,10 @@ impl WorkspaceStore for FlakyStore {
 }
 
 impl AccountStore for FlakyStore {
+    async fn set_email_notifications(&self, user_id: &str, on: bool) -> Result<(), StoreError> {
+        self.inner.set_email_notifications(user_id, on).await
+    }
+
     async fn has_users(&self) -> Result<bool, StoreError> {
         self.inner.has_users().await
     }

@@ -151,6 +151,7 @@ async fn start_custom_in(
     let store = SqliteStore::open(&path).await.unwrap();
     let store = store
         .with_reindex_delay(Duration::from_millis(100))
+        .with_mail_delay(Duration::from_millis(300))
         .with_revision_timing(config.revisions);
     let store = Arc::new(store);
     let registry = DocRegistry::new(store.clone(), config.collab);

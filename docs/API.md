@@ -203,6 +203,7 @@ The role in `GET /pages/{page}` tells the front end whether to make the editor r
 | POST | `/comments/{id}/resolve` | commenter | Resolve or reopen |
 | GET | `/me/notifications` | user | Notifications: mentions, replies and comments on one's pages |
 | POST | `/me/notifications/read` | user | Mark some or all as read |
+| PUT | `/me/email-notifications` | user, relay | Turn the mail of notifications on or off |
 
 Bodies and answers:
 - A comment is `{ id, page_id, parent_id, author, body, anchor, resolved_at, resolved_by, created_at, updated_at }`. `author` and `resolved_by` are `{ id, name }`, or `null` once the account is deleted. `parent_id` is `null` for a thread. `anchor` is `{ start, end, text }` or `null` for a reply and a comment on the whole page: `start` and `end` are base64 of encoded Yjs `RelativePosition` values, stored as sent (ADR 0012), and `text` is the quoted text.
@@ -216,6 +217,7 @@ Bodies and answers:
 Notifications (step 41):
 - `GET /me/notifications` answers `{ items, unread }`: the newest 100 notifications of the caller, newest first, among those whose page the caller can still read and that is not in the trash. `unread` counts those items, not older ones. An item is `{ id, kind, page: { id, space_id, title }, comment_id, actor, read, created_at }`. `kind` is `mention` (the caller is named in a comment, or in a page body as the last index found it, `comment_id` then `null`), `reply` (someone answered the caller's thread) or `comment` (someone commented on the caller's page: the one they created). A user gets one notification per comment, the first of those in that order, and never one for their own action. `actor` is `{ id, name }`, `null` once the account is deleted.
 - `POST /me/notifications/read` takes `{ ids? }` and answers `204`: it marks those of the caller that are unread as read, or all of theirs without `ids`. An id of someone else is ignored. There is no way to mark one unread again.
+- Mail (step 42, with a relay only: without one `PUT /me/email-notifications` is a `404` like the other mail routes). It takes `{ enabled }` and answers `204`; the choice is `email_notifications` in the `user` object, off by default. For a user who chose it, a notification nobody read starts a job one minute later (`CADOCS_MAIL_DELAY` is not a setting: a store option for tests), and the notifications that arrive meanwhile share it. The job mails one plain text message with those still unread and not yet mailed, each as "who did what on which page" and a link, at most 20 lines, and marks them as mailed. A notification read, or on a page the user can no longer read, before the job runs is not mailed, and neither is one while the choice is off.
 - A notification goes when its comment or page does, and a mention notification when an edit stops naming its user. A comment's `notification` event follows its `comment` event; a body mention reaches the user at the next `GET`, since the indexing job publishes no event.
 
 ### Attachments

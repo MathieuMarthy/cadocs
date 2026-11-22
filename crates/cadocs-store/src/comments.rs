@@ -97,8 +97,22 @@ pub struct Notification {
     pub comment_id: Option<String>,
     pub actor: Option<CommentUser>,
     pub read: bool,
+    /// A message by mail already told of it (step 42).
+    pub mailed: bool,
     pub created_at: i64,
 }
+
+/// What one message by mail tells a user: the notifications they have neither read nor been
+/// mailed, newest first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MailDigest {
+    pub email: String,
+    pub name: String,
+    pub items: Vec<Notification>,
+}
+
+/// The job that mails a user's new notifications, with `{"user": "<id>"}`, keyed `mail:<id>`.
+pub const MAIL_NOTIFICATIONS: &str = "mail_notifications";
 
 /// The newest notifications of a user, and how many of them are unread.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,6 +176,21 @@ pub trait CommentStore: Send + Sync + 'static {
     /// The newest `INBOX_SIZE` notifications of `user`, newest first, among those whose page the
     /// user can still read. `unread` counts those.
     fn notifications(&self, user: &str) -> impl Future<Output = Result<Inbox, StoreError>> + Send;
+
+    /// What to mail `user`, or `None` when their choice is off, their account is disabled, or
+    /// they have nothing new that they may still read.
+    fn mail_digest(
+        &self,
+        user: &str,
+    ) -> impl Future<Output = Result<Option<MailDigest>, StoreError>> + Send;
+
+    /// Marks the notifications `ids` of `user` as told by mail.
+    fn mark_mailed(
+        &self,
+        user: &str,
+        ids: &[String],
+        now: i64,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// Marks the notifications `ids` of `user` as read, or all of theirs for `None`. Ids of
     /// other users are ignored.

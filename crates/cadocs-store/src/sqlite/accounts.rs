@@ -5,6 +5,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, SqliteConnection, SqliteExecutor};
 
 use super::{BEGIN_WRITE, SqliteStore};
+use crate::now_ms;
 use crate::{
     AccountStore, ActiveSession, AdminChanges, CodeAttempt, Credentials, FirstUser, IdentityUser,
     MAX_CODE_TRIES, Membership, NewEmailCode, NewPasswordReset, NewSession, NewUser,
@@ -31,7 +32,8 @@ const USABLE_RESET: &str = "SELECT r.user_id FROM password_resets r
      WHERE r.token_hash = ?1 AND r.expires_at > ?2 AND u.disabled_at IS NULL";
 
 const SELECT_RECORD: &str =
-    "SELECT id, email, name, is_instance_admin, email_2fa, language, disabled_at, created_at,
+    "SELECT id, email, name, is_instance_admin, email_2fa, email_notifications, language,
+            disabled_at, created_at,
             EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = users.id
                                                AND t.enabled_at IS NOT NULL) AS totp
      FROM users";
@@ -197,7 +199,7 @@ async fn insert_recovery_codes(
 }
 
 const SELECT_CREDENTIALS: &str =
-    "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.language,
+    "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.email_notifications, u.language,
             u.password_hash, u.disabled_at, t.secret AS totp_secret, t.secret IS NOT NULL AS totp
      FROM users u LEFT JOIN user_totp t ON t.user_id = u.id AND t.enabled_at IS NOT NULL";
 
@@ -217,6 +219,7 @@ fn user(row: &SqliteRow) -> User {
         name: row.get("name"),
         is_instance_admin: row.get::<i64, _>("is_instance_admin") != 0,
         email_2fa: row.get::<i64, _>("email_2fa") != 0,
+        email_notifications: row.get::<i64, _>("email_notifications") != 0,
         totp: row.get("totp"),
         language: row.get("language"),
     }
@@ -336,7 +339,7 @@ impl AccountStore for SqliteStore {
         now: i64,
     ) -> Result<Option<ActiveSession>, StoreError> {
         let row = sqlx::query(
-            "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.language,
+            "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.email_notifications, u.language,
                     s.last_seen_at,
                     EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = u.id
                                                        AND t.enabled_at IS NOT NULL) AS totp
@@ -855,6 +858,16 @@ impl AccountStore for SqliteStore {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
+        Ok(())
+    }
+
+    async fn set_email_notifications(&self, user_id: &str, on: bool) -> Result<(), StoreError> {
+        sqlx::query("UPDATE users SET email_notifications = ?2, updated_at = ?3 WHERE id = ?1")
+            .bind(user_id)
+            .bind(on)
+            .bind(now_ms())
+            .execute(&self.writer)
+            .await?;
         Ok(())
     }
 

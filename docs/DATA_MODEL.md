@@ -23,6 +23,7 @@ CREATE TABLE users (
     disabled_at    BIGINT,
     email_verified_at BIGINT,                -- ADR 0026: NULL until a code sent to it is used
     email_2fa      SMALLINT NOT NULL DEFAULT 0 CHECK (email_2fa IN (0, 1)), -- ADR 0026: a login needs a mailed code
+    email_notifications SMALLINT NOT NULL DEFAULT 0 CHECK (email_notifications IN (0, 1)), -- step 42
     language       TEXT,                     -- the interface's (`en`, `fr`), NULL follows the browser's
     created_at     BIGINT NOT NULL,
     updated_at     BIGINT NOT NULL,
@@ -332,12 +333,15 @@ CREATE TABLE notifications (
     comment_id  TEXT REFERENCES comments(id) ON DELETE CASCADE,  -- NULL: a mention in the body
     actor_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
     read_at     BIGINT,
+    mailed_at   BIGINT,                     -- a message by mail told of it (step 42)
     created_at  BIGINT NOT NULL
 );
 CREATE INDEX notifications_user ON notifications(user_id, read_at);
 ```
 
 One row per user told, written in the transaction of what told them: `mentions::replace` for a new mention (a comment's, or the body's by the indexing job), and `create_comment` for a reply to the author of the thread and a comment on the page's creator. Where one comment would tell a user twice, the first of mention, reply, comment stays. Like `mentions`, a row says nothing of whether its user can read the page: the route filters. `mentions.read_at` is not used: read state lives here.
+
+A write that adds a notification queues, for each user with `email_notifications` who has one unread and unmailed, the job `mail_notifications` (payload `{"user": "<id>"}`, key `mail:<id>`) a minute ahead; a waiting one absorbs the next, so a burst sends one message. The job (`cadocs-jobs/src/mail.rs`) does nothing with no relay.
 
 ## Attachments
 
