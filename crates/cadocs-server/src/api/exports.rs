@@ -1,4 +1,5 @@
-//! Space exports (docs/API.md#spaces): a job that writes a zip of the space's pages, folders for
+//! Archive jobs, which bulk imports (`imports.rs`) share, and space exports
+//! (docs/API.md#spaces): a job that writes a zip of the space's pages, folders for
 //! pages with children, into an anonymous scratch file, which its starter downloads for an hour.
 //! The jobs live in memory, not in the `jobs` table: the file does not survive a restart anyway
 //! (`data/tmp` is emptied), so there is nothing a table could keep. One export runs at a time.
@@ -44,32 +45,42 @@ use crate::session::{self, CurrentSession};
 
 /// Pages one export takes, so its list of folders to visit stays small.
 const MAX_PAGES: usize = 10_000;
-/// Jobs held at once, running or waiting to be downloaded: each holds a file on the disk.
+/// Jobs holding a slot at once, running or waiting to be downloaded: each holds a file on the disk.
 const MAX_JOBS: usize = 8;
 /// Of those, what one user may hold, so one cannot take every slot.
 const MAX_USER_JOBS: usize = 2;
+/// Ended jobs with no file kept per user, for their status.
+const MAX_USER_ENDED: usize = 8;
 /// How long an ended job stays, for its status and its file.
 const KEEP: Duration = Duration::from_secs(3600);
 /// Siblings read from the store at a time.
 const BATCH: u32 = 100;
 const CHUNK: usize = 64 * 1024;
 
-enum Progress {
+const EXPORT: &str = "space_export";
+
+#[derive(Clone)]
+pub(super) enum Progress {
     Running,
+    /// An export, ready to download.
     Done(Arc<StdFile>, u64, String),
-    Failed,
+    /// An import, with the number of pages it made.
+    Imported(usize),
+    /// With what to tell the starter, if anything.
+    Failed(Option<String>),
 }
 
 struct Job {
     user: String,
     space: String,
+    kind: &'static str,
     progress: Progress,
 }
 
-/// What the export jobs hold, shared by the routes and the tasks.
+/// What the archive jobs hold, shared by the routes and the tasks.
 pub struct Exports {
     jobs: Mutex<HashMap<String, Job>>,
-    /// One export at a time, whoever asks.
+    /// One archive job at a time, whoever asks.
     turn: Semaphore,
 }
 
@@ -109,12 +120,109 @@ where
 }
 
 #[derive(Serialize)]
-struct JobBody {
+pub(super) struct JobBody {
     id: String,
     kind: &'static str,
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pages: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+impl JobBody {
+    fn new(id: String, kind: &'static str, progress: &Progress) -> Self {
+        let (status, size, pages, message) = match progress {
+            Progress::Running => ("running", None, None, None),
+            Progress::Done(_, size, _) => ("done", Some(*size), None, None),
+            Progress::Imported(pages) => ("done", None, Some(*pages), None),
+            Progress::Failed(message) => ("failed", None, None, message.clone()),
+        };
+        Self {
+            id,
+            kind,
+            status,
+            size,
+            pages,
+            message,
+        }
+    }
+}
+
+/// Runs `work` as the job `kind` of `user` on `space`, in its turn, and answers its first body.
+/// Refused when too many jobs are held.
+pub(super) fn run<S, A>(
+    state: &AppState<S, A>,
+    user: &str,
+    space: &str,
+    kind: &'static str,
+    work: impl Future<Output = Progress> + Send + 'static,
+) -> Result<(StatusCode, Json<JobBody>), ApiError>
+where
+    S: Send + Sync + 'static,
+    A: Send + Sync + 'static,
+{
+    let id = Uuid::now_v7().to_string();
+    {
+        let mut jobs = state.exports.jobs();
+        // An ended job with no file takes no slot, and the oldest of a user's go past a few, so
+        // the map stays bounded however fast they fail.
+        let mut ended: Vec<String> = jobs
+            .iter()
+            .filter(|(_, job)| {
+                job.user == user
+                    && matches!(job.progress, Progress::Failed(_) | Progress::Imported(_))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        // Version 7 ids sort by age.
+        ended.sort_unstable_by(|a, b| b.cmp(a));
+        for old in ended.iter().skip(MAX_USER_ENDED - 1) {
+            jobs.remove(old);
+        }
+        let held = || {
+            jobs.values()
+                .filter(|job| matches!(job.progress, Progress::Running | Progress::Done(..)))
+        };
+        if held().count() >= MAX_JOBS {
+            return Err(ApiError::new(ErrorCode::RateLimited)
+                .with_message("Too many exports or imports are running or waiting"));
+        }
+        if held().filter(|job| job.user == user).count() >= MAX_USER_JOBS {
+            return Err(ApiError::new(ErrorCode::RateLimited)
+                .with_message("You already have exports or imports running or waiting"));
+        }
+        let job = Job {
+            user: user.to_owned(),
+            space: space.to_owned(),
+            kind,
+            progress: Progress::Running,
+        };
+        jobs.insert(id.clone(), job);
+    }
+    let exports = state.exports.clone();
+    let job = id.clone();
+    tokio::spawn(async move {
+        // Nested, so that a panic ends as a failed job and not as one that holds a slot forever.
+        let turn = exports.clone();
+        let done = tokio::spawn(async move {
+            match turn.turn.acquire().await {
+                Ok(_turn) => work.await,
+                Err(_) => Progress::Failed(None),
+            }
+        });
+        let progress = done.await.unwrap_or_else(|error| {
+            warn!(%error, kind, "an archive job panicked");
+            Progress::Failed(None)
+        });
+        exports.settle(&job, progress);
+        sleep(KEEP).await;
+        exports.jobs().remove(&job);
+    });
+    let body = JobBody::new(id, kind, &Progress::Running);
+    Ok((StatusCode::ACCEPTED, Json(body)))
 }
 
 async fn start<S, A>(
@@ -138,64 +246,18 @@ where
         .space(&space, &user)
         .await?
         .ok_or_else(not_found)?;
-    let id = Uuid::now_v7().to_string();
-    {
-        let mut jobs = state.exports.jobs();
-        if jobs.len() >= MAX_JOBS {
-            return Err(ApiError::new(ErrorCode::RateLimited)
-                .with_message("Too many exports are running or waiting to be downloaded"));
-        }
-        if jobs.values().filter(|job| job.user == user).count() >= MAX_USER_JOBS {
-            return Err(ApiError::new(ErrorCode::RateLimited)
-                .with_message("You already have exports running or waiting to be downloaded"));
-        }
-        let job = Job {
-            user: user.clone(),
-            space: space.clone(),
-            progress: Progress::Running,
-        };
-        jobs.insert(id.clone(), job);
-    }
     let task = state.clone();
-    let job = id.clone();
-    tokio::spawn(async move {
+    let (owner, target) = (user.clone(), space.clone());
+    run(&state, &user, &space, EXPORT, async move {
         let name = format!("{}.zip", safe_name(&found.name, "space"));
-        // Nested, so that a panic ends as a failed job and not as one that holds a slot forever.
-        let work = {
-            let task = task.clone();
-            let (space, user) = (space.clone(), user.clone());
-            tokio::spawn(async move {
-                let _turn = task
-                    .exports
-                    .turn
-                    .acquire()
-                    .await
-                    .map_err(io::Error::other)?;
-                write(&task, &space, &user, html).await
-            })
-        };
-        let outcome = work
-            .await
-            .unwrap_or_else(|error| Err(io::Error::other(error)));
-        match outcome {
-            Ok((file, size)) => task
-                .exports
-                .settle(&job, Progress::Done(Arc::new(file), size, name)),
+        match write(&task, &target, &owner, html).await {
+            Ok((file, size)) => Progress::Done(Arc::new(file), size, name),
             Err(error) => {
-                warn!(%error, space, "a space export failed");
-                task.exports.settle(&job, Progress::Failed);
+                warn!(%error, space = target, "a space export failed");
+                Progress::Failed(None)
             }
         }
-        sleep(KEEP).await;
-        task.exports.jobs().remove(&job);
-    });
-    let body = JobBody {
-        id,
-        kind: "space_export",
-        status: "running",
-        size: None,
-    };
-    Ok((StatusCode::ACCEPTED, Json(body)))
+    })
 }
 
 /// A job as its starter sees it: `404` for anyone else, and once they lost the space.
@@ -203,25 +265,20 @@ async fn own<S: SpaceStore, A>(
     state: &AppState<S, A>,
     user: &str,
     id: &str,
-) -> Result<Option<(&'static str, Option<(Arc<StdFile>, u64, String)>)>, ApiError> {
-    let (space, outcome) = {
+) -> Result<(&'static str, Progress), ApiError> {
+    let (space, kind, progress) = {
         let jobs = state.exports.jobs();
         let Some(job) = jobs.get(id).filter(|job| job.user == user) else {
             return Err(not_found());
         };
-        let outcome = match &job.progress {
-            Progress::Running => ("running", None),
-            Progress::Failed => ("failed", None),
-            Progress::Done(file, size, name) => ("done", Some((file.clone(), *size, name.clone()))),
-        };
-        (job.space.clone(), outcome)
+        (job.space.clone(), job.kind, job.progress.clone())
     };
     state
         .store
         .space(&space, user)
         .await?
         .ok_or_else(not_found)?;
-    Ok(Some(outcome))
+    Ok((kind, progress))
 }
 
 async fn status<S: SpaceStore, A: Send + Sync + 'static>(
@@ -229,15 +286,8 @@ async fn status<S: SpaceStore, A: Send + Sync + 'static>(
     Extension(current): Extension<CurrentSession>,
     PathParam(id): PathParam,
 ) -> Result<Json<JobBody>, ApiError> {
-    let found = own(&state, &current.user.id, &id).await?;
-    let (status, file) = found.ok_or_else(not_found)?;
-    let size = file.map(|(_, size, _)| size);
-    Ok(Json(JobBody {
-        id,
-        kind: "space_export",
-        status,
-        size,
-    }))
+    let (kind, progress) = own(&state, &current.user.id, &id).await?;
+    Ok(Json(JobBody::new(id, kind, &progress)))
 }
 
 async fn file<S: SpaceStore, A: Send + Sync + 'static>(
@@ -245,8 +295,11 @@ async fn file<S: SpaceStore, A: Send + Sync + 'static>(
     Extension(current): Extension<CurrentSession>,
     PathParam(id): PathParam,
 ) -> Result<Response, ApiError> {
-    let found = own(&state, &current.user.id, &id).await?;
-    let Some((_, Some((file, size, name)))) = found else {
+    let (kind, progress) = own(&state, &current.user.id, &id).await?;
+    if kind != EXPORT {
+        return Err(not_found());
+    }
+    let Progress::Done(file, size, name) = progress else {
         return Err(ApiError::new(ErrorCode::Conflict).with_message("The export is not done"));
     };
     let chunks = futures_util::stream::unfold(0u64, move |at| {

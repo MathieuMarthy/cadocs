@@ -394,6 +394,11 @@ async fn each_space_action_follows_the_matrix_over_rest() {
         let got = wiki.api.raw("POST", &path, &headers, b"# Notes\n").await;
         check(&mut cells, "import", &got, Needs::Editor, 201);
 
+        let path = format!("/spaces/{space}/bulk-import");
+        let zip = empty_page_zip().await;
+        let got = wiki.api.raw("POST", &path, &bob.headers(), &zip).await;
+        check(&mut cells, "bulk import", &got, Needs::Editor, 202);
+
         // Export the space.
         let path = format!("/spaces/{space}/export");
         let got = wiki.api.raw("POST", &path, &bob.headers(), b"").await;
@@ -760,4 +765,12 @@ async fn workspace_creation_follows_the_setting_over_rest() {
             }
         }
     }
+}
+
+/// A zip of one empty page.
+async fn empty_page_zip() -> Vec<u8> {
+    let mut writer = async_zip::base::write::ZipFileWriter::new(Vec::new());
+    let entry = async_zip::ZipEntryBuilder::new("a.md".into(), async_zip::Compression::Stored);
+    writer.write_entry_whole(entry, b"").await.unwrap();
+    writer.close().await.unwrap()
 }

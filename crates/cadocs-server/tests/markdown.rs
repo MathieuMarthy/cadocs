@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use async_zip::base::read::mem::ZipFileReader;
 use async_zip::base::write::ZipFileWriter;
-use async_zip::{Compression, ZipEntryBuilder};
+use async_zip::{Compression, StringEncoding, ZipEntryBuilder, ZipString};
 use common::{Api, Login, ORIGIN, Reply, start_tuned};
 use serde_json::json;
 use tokio::time::{Duration, Instant, sleep};
@@ -641,4 +641,300 @@ async fn a_space_export_is_a_zip_of_folders_and_pages_only_its_starter_downloads
     let path = format!("/spaces/{}/export", wiki.space);
     let reply = wiki.api.raw("POST", &path, &wiki.vic.headers(), b"").await;
     assert_eq!(reply.status, 429, "{reply:?}");
+}
+
+impl Wiki {
+    /// Starts a bulk import and waits for its job to end.
+    async fn bulk(&self, query: &str, body: &[u8]) -> Reply {
+        let path = format!("/spaces/{}/bulk-import?{query}", self.space);
+        let mut headers = self.bob.headers().to_vec();
+        headers.push(("content-type", "application/zip"));
+        let reply = self.api.raw("POST", &path, &headers, body).await;
+        assert_eq!(reply.status, 202, "{reply:?}");
+        assert_eq!(reply.body["kind"], "space_import");
+        let job = format!("/jobs/{}", id(&reply));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let reply = self.api.get(&self.bob, &job).await;
+            assert_eq!(reply.status, 200, "{reply:?}");
+            if reply.body["status"] != "running" {
+                return reply;
+            }
+            assert!(Instant::now() < deadline, "the import never ended");
+            sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// The pages under `parent`, or at the root of the space, in order: id and exported Markdown.
+    async fn children(&self, parent: Option<&str>) -> Vec<(String, String)> {
+        let query = parent.map_or(String::new(), |id| format!("?parent={id}"));
+        let path = format!("/spaces/{}/tree{query}", self.space);
+        let reply = self.api.get(&self.ada, &path).await;
+        assert_eq!(reply.status, 200, "{reply:?}");
+        let mut pages = Vec::new();
+        for item in reply.body["items"].as_array().unwrap() {
+            let id = item["id"].as_str().unwrap().to_owned();
+            let markdown = self.markdown(&id).await;
+            pages.push((id, markdown));
+        }
+        pages
+    }
+
+    async fn live_pages(&self) -> i64 {
+        self.api
+            .number("SELECT COUNT(*) FROM pages WHERE deleted_at IS NULL")
+            .await
+    }
+}
+
+#[tokio::test]
+async fn a_bulk_import_makes_a_tree_of_pages_with_their_attachments() {
+    let wiki = wiki(&[]).await;
+    let body = zip(&[
+        (
+            "Guide.md",
+            b"# The guide\n\n![a](attachments/x/a%20b.png)\n\n[child](Guide/Child.md#top)\n",
+        ),
+        (
+            "Guide/Child.md",
+            b"![a](../attachments/x/a%20b.png)\n\n[back](../Guide.md)\n",
+        ),
+        ("notes/Deep.markdown", b"Deep.\n"),
+        ("attachments/x/a b.png", PNG),
+        (
+            "attachments/01890000-0000-7000-8000-000000000001/attached.md",
+            b"not a page",
+        ),
+        ("__MACOSX/Guide.md", b"junk"),
+        (".obsidian/x.md", b"junk"),
+    ])
+    .await;
+    let status = wiki.bulk("", &body).await;
+    assert_eq!(status.body["status"], "done", "{status:?}");
+    assert_eq!(status.body["pages"], 4);
+    let file = format!("/jobs/{}/file", id(&status));
+    assert_eq!(wiki.api.get(&wiki.bob, &file).await.status, 404);
+
+    let root = wiki.children(None).await;
+    assert_eq!(root.len(), 2, "{root:?}");
+    let (guide, text) = &root[0];
+    let under_guide = wiki.children(Some(guide)).await;
+    let (child, child_text) = &under_guide[0];
+    let image = text
+        .split(&format!("{ORIGIN}/api/v1/attachments/"))
+        .nth(1)
+        .unwrap()[..36]
+        .to_owned();
+    assert!(text.starts_with("# The guide\n\n![a]("), "{text}");
+    assert!(text.contains(&format!("{ORIGIN}/?page={child}")), "{text}");
+    // The same file, stored once, and a link back by page id.
+    assert!(child_text.starts_with("# Child\n"), "{child_text}");
+    assert!(child_text.contains(&image), "{child_text}");
+    assert!(
+        child_text.contains(&format!("{ORIGIN}/?page={guide}")),
+        "{child_text}"
+    );
+    let stored = wiki.api.number("SELECT COUNT(*) FROM attachments").await;
+    assert_eq!(stored, 1);
+    let reply = wiki
+        .api
+        .get(&wiki.vic, &format!("/attachments/{image}"))
+        .await;
+    assert_eq!(reply.bytes, PNG);
+
+    // A folder without a Markdown file is an empty page named after it.
+    let (notes, text) = &root[1];
+    assert_eq!(text, "# notes\n");
+    assert_eq!(wiki.children(Some(notes)).await[0].1, "# Deep\n\nDeep.\n");
+
+    // Under a parent.
+    let body = zip(&[("Sub.md", b"x")]).await;
+    let status = wiki.bulk(&format!("parent_id={notes}"), &body).await;
+    assert_eq!(status.body["status"], "done", "{status:?}");
+    assert_eq!(wiki.children(Some(notes)).await.len(), 2);
+}
+
+#[tokio::test]
+async fn a_bulk_import_refuses_or_fails_whole() {
+    let wiki = wiki(&[("CADOCS_MAX_UPLOAD_MB", "1")]).await;
+    let send = async |by: &Login, query: &str, body: &[u8]| {
+        let path = format!("/spaces/{}/bulk-import?{query}", wiki.space);
+        let mut headers = by.headers().to_vec();
+        headers.push(("content-type", "application/zip"));
+        wiki.api.raw("POST", &path, &headers, body).await
+    };
+    let one = zip(&[("a.md", b"a")]).await;
+    assert_eq!(send(&wiki.vic, "", &one).await.status, 403);
+    assert_eq!(send(&wiki.eve, "", &one).await.status, 404);
+    let reply = send(&wiki.bob, "parent_id=nope", &one).await;
+    assert_eq!(reply.body["error"]["fields"]["parent_id"], "unknown");
+
+    let bad = |reply: Reply, problem: &str| {
+        assert_eq!(reply.status, 400, "{reply:?}");
+        assert_eq!(reply.body["error"]["fields"]["file"], problem, "{reply:?}");
+    };
+    bad(send(&wiki.bob, "", b"not a zip").await, "invalid");
+    let none = zip(&[("readme.txt", b"x")]).await;
+    bad(send(&wiki.bob, "", &none).await, "no_markdown");
+    let deep = format!("{}a.md", "d/".repeat(100));
+    let deep = zip(&[(deep.as_str(), b"x")]).await;
+    bad(send(&wiki.bob, "", &deep).await, "too_deep");
+    let names: Vec<String> = (0..=1000).map(|n| format!("p{n}.md")).collect();
+    let many: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b""[..])).collect();
+    let many = zip(&many).await;
+    bad(send(&wiki.bob, "", &many).await, "too_many_pages");
+    let big = vec![b'a'; 2 * 1024 * 1024 + 1];
+    let big_page = zip(&[("a.md", &big)]).await;
+    assert_eq!(send(&wiki.bob, "", &big_page).await.status, 413);
+    assert_eq!(wiki.live_pages().await, 0);
+
+    // What only shows once the pages exist fails the job, and leaves none of them.
+    let not_utf8 = zip(&[("a.md", b"a"), ("b.md", b"\xff")]).await;
+    let status = wiki.bulk("", &not_utf8).await;
+    assert_eq!(status.body["status"], "failed", "{status:?}");
+    let message = status.body["message"].as_str().unwrap();
+    assert!(message.contains("b.md"), "{message}");
+    assert_eq!(wiki.live_pages().await, 0);
+    let heavy = zip(&[("a.md", b"[f](f.bin)"), ("f.bin", &big)]).await;
+    let status = wiki.bulk("", &heavy).await;
+    assert_eq!(status.body["status"], "failed", "{status:?}");
+    assert_eq!(wiki.live_pages().await, 0);
+}
+
+#[tokio::test]
+async fn an_ended_import_takes_no_slot_and_only_export_files_are_not_pages() {
+    let wiki = wiki(&[]).await;
+    // A page named `attachments` and its folder are the user's: only `attachments/<id>/` is not.
+    let body = zip(&[("attachments.md", b"a"), ("attachments/Mine.md", b"b")]).await;
+    // More than the jobs one user may hold.
+    for _ in 0..3 {
+        let status = wiki.bulk("", &body).await;
+        assert_eq!(status.body["status"], "done", "{status:?}");
+        assert_eq!(status.body["pages"], 2);
+    }
+    let failing = zip(&[("a.md", b"\xff")]).await;
+    for _ in 0..3 {
+        assert_eq!(wiki.bulk("", &failing).await.body["status"], "failed");
+    }
+
+    let parent = wiki.imported("# Gone\n").await;
+    let path = format!("/pages/{parent}");
+    let reply = wiki
+        .api
+        .send("DELETE", &path, &wiki.ada.headers(), json!({}))
+        .await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    let path = format!("/spaces/{}/bulk-import?parent_id={parent}", wiki.space);
+    let reply = wiki
+        .api
+        .raw("POST", &path, &wiki.bob.headers(), &body)
+        .await;
+    assert_eq!(reply.status, 400, "{reply:?}");
+    assert_eq!(reply.body["error"]["fields"]["parent_id"], "unknown");
+}
+
+#[tokio::test]
+async fn ended_jobs_and_their_messages_stay_bounded() {
+    let wiki = wiki(&[]).await;
+    let name = format!("{}.md", "n".repeat(2000));
+    let failing = zip(&[(name.as_str(), b"\xff")]).await;
+    let first = wiki.bulk("", &failing).await;
+    let message = first.body["message"].as_str().unwrap();
+    assert!(message.chars().count() <= 300, "{message}");
+    for _ in 0..8 {
+        wiki.bulk("", &failing).await;
+    }
+    // The oldest ended jobs of a user make room for the new ones.
+    let path = format!("/jobs/{}", id(&first));
+    assert_eq!(wiki.api.get(&wiki.bob, &path).await.status, 404);
+}
+
+/// A zip as desktop tools make it: deflated, with UTF-8 names that no flag declares.
+async fn deflated(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut writer = ZipFileWriter::new(Vec::new());
+    for (name, content) in entries {
+        let name = ZipString::new(name.as_bytes().to_vec(), StringEncoding::Raw);
+        let builder = ZipEntryBuilder::new(name, Compression::Deflate);
+        writer.write_entry_whole(builder, content).await.unwrap();
+    }
+    writer.close().await.unwrap()
+}
+
+#[tokio::test]
+async fn a_compressed_zip_imports_as_one_page_or_as_a_tree() {
+    let wiki = wiki(&[]).await;
+    let text = format!("![a](r\u{e9}sum\u{e9}.png)\n\n{}\n", "word ".repeat(500));
+    let one = deflated(&[
+        ("Caf\u{e9}.md", text.as_bytes()),
+        ("r\u{e9}sum\u{e9}.png", PNG),
+    ])
+    .await;
+    assert!(one.len() < text.len(), "the zip was not compressed");
+    let reply = wiki.import(&wiki.ada, "", "application/zip", &one).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let markdown = wiki.markdown(&id(&reply)).await;
+    assert!(markdown.contains("word word"), "{markdown}");
+    let image = &markdown
+        .split(&format!("{ORIGIN}/api/v1/attachments/"))
+        .nth(1)
+        .unwrap()[..36];
+    let reply = wiki
+        .api
+        .get(&wiki.ada, &format!("/attachments/{image}"))
+        .await;
+    assert_eq!(reply.bytes, PNG);
+
+    let status = wiki.bulk("", &one).await;
+    assert_eq!(status.body["status"], "done", "{status:?}");
+    let root = wiki.children(None).await;
+    assert!(root[1].1.starts_with("# Caf\u{e9}\n"), "{}", root[1].1);
+}
+
+#[tokio::test]
+async fn what_a_zip_unpacks_to_counts_against_the_import_limit() {
+    let wiki = wiki(&[("CADOCS_MAX_IMPORT_MB", "1")]).await;
+    // Far under the limit as sent, over it once unpacked.
+    let zeros = vec![0; 600 * 1024];
+    let bomb = deflated(&[
+        ("a.md", b"[b](b.bin) [c](c.bin)"),
+        ("b.bin", &zeros),
+        ("c.bin", &zeros),
+    ])
+    .await;
+    assert!(bomb.len() < 16 * 1024);
+    let reply = wiki.import(&wiki.ada, "", "application/zip", &bomb).await;
+    assert_eq!(reply.status, 413, "{reply:?}");
+    let path = format!("/spaces/{}/bulk-import", wiki.space);
+    let reply = wiki
+        .api
+        .raw("POST", &path, &wiki.ada.headers(), &bomb)
+        .await;
+    assert_eq!(reply.status, 413, "{reply:?}");
+    assert_eq!(wiki.live_pages().await, 0);
+}
+
+#[tokio::test]
+async fn a_page_that_unpacks_to_more_than_it_declares_is_refused() {
+    let wiki = wiki(&[]).await;
+    let long = vec![b'a'; 64 * 1024];
+    let mut lying = deflated(&[("a.md", &long)]).await;
+    // The unpacked size in the directory record.
+    let record = lying.windows(4).rposition(|w| w == b"PK\x01\x02").unwrap();
+    lying[record + 24..record + 28].copy_from_slice(&1u32.to_le_bytes());
+    let reply = wiki.import(&wiki.ada, "", "application/zip", &lying).await;
+    assert_eq!(reply.status, 400, "{reply:?}");
+    assert_eq!(reply.body["error"]["fields"]["file"], "invalid");
+    let status = wiki.bulk("", &lying).await;
+    assert_eq!(status.body["status"], "failed", "{status:?}");
+    assert_eq!(wiki.live_pages().await, 0);
+}
+
+#[tokio::test]
+async fn backslashes_in_a_zip_separate_folders() {
+    let wiki = wiki(&[]).await;
+    let body = zip(&[("folder\\page.md", b"x")]).await;
+    let status = wiki.bulk("", &body).await;
+    assert_eq!(status.body["pages"], 2, "{status:?}");
+    let root = wiki.children(None).await;
+    assert_eq!(root[0].1, "# folder\n");
 }
