@@ -394,6 +394,11 @@ async fn each_space_action_follows_the_matrix_over_rest() {
         let got = wiki.api.raw("POST", &path, &headers, b"# Notes\n").await;
         check(&mut cells, "import", &got, Needs::Editor, 201);
 
+        // Export the space.
+        let path = format!("/spaces/{space}/export");
+        let got = wiki.api.raw("POST", &path, &bob.headers(), b"").await;
+        check(&mut cells, "export a space", &got, Needs::Viewer, 202);
+
         // Upload or delete an attachment.
         let got = wiki.upload(bob).await;
         check(&mut cells, "upload", &got, Needs::Editor, 201);

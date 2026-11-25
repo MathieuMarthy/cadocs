@@ -97,6 +97,12 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 - A share reaches no socket, so its routes call no `access_changed()`: each public request checks the share again, and a revoke closes it at once.
 - Left open: a share stays open when its creator loses the editor role or leaves (ADR 0009 makes it a capability), and an expired share stays listed until revoked. Public answers are HTML for `404` only: a `429` or `503` keeps the JSON error shape.
 
+## Exports (step 52)
+
+- `api/exports.rs`: space exports are in-memory jobs (`AppState::exports`), not rows of `jobs`: the zip goes to `FileStore::scratch()`, an anonymous file that a restart loses anyway, and dropping the job closes it. A semaphore of one runs them in turn, `MAX_JOBS` bounds what is held, a task removes its job an hour after it ends. A download reads with `read_at`, so two at once share no offset (unix only).
+- The tree is walked folder by folder with `PageStore::tree` in batches of 100, so memory is one page and its AST, and a stack of folders. A page's title in its entry comes from its room (`registry.read`), as for a page export.
+- Left open: no progress count; a link between pages stays absolute rather than a relative file link; a page moved during the walk may be missed or written twice; HTML pages carry no style.
+
 ## Duplication (step 50)
 
 - `api/copies.rs`: `subtree_to_copy` (breadth first, at most `MAX_COPY_PAGES` + 1 rows, so a huge subtree costs one row over the limit), fresh ids and slugs, `create_copies` (all rows, one transaction), one `page.created`, then `fill` in a spawned task like an import: per page, `page_to_read` on the source (unreadable, trashed or moved to another space fails the copy), `registry.read` with `read_page` and `state_len`, each file through `copy_file` once (`files` maps source id to copy, `None` to leave it), `map_attachments`, then `open`, `page_to_edit`, `rewrite`. A failure, or a panic of that task, which a second task awaits, trashes the copy's own pages, by the ids made for it, through `trash_failed_copy`, which checks no role: `move_to_trash` would refuse a caller who lost edit on the target and leave a half copy live. `tests/server.rs` `copy_while` uses `hold_load` to change rights between the first source's check and the next.

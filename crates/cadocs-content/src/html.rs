@@ -34,7 +34,7 @@ pub fn to_html_with(document: &Document, titles: &dyn PageTitles, links: &dyn Li
 }
 
 /// Escapes text and attribute values alike.
-pub(crate) fn escape(text: &str, out: &mut String) {
+pub fn escape(text: &str, out: &mut String) {
     for c in text.chars() {
         match c {
             '&' => out.push_str("&amp;"),
