@@ -419,3 +419,33 @@ test("a group whose members fail to load says so, until another group opens", as
   await expect(groups).toContainText("nobody is in this group yet.");
   await expect(groups.getByRole("alert")).toHaveCount(0);
 });
+
+test("a language picked on the account screen redraws it, and outlives a reload", async ({
+  page,
+  server,
+}) => {
+  await asOwner(page, server);
+  await page.goto(`${server.url}/account`);
+  const profile = page.getByRole("region", { name: "profile" });
+  await profile.getByLabel("language").selectOption("fr");
+  await profile.getByRole("button", { name: "save" }).click();
+  await expect(page.getByRole("heading", { name: "compte", level: 1 })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  await expect(page.getByRole("status").filter({ hasText: "enregistré" })).toBeVisible();
+  await page.reload();
+  const profil = page.getByRole("region", { name: "profil" });
+  await profil.getByLabel("langue").selectOption("");
+  await profil.getByRole("button", { name: "enregistrer" }).click();
+  await expect(page.getByRole("heading", { name: "account", level: 1 })).toBeVisible();
+
+  // The browser's own language picked by name redraws nothing: one confirmation, not two.
+  await page.getByRole("region", { name: "profile" }).getByLabel("language").selectOption("en");
+  await page.reload();
+  const same = page.getByRole("region", { name: "profile" });
+  await same.getByLabel("language").selectOption("en");
+  await same.getByRole("button", { name: "save" }).click();
+  const saved = page.getByRole("status").filter({ hasText: "saved" });
+  await expect(saved.first()).toBeVisible();
+  // Read once: a retried count would wait for the notice to leave.
+  expect(await saved.count()).toBe(1);
+});

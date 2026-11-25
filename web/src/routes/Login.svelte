@@ -35,7 +35,7 @@
     if (withCode) body.code = withCode;
     if (withTotp) body.totp = withTotp;
     await form.run(
-      async () => signIn(await api<Session>("POST", "/auth/login", body)),
+      async () => await signIn(await api<Session>("POST", "/auth/login", body)),
       (error) =>
         error instanceof ApiError && error.status === 401
           ? t("login.wrong")

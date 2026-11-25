@@ -2,13 +2,20 @@
 
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { after, test } from "node:test";
 
-import { runnerImport } from "vite";
+import { createServer } from "vite";
 
-const { module: i18n } = await runnerImport<typeof import("../src/lib/i18n/index.ts")>(
-  fileURLToPath(new URL("../src/lib/i18n/index.ts", import.meta.url)),
-);
+// A server, not `runnerImport`: that one closes before `useLanguage` can import a catalogue.
+const vite = await createServer({
+  configFile: false,
+  logLevel: "silent",
+  server: { middlewareMode: true, hmr: false, ws: false, watch: null },
+});
+after(() => vite.close());
+const load = <T>(file: string) =>
+  vite.ssrLoadModule(fileURLToPath(new URL(`../src/lib/i18n/${file}`, import.meta.url))) as Promise<T>;
+const i18n = await load<typeof import("../src/lib/i18n/index.ts")>("index.ts");
 
 test("the person's choice comes first, if the interface has it", () => {
   assert.equal(i18n.pickLanguage("fr", ["de-DE", "en"], ["en", "fr"]), "fr");
@@ -40,8 +47,33 @@ test("numeric dates follow the browser's first locale, as before step 34", () =>
   assert.equal(i18n.dateLocale("fr", ["fr-CA"]), "fr-CA");
 });
 
-test("today the interface comes in English, whatever the browser asks", async () => {
-  assert.deepEqual(i18n.LANGUAGES, ["en"]);
+test("the interface comes in English and French, and the last choice wins", async () => {
+  assert.deepEqual(i18n.LANGUAGES, ["en", "fr"]);
   await i18n.useLanguage("fr");
+  assert.equal(i18n.currentLanguage(), "fr");
+  assert.equal(i18n.t("common.cancel"), "annuler");
+  assert.equal(i18n.t("groups.count", { count: 1 }), "1 membre");
+  assert.equal(i18n.t("groups.count", { count: 2 }), "2 membres");
+  assert.equal(i18n.t("comments.toggleOpen", { count: 1 }), "commentaires · 1 ouvert");
+  assert.equal(i18n.t("comments.toggleOpen", { count: 2 }), "commentaires · 2 ouverts");
+  assert.equal(i18n.t("space.trashed"), "mis à la corbeille");
+  // The second call is made before the first has its catalogue.
+  await Promise.all([i18n.useLanguage("en"), i18n.useLanguage("fr")]);
+  assert.equal(i18n.currentLanguage(), "fr");
+  await Promise.all([i18n.useLanguage("en"), i18n.useLanguage("fr"), i18n.useLanguage("en")]);
   assert.equal(i18n.currentLanguage(), "en");
+});
+
+test("French has every entry, with the parameters and forms of English", async () => {
+  const module = await load<typeof import("../src/lib/i18n/fr.ts")>("fr.ts");
+  const source = await load<typeof import("../src/lib/i18n/en.ts")>("en.ts");
+  type Entry = string | { one?: string; other: string };
+  const shape = (entry: Entry) =>
+    (typeof entry === "string" ? [entry] : Object.values(entry)).map((text) =>
+      (text.match(/\{\w+\}/g) ?? []).sort().join(),
+    );
+  assert.deepEqual(Object.keys(module.fr), Object.keys(source.en));
+  for (const [key, entry] of Object.entries(source.en as Record<string, Entry>)) {
+    assert.deepEqual(shape(module.fr[key as keyof typeof module.fr]), shape(entry), key);
+  }
 });

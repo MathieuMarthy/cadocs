@@ -373,7 +373,7 @@
           <li class="record">
             <span class="record-who">
               {space.name}
-              <span>{t("page.trashed")} <Time value={space.deleted_at ?? space.updated_at} /></span>
+              <span>{t("space.trashed")} <Time value={space.deleted_at ?? space.updated_at} /></span>
             </span>
             <IconButton
               icon="rotate-ccw"

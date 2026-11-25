@@ -189,7 +189,7 @@
     if (!done) return;
     await nav.loadSpaces();
     navigate(`/w/${workspace.slug}`);
-    notify(t("page.trashed"), async () => {
+    notify(t("space.trashed"), async () => {
       await api("POST", `/spaces/${moved.id}/restore`);
       await nav.loadSpaces();
     });
