@@ -69,7 +69,7 @@ Steps. The rules of the MVP steps apply, and every new screen takes its strings 
 - [x] Step 51: templates. `templates`, saving a page as one, a new page from one.
 - [x] Step 52: exports. `format=html` for one page, the space export as a job behind `/jobs/{id}`, in Markdown or HTML, streamed as a zip.
 - [x] Step 53: bulk import. A zip of Markdown files and folders becomes a tree of pages with its attachments, as a job.
-- [ ] Step 54: French. Every string of the catalogue translated, the language picker on the account screen.
+- [x] Step 54: French. Every string of the catalogue translated, the language picker on the account screen.
 - [ ] Step 55: V1 exit. Benchmark, binary size, security review of shares, OIDC, TOTP and comments, `COVERAGE.md` and the permission matrix for the new routes.
 
 Parallel work. Steps 38 to 53 fall into independent lanes. Each lane runs in order, and lanes can run side by side in separate branches or worktrees:

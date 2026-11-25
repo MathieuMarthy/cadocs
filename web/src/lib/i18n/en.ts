@@ -225,6 +225,7 @@ export const en = {
   "space.fieldProblem": "{field}: {problem}",
   "space.grants": "grants",
   "space.role": "role",
+  "space.trashed": "moved to trash",
   "space.trashHint": "its pages leave the tree for everyone until a space admin restores it.",
 
   "tree.spaces": "spaces",
@@ -309,7 +310,7 @@ export const en = {
 
   "comments.title": "comments",
   "comments.toggle": "comments",
-  "comments.toggleOpen": "comments · {count} open",
+  "comments.toggleOpen": { one: "comments · {count} open", other: "comments · {count} open" },
   "comments.close": "close comments",
   "comments.showOpen": "open · {count}",
   "comments.showResolved": "resolved · {count}",
@@ -359,6 +360,8 @@ export const en = {
   "trash.purge": "delete forever",
 
   "account.profile": "profile",
+  "account.language": "language",
+  "account.languageAuto": "same as the browser",
   "account.save": "save",
   "account.saved": "saved",
   "account.login": "email and password",

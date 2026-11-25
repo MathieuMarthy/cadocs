@@ -101,6 +101,8 @@
   });
 </script>
 
+<!-- `t` is not reactive: a change of language draws the screen again. -->
+{#key app.language}
 {#if app.phase === "loading"}
   <p class="meta" role="status" style="padding: var(--space-4)">{t("common.loading")}</p>
 {:else if app.phase === "failed"}
@@ -160,6 +162,7 @@
 {:else if view.name === "not-found"}
   <Message title={t("app.notFound")} />
 {/if}
+{/key}
 
 <!-- Outside every screen, so a screen that changes under it keeps the notice. -->
 <Notice />

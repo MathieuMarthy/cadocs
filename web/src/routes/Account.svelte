@@ -1,31 +1,42 @@
 <script lang="ts">
   import Confirm from "../components/Confirm.svelte";
   import Field from "../components/Field.svelte";
+  import Select from "../components/Select.svelte";
   import Shell from "../components/Shell.svelte";
   import { copy } from "../lib/actions";
   import { api, type User } from "../lib/api";
   import { Form } from "../lib/form.svelte";
   import { app, mailFeatures, signOut, updateUser } from "../lib/session.svelte";
-  import { t } from "../lib/i18n";
+  import { currentLanguage, LANGUAGES, t } from "../lib/i18n";
+  import { notify } from "../lib/notice.svelte";
   import { route } from "../lib/router.svelte";
 
   const user = app.session!.user;
 
   // The profile: what others see, changed without a password.
   let name = $state(user.name);
+  /** `""` follows the browser's. */
+  let language = $state(user.language ?? "");
+  /** Each language in its own words, so a person finds theirs whatever is on screen. */
+  const ownName = (code: string) =>
+    new Intl.DisplayNames(code, { type: "language" }).of(code)!.toLocaleLowerCase(code);
   let profileSaved = $state(false);
   const profile = new Form();
 
   async function saveProfile(event: SubmitEvent) {
     event.preventDefault();
     profileSaved = false;
-    if (name === app.session!.user.name) {
+    const chosen = language || null;
+    if (name === app.session!.user.name && chosen === (app.session!.user.language ?? null)) {
       profileSaved = true;
       return;
     }
+    const shown = currentLanguage();
     profileSaved = await profile.run(async () => {
-      updateUser(await api<User>("PATCH", "/me", { name }));
+      await updateUser(await api<User>("PATCH", "/me", { name, language: chosen }));
     });
+    // A new language draws this screen again: only a notice outlives that.
+    if (profileSaved && currentLanguage() !== shown) notify(t("account.saved"));
   }
 
   // How one logs in: the server asks the current password for either.
@@ -263,6 +274,16 @@
         required
         problem={profile.field("name")}
         oninput={() => (profileSaved = false)}
+      />
+      <Select
+        label={t("account.language")}
+        bind:value={language}
+        options={[
+          { value: "", label: t("account.languageAuto") },
+          ...LANGUAGES.map((value) => ({ value, label: ownName(value) })),
+        ]}
+        problem={profile.field("language")}
+        onchange={() => (profileSaved = false)}
       />
       {#if profile.problem}<p class="problem" role="alert">{profile.problem}</p>{/if}
       {#if profileSaved}<p class="notice" role="status">{t("account.saved")}</p>{/if}

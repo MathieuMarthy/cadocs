@@ -26,7 +26,7 @@
   async function accept(body: object, workspaceId: string) {
     await form.run(async () => {
       const session = await api<Session>("POST", `${path}/accept`, body);
-      signIn(session);
+      await signIn(session);
       const joined = session.workspaces.find((item) => item.id === workspaceId);
       navigate(joined ? `/w/${joined.slug}` : "/", { replace: true });
     });

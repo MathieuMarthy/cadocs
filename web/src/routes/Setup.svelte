@@ -25,7 +25,7 @@
     await form.run(
       async () => {
         const body = { name, email, password, workspace_name: workspace, code };
-        signIn(await api<Session>("POST", "/auth/setup", body));
+        await signIn(await api<Session>("POST", "/auth/setup", body));
       },
       (error) => {
         if (error instanceof ApiError && error.fields.code) askCode = true;

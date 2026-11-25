@@ -13,6 +13,7 @@ export type Params = Record<string, string | number>;
 /** The languages the interface comes in, and how each catalogue loads. */
 const CATALOGUES: Record<string, () => Promise<Catalogue>> = {
   en: async () => en,
+  fr: async () => (await import("./fr")).fr,
 };
 
 export const LANGUAGES = Object.keys(CATALOGUES);
@@ -60,9 +61,9 @@ export function pickLanguage(
 }
 
 /**
- * The locale of numeric dates: the browser's first, as before step 34, else the interface's.
- * Dates in words (`5 minutes ago`) take the interface's language instead. Step 54 decides
- * whether a chosen language moves them too.
+ * The locale of numeric dates: the browser's first, else the interface's. A chosen language does
+ * not move them: day and month order is the region's habit. Dates in words (`5 minutes ago`)
+ * take the interface's language.
  */
 export function dateLocale(interfaceLanguage: string, browser: readonly string[]) {
   return browser[0] ?? interfaceLanguage;
@@ -72,12 +73,18 @@ export function dateLocale(interfaceLanguage: string, browser: readonly string[]
 export const formatLocale = () =>
   dateLocale(language, typeof navigator === "undefined" ? [] : navigator.languages);
 
+/** The last language asked for: a catalogue that loads late must not replace a newer choice. */
+let wanted = language;
+
 /** Shows the interface in the language picked for `chosen`, `null` following the browser's. */
 export async function useLanguage(chosen: string | null | undefined) {
   const browser = typeof navigator === "undefined" ? [] : navigator.languages;
   const picked = pickLanguage(chosen, browser);
+  wanted = picked;
   if (picked === language) return;
-  strings = await CATALOGUES[picked]!();
+  const loaded = await CATALOGUES[picked]!();
+  if (wanted !== picked) return;
+  strings = loaded;
   language = picked;
   plurals = new Intl.PluralRules(language);
   if (typeof document !== "undefined") document.documentElement.lang = language;

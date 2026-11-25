@@ -9,7 +9,7 @@ import {
   type User,
 } from "./api";
 import { navigate } from "./router.svelte";
-import { t, useLanguage } from "./i18n";
+import { currentLanguage, t, useLanguage } from "./i18n";
 
 export const app = $state<{
   phase: "loading" | "failed" | "ready";
@@ -17,14 +17,26 @@ export const app = $state<{
   setupRequired: boolean;
   /** What the login screen says on arrival. */
   notice: string | null;
-}>({ phase: "loading", session: null, setupRequired: false, notice: null });
+  /** The language on screen: `App` draws the screens again when it changes. */
+  language: string;
+}>({ phase: "loading", session: null, setupRequired: false, notice: null, language: "en" });
 
-export function signIn(session: Session) {
+/** A catalogue that fails to load leaves the language on screen. */
+async function showLanguage(chosen: string | null | undefined) {
+  await useLanguage(chosen).catch(() => {});
+  app.language = currentLanguage();
+}
+
+/**
+ * A login waits for the person's language, so the first screen is drawn once. A session read
+ * again keeps the language on screen: a change of it would remount the page under the person.
+ */
+export async function signIn(session: Session) {
   setCsrfToken(session.csrf_token);
+  if (!app.session) await showLanguage(session.user.language);
   app.session = session;
   app.setupRequired = false;
   app.notice = null;
-  void useLanguage(session.user.language);
 }
 
 /** The session ended on its own: the router sends the person to login, and back here after. */
@@ -45,14 +57,15 @@ export function signOut(notice: string | null = null, to = "/login") {
   app.notice = notice;
 }
 
-export function updateUser(user: User) {
+export async function updateUser(user: User) {
+  const before = app.session?.user.language;
   if (app.session) app.session.user = user;
-  void useLanguage(user.language);
+  if (user.language !== before) await showLanguage(user.language);
 }
 
 /** Reads the session again, after a change that may have altered it. */
 export async function refreshSession() {
-  signIn(await api<Session>("GET", "/session"));
+  await signIn(await api<Session>("GET", "/session"));
 }
 
 /** What a mail relay turns on (ADR 0026). */
@@ -89,14 +102,14 @@ export async function boot() {
   app.phase = "loading";
   try {
     try {
-      signIn(await api<Session>("GET", "/session"));
+      await signIn(await api<Session>("GET", "/session"));
     } catch (error) {
       if (!(error instanceof ApiError) || error.status !== 401) throw error;
       const { required } = await api<{ required: boolean }>("GET", "/auth/setup");
       app.setupRequired = required;
     }
-    // The person's language, or the browser's, before anything shows.
-    await useLanguage(app.session?.user.language ?? null);
+    // With nobody logged in, the browser's language, before anything shows.
+    if (!app.session) await showLanguage(null);
     app.phase = "ready";
   } catch {
     app.phase = "failed";

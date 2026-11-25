@@ -32,7 +32,7 @@
     event.preventDefault();
     await confirmation.run(async () => {
       const body = { email, code, name, password };
-      signIn(await api<Session>("POST", "/auth/register/confirm", body));
+      await signIn(await api<Session>("POST", "/auth/register/confirm", body));
     });
   }
 </script>
