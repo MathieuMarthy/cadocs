@@ -130,3 +130,34 @@ export async function importPage<T>(space: string, file: File): Promise<T> {
   const response = await call("POST", path, headers, file);
   return (await response.json()) as T;
 }
+
+/** A bulk import as `/jobs/{id}` answers it. */
+export interface ImportJob {
+  id: string;
+  status: "running" | "done" | "failed";
+  /** How many pages a done one made. */
+  pages?: number;
+  /** Why a failed one stopped, when the server can say. */
+  message?: string;
+}
+
+const JOB_POLL_MS = 1000;
+
+/** Imports a zip of Markdown files and folders under `parent`, and waits for the job to end. */
+export async function bulkImport(space: string, parent: string | null, file: File) {
+  const under = parent ? `?parent_id=${encodeURIComponent(parent)}` : "";
+  const path = `/spaces/${encodeURIComponent(space)}/bulk-import${under}`;
+  const response = await call("POST", path, { "content-type": "application/zip" }, file);
+  let job = (await response.json()) as ImportJob;
+  while (job.status === "running") {
+    await new Promise((done) => setTimeout(done, JOB_POLL_MS));
+    try {
+      job = await api<ImportJob>("GET", `/jobs/${job.id}`);
+    } catch (error) {
+      // The job goes on whatever the network does: giving up would invite a second import.
+      const passing = error instanceof ApiError && (error.status === 0 || error.status >= 500);
+      if (!passing) throw error;
+    }
+  }
+  return job;
+}

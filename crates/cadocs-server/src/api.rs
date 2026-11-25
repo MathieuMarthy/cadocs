@@ -7,6 +7,7 @@ mod comments;
 mod copies;
 pub mod exports;
 mod groups;
+mod imports;
 mod invitations;
 mod markdown;
 mod oidc;
@@ -444,6 +445,7 @@ where
         .merge(attachments::routes(state))
         .merge(markdown::routes(state))
         .merge(exports::routes(state))
+        .merge(imports::routes(state))
         .merge(search::routes(state))
         .merge(revisions::routes(state))
         .merge(comments::routes(state))

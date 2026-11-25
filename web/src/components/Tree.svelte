@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { SvelteSet } from "svelte/reactivity";
+
+  import BulkImport from "./BulkImport.svelte";
   import IconButton from "./IconButton.svelte";
   import Menu, { type MenuItem } from "./Menu.svelte";
   import NewSpace, { managesSpaces } from "./NewSpace.svelte";
@@ -44,6 +47,9 @@
   const move = (page: PageRow, place: Place) => void attempt(() => nav.move(page, place));
   const trash = (page: PageRow) => void attempt(() => trashPage(nav, page));
 
+  /** The spaces whose zip import form is open, under their row: one each, as each polls its job. */
+  const bulk = new SvelteSet<string>();
+
   /** The file picker of `import markdown`, and the space it imports into. */
   let picker = $state<HTMLInputElement>();
   let importing: Space | null = null;
@@ -75,6 +81,7 @@
     if (!canEdit(space.role)) return [settings];
     return [
       { icon: "upload", label: t("tree.import"), select: () => pick(space) },
+      { icon: "upload", label: t("tree.importZip"), select: () => void bulk.add(space.id) },
       { icon: "trash-2", label: t("tree.openTrash"), href: `${base}/trash/${space.slug}` },
       settings,
     ];
@@ -151,6 +158,9 @@
             <Menu label={t("menu.moreFor", { name: label(space) })} items={spaceItems(space)} />
           </span>
         </div>
+        {#if bulk.has(space.id)}
+          <BulkImport {nav} {space} onclose={() => bulk.delete(space.id)} />
+        {/if}
         <!-- Once loaded, so the level unfolds to the height of its rows. -->
         {#if open && root?.loaded}
           {#if root.items.length === 0 && !root.problem}

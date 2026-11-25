@@ -24,8 +24,9 @@ publish = false
 
 [workspace.dependencies]
 anyhow = "1"
-# Zips of one page and its attachments (docs/API.md#pages). No compression: entries are stored.
-async_zip = { version = "0.0.19", default-features = false, features = ["tokio"] }
+# Zips of pages and their attachments (docs/API.md#pages). Exports store entries as they are;
+# imports also read deflated ones (ADR 0029).
+async_zip = { version = "0.0.19", default-features = false, features = ["deflate", "tokio"] }
 argon2 = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "password-hash"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
 # Comment anchors in JSON (docs/API.md#comments). sqlx already links this version.

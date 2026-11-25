@@ -4,8 +4,8 @@
 //! download as `attachments/<id>/<name>`, where its links point. An import reads either back into
 //! a new page, with copies of the zip's attachments, and writes it through the room.
 //!
-//! Zip entries are stored, not compressed: attachments mostly are already, and this keeps a
-//! decompressor out of the binary. An import takes its body to a scratch file first, since a zip
+//! Exports store their entries as they are, since attachments mostly are compressed already; an
+//! import also reads deflated ones, as desktop tools write them (ADR 0029). An import takes its body to a scratch file first, since a zip
 //! is read from its end, and bounds the zip's directory before parsing it.
 
 // async_zip 0.0.19 deprecates its seekable reader for a `read1` module it does not ship yet.
@@ -57,7 +57,7 @@ use crate::AppState;
 use crate::session::{self, CurrentSession};
 
 /// The Markdown of one page, about what a page socket takes in one frame.
-const MAX_MARKDOWN_BYTES: u64 = 2 * 1024 * 1024;
+pub(super) const MAX_MARKDOWN_BYTES: u64 = 2 * 1024 * 1024;
 /// Entries of an imported zip, and the size of their directory, which is parsed into memory.
 const MAX_ENTRIES: u16 = 1000;
 const MAX_DIRECTORY_BYTES: u32 = 1024 * 1024;
@@ -100,7 +100,7 @@ pub(super) fn not_found() -> ApiError {
     ApiError::new(ErrorCode::NotFound)
 }
 
-fn too_large() -> ApiError {
+pub(super) fn too_large() -> ApiError {
     ApiError::new(ErrorCode::TooLarge).with_message("The file is over the import limit")
 }
 
@@ -174,23 +174,48 @@ impl Links for Bundle<'_> {
 }
 
 /// An imported zip: a link to one of its entries is an attachment, known by the entry's name
-/// until it is stored. Other links read as on this server.
-struct Unbundle<'a> {
-    absolute: Absolute<'a>,
-    entries: &'a HashMap<String, Entry>,
+/// until it is stored, or a page when the entry becomes one. Other links read as on this server.
+pub(super) struct Unbundle<'a> {
+    pub(super) absolute: Absolute<'a>,
+    pub(super) entries: &'a HashMap<String, Entry>,
+    /// The folder of the entry being read, which its relative links start from.
+    pub(super) dir: &'a str,
+    /// The ids of the pages made of entries, by entry name.
+    pub(super) pages: &'a HashMap<String, String>,
+}
+
+/// The entry name a relative address points to from the folder `dir`, without its fragment.
+fn resolve(dir: &str, href: &str) -> Option<String> {
+    let path = href.split('#').next().unwrap_or_default();
+    if path.is_empty() || path.starts_with('/') {
+        return None;
+    }
+    let path = percent_decode_str(path).decode_utf8().ok()?;
+    let mut segments: Vec<&str> = dir.split('/').filter(|part| !part.is_empty()).collect();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                segments.pop()?;
+            }
+            part => segments.push(part),
+        }
+    }
+    Some(segments.join("/"))
 }
 
 impl Links for Unbundle<'_> {
     fn attachment_id(&self, href: &str) -> Option<String> {
-        let name = percent_decode_str(href).decode_utf8().ok();
-        match name.filter(|name| self.entries.contains_key(name.as_ref())) {
-            Some(name) => Some(name.into_owned()),
+        match resolve(self.dir, href).filter(|name| self.entries.contains_key(name)) {
+            Some(name) => (!self.pages.contains_key(&name)).then_some(name),
             None => self.absolute.attachment_id(href),
         }
     }
 
     fn page_id(&self, href: &str) -> Option<String> {
-        self.absolute.page_id(href)
+        resolve(self.dir, href)
+            .and_then(|name| self.pages.get(&name).cloned())
+            .or_else(|| self.absolute.page_id(href))
     }
 }
 
@@ -397,33 +422,35 @@ async fn write_zip(
 }
 
 /// An entry of an imported zip.
-struct Entry {
+#[derive(Clone, Copy)]
+pub(super) struct Entry {
     index: usize,
-    size: u64,
+    pub(super) size: u64,
 }
 
 /// An imported zip, read from its scratch file.
-struct Archive {
+pub(super) struct Archive {
     reader: ZipFileReader<Compat<BufReader<File>>>,
     /// Its files, by name.
-    entries: HashMap<String, Entry>,
-    /// The index of its one Markdown file.
-    markdown: usize,
-    /// The size of the zip, which bounds what its entries may write out together.
-    length: u64,
+    pub(super) entries: HashMap<String, Entry>,
 }
 
-fn unreadable_zip(error: ZipError) -> ApiError {
+pub(super) fn unreadable_zip(error: ZipError) -> ApiError {
     match error {
-        ZipError::CompressionNotSupported(_) => invalid("file", "compressed")
-            .with_message("Only zips whose entries are stored, not compressed, can be imported"),
+        ZipError::CompressionNotSupported(_) => invalid("file", "compression")
+            .with_message("The zip uses a compression other than deflate"),
         _ => invalid("file", "invalid").with_message("The zip cannot be read"),
     }
 }
 
 impl Archive {
-    async fn open(mut file: File) -> Result<Self, ApiError> {
-        let length = check_directory(&mut file).await?;
+    /// `max_unpacked` bounds what the entries declare they unpack to, all together.
+    pub(super) async fn open(
+        mut file: File,
+        max_entries: u16,
+        max_unpacked: u64,
+    ) -> Result<Self, ApiError> {
+        let length = check_directory(&mut file, max_entries).await?;
         file.seek(SeekFrom::Start(0))
             .await
             .map_err(ApiError::internal)?;
@@ -431,55 +458,73 @@ impl Archive {
             .await
             .map_err(unreadable_zip)?;
         let mut entries = HashMap::new();
-        let mut markdown = Vec::new();
+        let (mut packed, mut unpacked) = (0u64, 0u64);
         for (index, entry) in reader.file().entries().iter().enumerate() {
-            let Ok(name) = entry.filename().as_str() else {
+            // Many tools write UTF-8 names without the flag that says so.
+            let Ok(name) = std::str::from_utf8(entry.filename().as_bytes()) else {
                 continue;
             };
-            if entry.dir().unwrap_or(true) {
+            // Some Windows tools separate folders with backslashes.
+            let name = name.replace('\\', "/");
+            // `ZipEntry::dir` wants the UTF-8 flag too.
+            if name.ends_with('/') {
                 continue;
             }
-            if entry.compression() != Compression::Stored {
+            if !matches!(
+                entry.compression(),
+                Compression::Stored | Compression::Deflate
+            ) {
                 return Err(unreadable_zip(ZipError::CompressionNotSupported(0)));
             }
-            if !name.contains('/') && name.to_lowercase().ends_with(".md") {
-                markdown.push(index);
-            }
-            // Stored, so both sizes are the bytes the entry writes out.
             let size = entry.uncompressed_size();
-            if entry.compressed_size() != size {
-                return Err(unreadable_zip(ZipError::UnableToLocateEOCDR));
-            }
-            entries.insert(name.to_owned(), Entry { index, size });
+            packed = packed.saturating_add(entry.compressed_size());
+            unpacked = unpacked.saturating_add(size);
+            entries.insert(name, Entry { index, size });
         }
-        let markdown = match markdown[..] {
-            [] => return Err(invalid("file", "no_markdown")),
-            [one] => one,
-            _ => return Err(invalid("file", "several_markdown")),
-        };
-        Ok(Self {
-            reader,
-            entries,
-            length,
-            markdown,
-        })
+        // Entries that share their bytes would unpack more than was received.
+        if packed > length {
+            return Err(unreadable_zip(ZipError::UnableToLocateEOCDR));
+        }
+        if unpacked > max_unpacked {
+            return Err(too_large());
+        }
+        Ok(Self { reader, entries })
     }
 
-    async fn markdown(&mut self) -> Result<Vec<u8>, ApiError> {
+    /// The index of the one Markdown file at the root, which an import of one page reads.
+    fn only_markdown(&self) -> Result<&String, ApiError> {
+        let mut found = self
+            .entries
+            .iter()
+            .filter(|(name, _)| !name.contains('/') && name.to_lowercase().ends_with(".md"));
+        match (found.next(), found.next()) {
+            (Some((name, _)), None) => Ok(name),
+            (None, _) => Err(invalid("file", "no_markdown")),
+            _ => Err(invalid("file", "several_markdown")),
+        }
+    }
+
+    /// The bytes of the Markdown entry `name`, as many as its directory record declares.
+    pub(super) async fn markdown(&mut self, name: &str) -> Result<Vec<u8>, ApiError> {
+        let Entry { index, size } = *self.entries.get(name).ok_or_else(not_found)?;
         let entry = self
             .reader
-            .reader_without_entry(self.markdown)
+            .reader_without_entry(index)
             .await
             .map_err(unreadable_zip)?;
         let mut bytes = Vec::new();
         entry
             .compat()
-            .take(MAX_MARKDOWN_BYTES + 1)
+            .take(size.min(MAX_MARKDOWN_BYTES) + 1)
             .read_to_end(&mut bytes)
             .await
             .map_err(|_| invalid("file", "invalid"))?;
         if bytes.len() as u64 > MAX_MARKDOWN_BYTES {
             return Err(too_large());
+        }
+        // The limits go by the declared sizes, and inflating does not hold to them.
+        if bytes.len() as u64 != size {
+            return Err(invalid("file", "invalid"));
         }
         Ok(bytes)
     }
@@ -505,7 +550,7 @@ impl Archive {
 /// Bounds what parsing the zip's directory reads, before it is parsed: few entries, a small
 /// directory right before its end record, and no zip64 records, whose sizes would be elsewhere.
 /// The end record is found as the parser finds it, the last one in the file.
-async fn check_directory(file: &mut File) -> Result<u64, ApiError> {
+async fn check_directory(file: &mut File, max_entries: u16) -> Result<u64, ApiError> {
     let unreadable = || invalid("file", "invalid").with_message("The zip cannot be read");
     let length = file
         .seek(SeekFrom::End(0))
@@ -532,7 +577,7 @@ async fn check_directory(file: &mut File) -> Result<u64, ApiError> {
     let entries = u16::from_le_bytes([record[10], record[11]]);
     let size = u32::from_le_bytes([record[12], record[13], record[14], record[15]]);
     let offset = u32::from_le_bytes([record[16], record[17], record[18], record[19]]);
-    if entries > MAX_ENTRIES {
+    if entries > max_entries {
         return Err(invalid("file", "too_many_entries"));
     }
     if size > MAX_DIRECTORY_BYTES || u64::from(offset) + u64::from(size) != start + at as u64 {
@@ -560,7 +605,11 @@ fn cut_short() -> ApiError {
 }
 
 /// Streams `body` into a scratch file, at most `limit` bytes, and answers it rewound.
-async fn receive(files: &dyn FileStore, body: Body, limit: u64) -> Result<File, ApiError> {
+pub(super) async fn receive(
+    files: &dyn FileStore,
+    body: Body,
+    limit: u64,
+) -> Result<File, ApiError> {
     let mut file = File::from_std(files.scratch().map_err(ApiError::internal)?);
     let mut stream = body.into_data_stream().map_err(io::Error::other);
     let mut written = 0u64;
@@ -621,13 +670,13 @@ fn title_from(name: &str) -> String {
 }
 
 /// What an import has read, before anything is stored.
-struct Parsed {
-    title: String,
-    document: Document,
+pub(super) struct Parsed {
+    pub(super) title: String,
+    pub(super) document: Document,
     /// The size of the Markdown, about what the page's room takes in.
-    bytes: usize,
+    pub(super) bytes: usize,
     /// Entries to store as attachments, by name.
-    attachments: Vec<(String, usize)>,
+    pub(super) attachments: Vec<String>,
 }
 
 async fn import<
@@ -655,27 +704,36 @@ async fn import<
     let mut archive = None;
     let markdown = if is_zip(&headers) {
         let file = receive(&*state.files, body, limits.max_import_bytes).await?;
-        let mut opened = Archive::open(file).await?;
-        let markdown = opened.markdown().await?;
+        let max = limits.max_import_bytes;
+        let mut opened = Archive::open(file, MAX_ENTRIES, max).await?;
+        let name = opened.only_markdown()?.clone();
+        let markdown = opened.markdown(&name).await?;
         archive = Some(opened);
         markdown
     } else {
         read_limited(body, MAX_MARKDOWN_BYTES.min(limits.max_import_bytes)).await?
     };
-    let parsed = parse(&state, &name, markdown, archive.as_ref())?;
-    if let Some(archive) = &archive {
-        let mut total = 0u64;
-        for (entry, _) in &parsed.attachments {
-            let size = archive.entries[entry].size;
-            if size > limits.max_upload_bytes {
-                return Err(ApiError::new(ErrorCode::TooLarge)
-                    .with_message("An attachment is over the upload limit"));
-            }
-            total = total.saturating_add(size);
+    let absolute = Absolute {
+        origin: state.http.public_url.origin(),
+    };
+    let pages = HashMap::new();
+    let parsed = match &archive {
+        Some(archive) => {
+            let links = Unbundle {
+                absolute,
+                entries: &archive.entries,
+                dir: "",
+                pages: &pages,
+            };
+            parse(&name, markdown, &links, Some(archive))?
         }
-        // Entries may share their bytes, which would write out more than was received.
-        if total > archive.length {
-            return Err(unreadable_zip(ZipError::UnableToLocateEOCDR));
+        None => parse(&name, markdown, &absolute, None)?,
+    };
+    if let Some(archive) = &archive {
+        let over = |entry: &String| archive.entries[entry].size > limits.max_upload_bytes;
+        if parsed.attachments.iter().any(over) {
+            return Err(ApiError::new(ErrorCode::TooLarge)
+                .with_message("An attachment is over the upload limit"));
         }
     }
 
@@ -684,7 +742,8 @@ async fn import<
     let task = state.clone();
     let id = page.id.clone();
     let filled = tokio::spawn(async move {
-        let filled = fill(&task, &id, &user, &parsed, archive).await;
+        let mut stored = HashMap::new();
+        let filled = fill(&task, &id, &user, &parsed, archive.as_mut(), &mut stored).await;
         if filled.is_err()
             && let Err(trashed) = pages::move_to_trash(&task, &id, &user).await
         {
@@ -696,27 +755,15 @@ async fn import<
     Ok((StatusCode::CREATED, Json(page.into())))
 }
 
-fn parse<S, A>(
-    state: &AppState<S, A>,
+pub(super) fn parse(
     name: &str,
     markdown: Vec<u8>,
+    links: &dyn Links,
     archive: Option<&Archive>,
 ) -> Result<Parsed, ApiError> {
     let text = String::from_utf8(markdown).map_err(|_| invalid("file", "not_utf8"))?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-    let absolute = Absolute {
-        origin: state.http.public_url.origin(),
-    };
-    let mut document = match archive {
-        Some(archive) => {
-            let links = Unbundle {
-                absolute,
-                entries: &archive.entries,
-            };
-            from_markdown_with(text, &links)
-        }
-        None => from_markdown_with(text, &absolute),
-    };
+    let mut document = from_markdown_with(text, links);
     let title = take_title(&mut document)
         .map(|title| title.trim().to_owned())
         .filter(|title| !title.is_empty())
@@ -726,10 +773,7 @@ fn parse<S, A>(
         Some(archive) => document
             .attachments()
             .into_iter()
-            .filter_map(|key| {
-                let index = archive.entries.get(&key)?.index;
-                Some((key, index))
-            })
+            .filter(|key| archive.entries.contains_key(key))
             .collect(),
         None => Vec::new(),
     };
@@ -741,23 +785,27 @@ fn parse<S, A>(
     })
 }
 
-/// Stores the zip's attachments for `page`, then writes the content through its room.
-async fn fill<S: DocStore + PageStore + AttachmentStore, A>(
+/// Stores the zip's attachments for `page`, then writes the content through its room. `ids`
+/// holds the attachments already stored, by entry name, so pages that show one file share it.
+pub(super) async fn fill<S: DocStore + PageStore + AttachmentStore, A>(
     state: &AppState<S, A>,
     page: &str,
     user: &str,
     parsed: &Parsed,
-    archive: Option<Archive>,
+    archive: Option<&mut Archive>,
+    ids: &mut HashMap<String, String>,
 ) -> Result<(), ApiError> {
-    let mut ids = HashMap::new();
-    if let Some(mut archive) = archive {
+    if let Some(archive) = archive {
         let limits = state.attachments;
-        for (entry, index) in &parsed.attachments {
+        for entry in &parsed.attachments {
+            if ids.contains_key(entry) {
+                continue;
+            }
             let id = Uuid::now_v7().to_string();
             // At most what the directory declared, which `import` checked against the zip's size.
-            let declared = archive.entries[entry].size;
+            let Entry { index, size } = archive.entries[entry];
             let stored = archive
-                .put(*index, &id, &*state.files, declared)
+                .put(index, &id, &*state.files, size)
                 .await
                 .map_err(file_error)?;
             let last = entry.rsplit('/').next().unwrap_or_default();
@@ -772,6 +820,13 @@ async fn fill<S: DocStore + PageStore + AttachmentStore, A>(
             } else {
                 file_name
             };
+            // Cut short, or less than the directory declared: a damaged zip.
+            if stored.size != size {
+                if let Err(error) = state.files.delete(&id).await {
+                    warn!(%error, id, "cannot remove an unrecorded import");
+                }
+                return Err(invalid("file", "invalid"));
+            }
             let new = NewAttachment {
                 content_type: guess_type(&file_name).to_owned(),
                 id,

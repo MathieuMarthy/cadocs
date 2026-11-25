@@ -138,7 +138,7 @@ These figures are design estimates. The measurements in [Measured results](#meas
 | Per WebSocket | tens of KB | Bounded send queue, capped socket count. A slow client is disconnected, never buffered without limit |
 | Per loaded document | a few times its encoded size | Unload after inactivity, compact on unload, capped room count |
 | Peaks: password hashing | 19 MB per hash at OWASP settings | A semaphore allows one hash at a time, and a fixed mmap threshold unmaps its block when it ends (ADR 0023) |
-| Peaks: uploads, imports and exports | bounded | Stream to disk, never buffer a whole file. A page export streams its zip through a 64 KiB pipe, and its content read is bounded by `CADOCS_DOC_READS`. One space export job at a time (V1) |
+| Peaks: uploads, imports and exports | bounded | Stream to disk, never buffer a whole file. A page export streams its zip through a 64 KiB pipe, and its content read is bounded by `CADOCS_DOC_READS`. One archive job at a time, space export or bulk import (V1) |
 
 Other strategies:
 

@@ -99,7 +99,7 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 
 ## Exports (step 52)
 
-- `api/exports.rs`: space exports are in-memory jobs (`AppState::exports`), not rows of `jobs`: the zip goes to `FileStore::scratch()`, an anonymous file that a restart loses anyway, and dropping the job closes it. A semaphore of one runs them in turn, `MAX_JOBS` bounds what is held, a task removes its job an hour after it ends. A download reads with `read_at`, so two at once share no offset (unix only).
+- `api/exports.rs`: space exports are in-memory jobs (`AppState::exports`), not rows of `jobs`: the zip goes to `FileStore::scratch()`, an anonymous file that a restart loses anyway, and dropping the job closes it. A semaphore of one runs them in turn, `MAX_JOBS` bounds the jobs running or holding a file (an ended one without a file takes no slot, and only `MAX_USER_ENDED` per user are kept), a task removes its job an hour after it ends. A download reads with `read_at`, so two at once share no offset (unix only).
 - The tree is walked folder by folder with `PageStore::tree` in batches of 100, so memory is one page and its AST, and a stack of folders. A page's title in its entry comes from its room (`registry.read`), as for a page export.
 - Left open: no progress count; a link between pages stays absolute rather than a relative file link; a page moved during the walk may be missed or written twice; HTML pages carry no style.
 
@@ -123,3 +123,9 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 - `FakeRelay` (`cadocs_mail::fake`, dev only) is a real plain text SMTP server.
 - Mail of notifications (step 42): `PUT /me/email-notifications` sits in the mail block. The job runs in `cadocs-jobs` with a clone of `state.mail`, so `start_jobs` must follow the line that sets it (`main` and `tests/common` do). The message is queued before `mark_mailed`: a crash between the two mails twice, a full outbox fails the job for a retry. Left open: the address is not proven before the first message; the message is English whatever the user's language.
 - Left open: no `CADOCS_SMTP_CA_FILE`; asking for a reset link voids earlier ones, up to the per-address limit; the per-address table refuses newcomers silently past 4096; a registration code for an address taken meanwhile answers `409 email: taken`; a login started just before the factor went on ends without a code; turning the factor on ends no other session; the old address is not told when an account moves; a pending code survives a password change; two asks at once can store one code while the other's message goes out last.
+
+## Bulk import (step 53)
+
+- `api/imports.rs` reuses `Archive`, `parse` and `fill` of `markdown.rs`, and `exports::run` for the job (shared map, slots and turn; `Progress::Imported`). All page rows are made first with `pages::add`, so relative links between files resolve to ids (`Unbundle` takes the folder of the file and that map), then each is filled. A failure or a panic discards every id made, as a copy does.
+- Left open: an attachment over the upload limit or the quota is found only by the job, after the rows are made (`failed`, not `413`); a restart mid-job leaves the pages made.
+- Deflated zips (ADR 0029): `Archive::open` bounds the packed sizes by the zip and the unpacked ones by `CADOCS_MAX_IMPORT_MB`. Names and folders are read from the raw bytes: `filename().as_str()` and `ZipEntry::dir` fail without the UTF-8 flag, which macOS and others leave off. Names in another code page (old Windows tools) are still skipped.
