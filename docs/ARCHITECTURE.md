@@ -253,6 +253,19 @@ A login of the peak takes 0.4 seconds at p50 and 0.8 at p95, since 30 hashes run
 - **`CADOCS_MAX_ROOMS` no longer binds, and step 23b removed it (ADR 0022).** 256 small rooms with their sockets take 9 MB over idle, about 36 KiB each, under the 64 KiB the room budget counts at least per room. So the budget alone caps rooms at 1,152, and `CADOCS_MAX_SOCKETS` (512) caps the live ones at 512, about 18 MB over idle for such rooms. Larger documents reach the budget first, at about 110 benchmark documents. Not measured: an idle room with no socket, waiting to unload, which should cost less than one with its socket.
 - **A reindex of every page slows search.** A first run seeded the pages with their 20,000 reindex and revision jobs still queued, which each server then ran on its one core. Meanwhile a search matching every page took 3.6 to 4.5 seconds, against 16 ms once the reindexes were done. A change of the workspace language queues the same reindex of every page.
 
+### V1 results
+
+Step 55, on 2026-11-25, the same scenario and machine, one run. RSS in MB (10^6 bytes).
+
+| Phase | Target | RSS | Anonymous | Verdict |
+| --- | --- | --- | --- | --- |
+| Idle, 10,000 pages | under 30 | 13.2 | 2.8 | holds |
+| 30 active users, 30 page and 30 events sockets | under 100 | 34.5 | 22.6 | holds |
+| After 3 login peaks of 30 | idle plus 10, so 23.1 | 15.3 | 4.7 | holds |
+| 256 rooms on empty pages | under 100 | 22.5 | 11.4 | holds |
+
+Search matching all 10,000 pages: 14.9 ms at p95. The release binary is 20.3 MB, with `web/dist` and no S3 code. Idle grew by 1.6 MB since the mail stage, with the V1 code in the binary; anonymous memory did not move. Details in the [benchmark notes](notes/benchmark.md#measures).
+
 ## Limits accepted by design
 
 - One process on one machine: no horizontal scaling or active-active high availability (ADR 0006).

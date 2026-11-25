@@ -1104,6 +1104,11 @@ mod tests {
             ),
         ]);
         let providers = config(&vars).unwrap().oidc;
+        // The secret never reaches a log through `Debug`.
+        assert!(
+            !format!("{providers:?}").contains("s3cret"),
+            "{providers:?}"
+        );
         let read: Vec<_> = providers
             .iter()
             .map(|p| (&*p.id, &*p.issuer, &*p.client_id, &*p.client_secret))

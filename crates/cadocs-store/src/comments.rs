@@ -121,6 +121,9 @@ pub struct Inbox {
     pub unread: usize,
 }
 
+/// How many replies a thread takes, so a list of threads stays bounded.
+pub const MAX_REPLIES: i64 = 100;
+
 /// How many notifications an inbox holds, the newest ones.
 pub const INBOX_SIZE: u32 = 100;
 
@@ -137,7 +140,7 @@ pub trait CommentStore: Send + Sync + 'static {
 
     /// A thread, or a reply to a thread of the same page. Refused with `PageNotFound`,
     /// `NotAllowed`, `UnknownParent` for a parent that is not a comment of the page, or
-    /// `NestedReply` for a parent that is itself a reply. A reply's anchor is the caller's to
+    /// `NestedReply` for a parent that is itself a reply, `TooManyReplies` past [`MAX_REPLIES`]. A reply's anchor is the caller's to
     /// refuse.
     fn create_comment(
         &self,

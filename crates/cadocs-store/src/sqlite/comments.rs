@@ -6,8 +6,8 @@ use super::mentions::{self, Place};
 use super::pages;
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
-    Anchor, Comment, CommentChange, CommentStore, CommentUser, INBOX_SIZE, Inbox, MailDigest,
-    NewComment, Notification, NotificationKind, Notified, PageSite, StoreError, Thread,
+    Anchor, Comment, CommentChange, CommentStore, CommentUser, INBOX_SIZE, Inbox, MAX_REPLIES,
+    MailDigest, NewComment, Notification, NotificationKind, Notified, PageSite, StoreError, Thread,
 };
 
 /// A comment with the names of its author and of who resolved it, while their accounts exist.
@@ -189,6 +189,14 @@ impl CommentStore for SqliteStore {
             if parent.get::<Option<String>, _>("parent_id").is_some() {
                 return Err(StoreError::NestedReply);
             }
+            let replies: i64 =
+                sqlx::query_scalar("SELECT count(*) FROM comments WHERE parent_id = ?1")
+                    .bind(parent_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if replies >= MAX_REPLIES {
+                return Err(StoreError::TooManyReplies);
+            }
         }
         let anchor = new.anchor.as_ref();
         sqlx::query(
@@ -223,7 +231,18 @@ impl CommentStore for SqliteStore {
             mail_at,
         )
         .await?;
-        // A user mentioned is told of that alone, then the author of the thread, then the page's.
+        // A user mentioned is told of that alone, then the author of the thread, then the page's,
+        // if they may read it.
+        let owners: Vec<String> = sqlx::query_scalar(
+            "SELECT author_id FROM comments WHERE id = ?1 AND author_id IS NOT NULL
+             UNION SELECT created_by FROM pages WHERE id = ?2 AND created_by IS NOT NULL",
+        )
+        .bind(&new.parent_id)
+        .bind(&new.page_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let readers = mentions::readers(&mut tx, &new.page_id, &owners).await?;
+        let readers = serde_json::to_string(&readers).expect("strings make JSON");
         for (kind, owner) in [
             ("reply", "SELECT author_id FROM comments WHERE id = ?3"),
             ("comment", "SELECT created_by FROM pages WHERE id = ?2"),
@@ -233,6 +252,7 @@ impl CommentStore for SqliteStore {
                  SELECT lower(hex(randomblob(16))), u.id, ?6, ?2, ?1, ?4, ?5
                  FROM users u
                  WHERE u.id = ({owner}) AND u.id <> ?4
+                   AND u.id IN (SELECT value FROM json_each(?7))
                    AND NOT EXISTS (SELECT 1 FROM notifications n
                                    WHERE n.comment_id = ?1 AND n.user_id = u.id)"
             )))
@@ -242,6 +262,7 @@ impl CommentStore for SqliteStore {
             .bind(&new.actor)
             .bind(new.now)
             .bind(kind)
+            .bind(&readers)
             .execute(&mut *tx)
             .await?;
         }

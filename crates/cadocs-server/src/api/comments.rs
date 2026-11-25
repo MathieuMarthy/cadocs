@@ -3,6 +3,8 @@
 //! event to the readers of the space. A body is plain text whose `<user:ID>` tokens mention
 //! users (`cadocs_content::comment`): the store records those of the workspace.
 
+use std::time::Duration;
+
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
 use axum::middleware::from_fn_with_state;
@@ -31,6 +33,10 @@ pub const MAX_COMMENT_CHARS: usize = 10_000;
 pub const MAX_QUOTE_CHARS: usize = 1_000;
 /// The longest relative position, decoded. A real one takes a few dozen bytes.
 pub const MAX_POSITION_BYTES: usize = 1_024;
+/// Each account writes this many comments at once, then one per `WRITE_REFILL`: new comments and
+/// edits alike, since an edit can mention someone again.
+pub const WRITE_BURST: u32 = 30;
+pub const WRITE_REFILL: Duration = Duration::from_secs(2);
 /// A body of `MAX_COMMENT_CHARS` in 4-byte characters, with room for the rest of the request.
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
 
@@ -210,6 +216,9 @@ async fn create<S: DocStore + CommentStore, A>(
     PathParam(page): PathParam,
     JsonBody(request): JsonBody<CreateRequest>,
 ) -> Result<Response, ApiError> {
+    if let Err(wait) = state.comment_writes.check(&current.user.id) {
+        return Err(ApiError::rate_limited(wait));
+    }
     let mut fields = Fields::default();
     let body = fields.check("body", clean_body(&request.body));
     let anchor = match (&request.anchor, &request.parent_id) {
@@ -240,6 +249,9 @@ async fn edit<S: DocStore + CommentStore, A>(
     PathParam(comment): PathParam,
     JsonBody(request): JsonBody<EditRequest>,
 ) -> Result<Json<CommentBody>, ApiError> {
+    if let Err(wait) = state.comment_writes.check(&current.user.id) {
+        return Err(ApiError::rate_limited(wait));
+    }
     let mut fields = Fields::default();
     let body = fields.check("body", clean_body(&request.body));
     fields.finish()?;

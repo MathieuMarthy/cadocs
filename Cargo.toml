@@ -75,6 +75,9 @@ serde_json = { version = "1", default-features = false, features = ["std"] }
 # TOTP codes: the copy axum and tungstenite already ship. Moves with them.
 sha1 = { version = "0.10", default-features = false }
 sha2 = { version = "0.11", default-features = false }
+# TCP_USER_TIMEOUT on accepted sockets, so a client that never reads is cut (step 55). Already in
+# the tree through lettre.
+socket2 = { version = "0.6", features = ["all"] }
 sqlx = { version = "0.9", default-features = false, features = ["macros", "migrate", "runtime-tokio", "sqlite"] }
 subtle = { version = "2", default-features = false }
 tempfile = "3"

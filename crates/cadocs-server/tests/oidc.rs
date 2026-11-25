@@ -665,3 +665,42 @@ async fn a_stolen_session_cannot_tie_its_own_provider_to_an_account_with_a_passw
     assert_eq!(wrong.status, 400, "{wrong:?}");
     assert_eq!(set_cookie(&wrong, "__Host-oidc"), None);
 }
+
+/// A reset proves who holds the account, so it unties every provider: someone who claimed an
+/// address through a provider that does not prove it, or tied one to a stolen session, loses the
+/// account once its owner takes it back.
+#[tokio::test]
+async fn a_password_reset_unties_the_providers_of_the_account() {
+    let fake = fake_provider().await;
+    let api = server(&fake, &[]).await;
+    let ada = Login::from(&api.setup().await);
+    let started = api.start_oidc(&fake).await;
+    let mut claims = claims(&fake, &started, "mallory", "grace@example.org");
+    claims["email_verified"] = json!(false);
+    let reply = api.finish_oidc(&fake, &started, claims).await;
+    assert!(set_cookie(&reply, common::COOKIE).is_some(), "{reply:?}");
+
+    // Grace takes her address back through a reset link.
+    let grace: String =
+        sqlx::query_scalar("SELECT id FROM users WHERE email = 'grace@example.org'")
+            .fetch_one(&api.db)
+            .await
+            .unwrap();
+    let path = format!("/admin/users/{grace}/password-reset");
+    let reply = api.raw("POST", &path, &ada.headers(), b"").await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let token = reply.body["link"]
+        .as_str()
+        .unwrap()
+        .rsplit('/')
+        .next()
+        .unwrap();
+    let path = format!("/auth/password-reset/{token}");
+    let body = json!({ "password": "a long new password" });
+    let reply = api.send("POST", &path, &[], body).await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+
+    assert_eq!(api.identities().await, 0);
+    let reply = api.oidc_login(&fake, "mallory", "grace@example.org").await;
+    refused_with(&reply, "taken");
+}

@@ -266,6 +266,11 @@ In `redirect` mode, only safe images (AVIF, GIF, JPEG, PNG, WebP) are redirected
 - **Accepted at the end of the MVP:** a user who can invite learns whether an address has an account, from `has_account` in `GET /invitations/{token}`, and, without a relay, from the `409` of `PATCH /me`. Hiding it would leave the invitation page unable to choose between login and sign-up, and needs mail to answer a taken address. It reveals no content and needs an account.
   - A page's position key grows a little with each move between two close siblings, so an editor scripting moves can make the keys of their own spaces long. Writers are trusted.
   - `style-src` allows inline styles (see below). Scripts only load from the instance itself.
+- **Accepted by the review of step 55** (shares, OIDC, TOTP, comments):
+  - Unlinking a provider needs a session but not the password, and does not end the sessions it opened. Someone holding a stolen session can untie the owner's provider, which costs the owner single sign-on, not the account. A password reset ends every session and unties every provider.
+  - `cadocs reset-totp` leaves the providers tied: run `reset-password` too when the account may be in other hands.
+  - With the default `CADOCS_REGISTRATION=open`, a provider that lets people set an address they do not hold can make an account under someone else's address, unverified, before its owner arrives. The owner takes it back with a reset link, which unties the provider. Prefer providers that prove addresses, or close registration.
+  - A client that reads a public page slowly, or not at all, holds one of 16 render turns, 4 at most per address, for at most 60 seconds, then loses the turn and the page; the kernel also closes a connection whose data waits 60 seconds (`TCP_USER_TIMEOUT`, Linux only). Clients from 4 addresses that keep reconnecting can make public pages answer `503`, while logged-in use is unaffected. Behind a proxy, set `CADOCS_TRUSTED_PROXIES`, or every visitor counts as the proxy's address and shares its 4 turns. A download paused for more than a minute is cut, and so is a public page whose HTML takes more than 60 seconds to reach a slow link (about 3 MB at 400 kbit/s; images are separate requests). A proxy that buffers answers, as nginx does by default, takes that load instead.
 
 ## Security headers
 

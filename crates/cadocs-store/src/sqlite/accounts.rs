@@ -666,6 +666,11 @@ impl AccountStore for SqliteStore {
             .execute(&mut *tx)
             .await?;
         revoke_access(&mut tx, &user_id).await?;
+        // A reset proves who holds the account: a provider tied by someone else goes with it.
+        sqlx::query("DELETE FROM user_identities WHERE user_id = ?1")
+            .bind(&user_id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(true)
     }

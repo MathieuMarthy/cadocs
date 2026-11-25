@@ -31,6 +31,7 @@ It also had to say how an identity meets an account that exists.
 - An operator who wants only their own people sets the provider to admit only them, or closes registration and invites people, who then link the provider.
 - An account made by a provider has no password, so the routes that need the current password (email change, password change, the authenticator app) are closed to it until it gets one through a reset link.
 - A user who turned on the app and later links a provider can log in through the provider without the app. The account screen of step 49 says so.
+- A password reset unties every provider of the account (step 55). A provider that does not prove addresses still makes an account with the address it gives, unverified: whoever holds the mailbox takes the account back with a reset, and the provider's subject loses it. The same reset ends a provider tied with a stolen session. A user who linked their own provider links it again.
 - Only RS256 tokens pass. A provider that signs with HS256 or ES256 is refused with a line in the log.
 - The TLS path is checked by hand against Authentik and Keycloak in step 49: the tests run against a fake provider over plain HTTP on loopback.
 

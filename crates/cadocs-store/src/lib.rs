@@ -25,7 +25,8 @@ pub use accounts::{
 pub use attachments::{Attachment, AttachmentStore, NewAttachment, UploadTarget};
 pub use comments::{
     Anchor, Comment, CommentChange, CommentStore, CommentUser, INBOX_SIZE, Inbox,
-    MAIL_NOTIFICATIONS, MailDigest, NewComment, Notification, NotificationKind, Notified, Thread,
+    MAIL_NOTIFICATIONS, MAX_REPLIES, MailDigest, NewComment, Notification, NotificationKind,
+    Notified, Thread,
 };
 pub use groups::{Group, GroupStore, NewGroup};
 pub use jobs::{ExpiredPage, ExpiredSpace, Job, JobStore, NewJob};
@@ -152,6 +153,8 @@ pub enum StoreError {
     CommentNotFound,
     #[error("a reply answers a thread, not another reply")]
     NestedReply,
+    #[error("a thread takes at most {} replies", crate::comments::MAX_REPLIES)]
+    TooManyReplies,
     #[error("only a thread can be resolved")]
     NotAThread,
     #[error("the workspace has no room left for this file")]
