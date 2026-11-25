@@ -30,7 +30,7 @@ async_zip = { version = "0.0.19", default-features = false, features = ["deflate
 argon2 = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "password-hash"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
 # Comment anchors in JSON (docs/API.md#comments). sqlx already links this version.
-base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 bytes = { version = "1", default-features = false }
 cadocs-collab = { path = "crates/cadocs-collab" }
 cadocs-content = { path = "crates/cadocs-content" }
@@ -49,7 +49,7 @@ http-body-util = { version = "0.1", default-features = false }
 hyper = { version = "1", default-features = false, features = ["client", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 # HMAC-SHA-1 of TOTP codes (RFC 6238). The 0.12 line, over the `digest` 0.10 that `sha1` brings.
-hmac = { version = "0.12", default-features = false }
+hmac = { version = "0.13", default-features = false }
 # SMTP to the operator's relay (ADR 0026). No pool: a connection per message, none at idle.
 # rustls with `ring` and the system roots, as `reqwest` has them in the S3 build.
 lettre = { version = "0.11", default-features = false, features = ["builder", "ring", "rustls-native-certs", "smtp-transport", "tokio1-rustls"] }
@@ -73,7 +73,7 @@ rusty-s3 = { version = "0.12", default-features = false, features = ["full", "ru
 serde = { version = "1", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["std"] }
 # TOTP codes: the copy axum and tungstenite already ship. Moves with them.
-sha1 = { version = "0.10", default-features = false }
+sha1 = { version = "0.11", default-features = false }
 sha2 = { version = "0.11", default-features = false }
 # TCP_USER_TIMEOUT on accepted sockets, so a client that never reads is cut (step 55). Already in
 # the tree through lettre.
@@ -83,14 +83,14 @@ subtle = { version = "2", default-features = false }
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", default-features = false }
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 # The rustls of `lettre`, with `ring`: the S3 store installs it as the provider of reqwest 0.13.
 # TLS of OIDC requests (ADR 0028): the version `lettre` uses, with `ring`.
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 tokio-util = { version = "0.7", default-features = false }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 # The version axum uses: `ws.rs` reads its error type, and a second copy would not match.
-tungstenite = { version = "0.29", default-features = false }
+tungstenite = { version = "0.30", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std"] }
 # The URL type `rusty-s3` signs, already in the tree through it.
