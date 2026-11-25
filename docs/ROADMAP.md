@@ -70,7 +70,7 @@ Steps. The rules of the MVP steps apply, and every new screen takes its strings 
 - [x] Step 52: exports. `format=html` for one page, the space export as a job behind `/jobs/{id}`, in Markdown or HTML, streamed as a zip.
 - [x] Step 53: bulk import. A zip of Markdown files and folders becomes a tree of pages with its attachments, as a job.
 - [x] Step 54: French. Every string of the catalogue translated, the language picker on the account screen.
-- [ ] Step 55: V1 exit. Benchmark, binary size, security review of shares, OIDC, TOTP and comments, `COVERAGE.md` and the permission matrix for the new routes.
+- [x] Step 55: V1 exit. Benchmark, binary size, security review of shares, OIDC, TOTP and comments, `COVERAGE.md` and the permission matrix for the new routes.
 
 Parallel work. Steps 38 to 53 fall into independent lanes. Each lane runs in order, and lanes can run side by side in separate branches or worktrees:
 
@@ -96,11 +96,11 @@ Lanes do not depend on each other, but they share files, so merge one branch at 
 
 Exit criteria:
 
-- [ ] Public pages contain no JavaScript requirement, and a test confirms a script in content cannot execute.
-- [ ] OIDC works with at least two providers (for example Authentik and Keycloak).
-- [ ] Binary size stays under 30 MB, and a default build contains no S3 code.
-- [ ] Idle RSS and active-user thresholds of the MVP still hold.
-- [ ] Upgrade from every earlier release is tested through migrations.
+- [x] Public pages contain no JavaScript requirement, and a test confirms a script in content cannot execute.
+- [ ] OIDC works with at least two providers (for example Authentik and Keycloak). Open: the manual check of [OPERATIONS.md](OPERATIONS.md#single-sign-on-oidc) has not been run.
+- [x] Binary size stays under 30 MB, and a default build contains no S3 code.
+- [x] Idle RSS and active-user thresholds of the MVP still hold.
+- [x] Upgrade from every earlier release is tested through migrations.
 
 ## V2
 

@@ -424,6 +424,34 @@ async fn each_space_action_follows_the_matrix_over_rest() {
             .await;
         check(&mut cells, "revoke a share", &got, Needs::Editor, 204);
 
+        // Read backlinks, with the rows that read a page.
+        let path = format!("/pages/{page}/backlinks");
+        let got = wiki.call(bob, "GET", &path).await;
+        check(&mut cells, "read backlinks", &got, Needs::Viewer, 200);
+
+        // List the templates, save a page as one, start a page from one, delete one.
+        let path = format!("/spaces/{space}/templates");
+        let got = wiki.call(bob, "GET", &path).await;
+        check(&mut cells, "list templates", &got, Needs::Viewer, 200);
+        let path = format!("/pages/{page}/template");
+        let got = wiki.send(bob, "POST", &path, json!({})).await;
+        check(&mut cells, "save a template", &got, Needs::Editor, 201);
+        let reply = wiki.send(&wiki.ada, "POST", &path, json!({})).await;
+        assert_eq!(reply.status, 201, "{reply:?}");
+        let template = id(&reply);
+        let path = format!("/templates/{template}/pages");
+        let got = wiki.send(bob, "POST", &path, json!({})).await;
+        check(
+            &mut cells,
+            "start from a template",
+            &got,
+            Needs::Editor,
+            201,
+        );
+        let path = format!("/templates/{template}");
+        let got = wiki.call(bob, "DELETE", &path).await;
+        check(&mut cells, "delete a template", &got, Needs::Editor, 204);
+
         // Purge a page from the trash.
         let trashed = wiki.trashed_page().await;
         let got = wiki
@@ -473,6 +501,10 @@ async fn a_trashed_space_denies_everything_but_its_restoration() {
         let wiki = Wiki::new(role).await;
         let (bob, space, page) = (&wiki.bob, wiki.space.clone(), wiki.page.clone());
         let comment = wiki.own_comment().await;
+        let path = format!("/pages/{page}/template");
+        let reply = wiki.send(&wiki.ada, "POST", &path, json!({})).await;
+        assert_eq!(reply.status, 201, "{reply:?}");
+        let template = id(&reply);
         let reply = wiki
             .call(&wiki.ada, "DELETE", &format!("/spaces/{space}"))
             .await;
@@ -488,6 +520,8 @@ async fn a_trashed_space_denies_everything_but_its_restoration() {
             format!("/pages/{page}/revisions"),
             format!("/pages/{page}/comments"),
             format!("/attachments/{}", wiki.attachment),
+            format!("/pages/{page}/backlinks"),
+            format!("/spaces/{space}/templates"),
         ];
         for path in reads {
             let got = wiki.call(bob, "GET", &path).await;
@@ -513,6 +547,16 @@ async fn a_trashed_space_denies_everything_but_its_restoration() {
         let path = format!("/pages/{page}/duplicate");
         let got = wiki.send(bob, "POST", &path, json!({})).await;
         cells.check(role, "duplicate a page", &got, 404);
+        let path = format!("/pages/{page}/template");
+        let got = wiki.send(bob, "POST", &path, json!({})).await;
+        cells.check(role, "save a template", &got, 404);
+        let path = format!("/templates/{template}/pages");
+        let got = wiki.send(bob, "POST", &path, json!({})).await;
+        cells.check(role, "start from a template", &got, 404);
+        let got = wiki
+            .call(bob, "DELETE", &format!("/templates/{template}"))
+            .await;
+        cells.check(role, "delete a template", &got, 404);
         let path = format!("/pages/{page}/comments");
         let got = wiki.send(bob, "POST", &path, json!({ "body": "Hm" })).await;
         cells.check(role, "comment", &got, 404);

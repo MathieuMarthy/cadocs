@@ -230,3 +230,26 @@ async fn an_edit_naming_someone_told_already_turns_it_into_a_mention() {
     assert_eq!(reply.status, 200, "{reply:?}");
     assert_eq!(kinds(&wiki.inbox(&wiki.ada).await), ["mention"]);
 }
+
+/// Only who may read the page is told of it: rows they could never see would push their real
+/// notifications out of the inbox.
+#[tokio::test]
+async fn no_one_is_told_of_a_page_they_cannot_read() {
+    let wiki = wiki().await;
+    let thread = wiki.comment(&wiki.bob, json!({ "body": "Question" })).await;
+    wiki.grant(false).await;
+
+    let body = format!("<user:{BOB}> look");
+    wiki.comment(&wiki.carol, json!({ "body": body })).await;
+    wiki.comment(
+        &wiki.carol,
+        json!({ "body": "Answer", "parent_id": thread }),
+    )
+    .await;
+    // Ada owns the page and reads it: she is told.
+    assert_eq!(wiki.inbox(&wiki.ada).await["unread"], 3);
+
+    // Nothing was kept for Bob to see once he reads the space again.
+    wiki.grant(true).await;
+    assert_eq!(kinds(&wiki.inbox(&wiki.bob).await), Vec::<&str>::new());
+}
