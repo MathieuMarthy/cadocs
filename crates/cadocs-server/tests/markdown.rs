@@ -487,3 +487,158 @@ async fn an_empty_first_heading_leaves_the_title_to_the_file_name() {
     assert_eq!(reply.status, 201, "{reply:?}");
     assert_eq!(reply.body["title"], "Plan");
 }
+
+#[tokio::test]
+async fn an_html_export_is_one_escaped_file_or_a_zip_with_its_attachments() {
+    let wiki = wiki(&[("CADOCS_FLUSH_INTERVAL_MS", "50")]).await;
+    let page = wiki
+        .imported("# Guide\n\nSome **bold** text and <script>alert(1)</script>.\n")
+        .await;
+    let reply = wiki.export(&wiki.vic, &page, "format=html").await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert_eq!(
+        reply.header("content-type"),
+        Some("text/html; charset=utf-8")
+    );
+    assert!(
+        reply
+            .header("content-disposition")
+            .unwrap()
+            .starts_with("attachment; filename=\"Guide.html\"")
+    );
+    let html = String::from_utf8(reply.bytes).unwrap();
+    assert!(html.starts_with("<!doctype html>"), "{html}");
+    assert!(html.contains("<title>Guide</title>"), "{html}");
+    assert!(html.contains("<h1>Guide</h1>"), "{html}");
+    assert!(html.contains("<strong>bold</strong>"), "{html}");
+    assert!(!html.contains("<script>"), "{html}");
+
+    let image = wiki.attach(&page, "a.png", "image/png", b"PNG").await;
+    let content = format!("# Guide\n\n![a](/api/v1/attachments/{image})\n");
+    let reply = wiki
+        .import(&wiki.ada, "name=g.md", "text/markdown", content.as_bytes())
+        .await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let page = id(&reply);
+    let reply = wiki
+        .export(&wiki.ada, &page, "format=html&attachments=1")
+        .await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert_eq!(reply.header("content-type"), Some("application/zip"));
+    let entries = unzip(reply.bytes).await;
+    let html = String::from_utf8(entries["Guide.html"].clone()).unwrap();
+    assert!(
+        html.contains(&format!("src=\"attachments/{image}/a.png\"")),
+        "{html}"
+    );
+
+    let reply = wiki.export(&wiki.ada, &page, "format=pdf").await;
+    assert_eq!(reply.status, 400, "{reply:?}");
+}
+
+impl Wiki {
+    /// Starts a space export and waits for it to end: the job's final status.
+    async fn space_export(&self, by: &Login, query: &str) -> (String, Reply) {
+        let path = format!("/spaces/{}/export?{query}", self.space);
+        let reply = self.api.raw("POST", &path, &by.headers(), b"").await;
+        assert_eq!(reply.status, 202, "{reply:?}");
+        let job = id(&reply);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let reply = self.api.get(by, &format!("/jobs/{job}")).await;
+            assert_eq!(reply.status, 200, "{reply:?}");
+            if reply.body["status"] != "running" {
+                return (job, reply);
+            }
+            assert!(Instant::now() < deadline, "the export never ended");
+            sleep(Duration::from_millis(20)).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_space_export_is_a_zip_of_folders_and_pages_only_its_starter_downloads() {
+    let wiki = wiki(&[("CADOCS_FLUSH_INTERVAL_MS", "50")]).await;
+    let image = wiki
+        .attach(&wiki.new_page().await, "a.png", "image/png", PNG)
+        .await;
+    let guide = wiki
+        .imported(&format!("# Guide\n\n![a](/api/v1/attachments/{image})\n"))
+        .await;
+    let query = format!("name=c.md&parent_id={guide}");
+    let reply = wiki
+        .import(
+            &wiki.ada,
+            &query,
+            "text/markdown",
+            b"# Child\n\nHello **you**.\n",
+        )
+        .await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    // The same title twice at the root, so the second one is told apart.
+    wiki.imported("# Guide\n\nOther.\n").await;
+
+    let (job, status) = wiki.space_export(&wiki.vic, "format=md").await;
+    assert_eq!(status.body["status"], "done", "{status:?}");
+    let file = format!("/jobs/{job}/file");
+    let reply = wiki.api.get(&wiki.vic, &file).await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert_eq!(reply.header("content-type"), Some("application/zip"));
+    assert!(
+        reply
+            .header("content-disposition")
+            .unwrap()
+            .starts_with("attachment; filename=\"Handbook.zip\"")
+    );
+    let entries = unzip(reply.bytes).await;
+    let mut names: Vec<_> = entries
+        .keys()
+        .filter(|name| !name.starts_with("attachments/"))
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        ["Guide (2).md", "Guide.md", "Guide/Child.md", "Untitled.md"],
+        "{:?}",
+        entries.keys()
+    );
+    let child = String::from_utf8(entries["Guide/Child.md"].clone()).unwrap();
+    assert_eq!(child, "# Child\n\nHello **you**.\n");
+    let guide = String::from_utf8(entries["Guide.md"].clone()).unwrap();
+    assert!(
+        guide.contains(&format!("(attachments/{image}/a.png)")),
+        "{guide}"
+    );
+    assert_eq!(entries[&format!("attachments/{image}/a.png")], PNG);
+
+    // Only whoever started it sees it, and only while they can read the space.
+    for other in [&wiki.bob, &wiki.eve] {
+        assert_eq!(
+            wiki.api.get(other, &format!("/jobs/{job}")).await.status,
+            404
+        );
+        assert_eq!(wiki.api.get(other, &file).await.status, 404);
+    }
+    let path = format!("/spaces/{}/export?format=md", wiki.space);
+    let reply = wiki.api.raw("POST", &path, &wiki.eve.headers(), b"").await;
+    assert_eq!(reply.status, 404, "{reply:?}");
+    let reply = wiki
+        .api
+        .raw("POST", &format!("{path}x"), &wiki.vic.headers(), b"")
+        .await;
+    assert_eq!(reply.status, 400, "{reply:?}");
+
+    let (job, _) = wiki.space_export(&wiki.vic, "format=html").await;
+    let reply = wiki.api.get(&wiki.vic, &format!("/jobs/{job}/file")).await;
+    let entries = unzip(reply.bytes).await;
+    let html = String::from_utf8(entries["Guide/Child.html"].clone()).unwrap();
+    assert!(
+        html.contains("<h1>Child</h1>") && html.contains("<strong>you</strong>"),
+        "{html}"
+    );
+
+    // Held jobs count until an hour after their end: a third one of the same user is refused.
+    let path = format!("/spaces/{}/export", wiki.space);
+    let reply = wiki.api.raw("POST", &path, &wiki.vic.headers(), b"").await;
+    assert_eq!(reply.status, 429, "{reply:?}");
+}

@@ -27,6 +27,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use cadocs_content::ast::{Block, Document, Inline};
+use cadocs_content::html::{escape, to_html_with};
 use cadocs_content::markdown::{from_markdown_with, to_markdown_with};
 use cadocs_content::yjs::{read_page, replace_page};
 use cadocs_content::{
@@ -68,8 +69,9 @@ const ATTACHMENTS_DIR: &str = "attachments/";
 const PIPE_BYTES: usize = 64 * 1024;
 /// The longest name an export gives a file, in characters.
 const ENTRY_CHARS: usize = 100;
-const MARKDOWN_TYPE: &str = "text/markdown; charset=utf-8";
-const ZIP_TYPE: &str = "application/zip";
+pub(super) const MARKDOWN_TYPE: &str = "text/markdown; charset=utf-8";
+pub(super) const HTML_TYPE: &str = "text/html; charset=utf-8";
+pub(super) const ZIP_TYPE: &str = "application/zip";
 /// What a path segment keeps unescaped: RFC 3986's unreserved characters.
 const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
@@ -90,11 +92,11 @@ where
         .route_layer(from_fn_with_state(state.clone(), session::require::<S, A>))
 }
 
-fn invalid(field: &'static str, problem: &'static str) -> ApiError {
+pub(super) fn invalid(field: &'static str, problem: &'static str) -> ApiError {
     ApiError::new(ErrorCode::ValidationFailed).with_field(field, problem)
 }
 
-fn not_found() -> ApiError {
+pub(super) fn not_found() -> ApiError {
     ApiError::new(ErrorCode::NotFound)
 }
 
@@ -103,7 +105,7 @@ fn too_large() -> ApiError {
 }
 
 /// The raw value of `name` in a query.
-fn param<'q>(query: Option<&'q str>, name: &str) -> Option<&'q str> {
+pub(super) fn param<'q>(query: Option<&'q str>, name: &str) -> Option<&'q str> {
     query?
         .split('&')
         .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
@@ -118,8 +120,8 @@ fn decoded(raw: &str) -> Option<String> {
 
 /// Addresses on this server, absolute, for a file opened anywhere. Reading, it also knows the
 /// relative ones.
-struct Absolute<'a> {
-    origin: &'a str,
+pub(super) struct Absolute<'a> {
+    pub(super) origin: &'a str,
 }
 
 impl Absolute<'_> {
@@ -147,10 +149,12 @@ impl Links for Absolute<'_> {
 }
 
 /// An export zip: the attachments it holds are linked inside it, the others on this server.
-struct Bundle<'a> {
-    absolute: Absolute<'a>,
+pub(super) struct Bundle<'a> {
+    pub(super) absolute: Absolute<'a>,
     /// The zip's attachments, with the name of their entry, in `ATTACHMENTS_DIR/<id>/`.
-    files: &'a [(String, String)],
+    pub(super) files: &'a [(String, String)],
+    /// What leads from the entry of the page to the zip's root: `../` for each folder.
+    pub(super) up: &'a str,
 }
 
 impl Links for Bundle<'_> {
@@ -158,7 +162,7 @@ impl Links for Bundle<'_> {
         match self.files.iter().find(|(file, _)| file == id) {
             Some((_, name)) => {
                 let name = utf8_percent_encode(name, SEGMENT);
-                format!("{ATTACHMENTS_DIR}{id}/{name}")
+                format!("{}{ATTACHMENTS_DIR}{id}/{name}", self.up)
             }
             None => self.absolute.attachment(id),
         }
@@ -192,7 +196,7 @@ impl Links for Unbundle<'_> {
 
 /// A name that is safe as a file name on any system: no separators, reserved or control
 /// characters, no dot or space at its edges, and not too long.
-fn safe_name(name: &str, fallback: &str) -> String {
+pub(super) fn safe_name(name: &str, fallback: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| match c {
@@ -211,7 +215,7 @@ fn safe_name(name: &str, fallback: &str) -> String {
 }
 
 /// The page as Markdown: its title as the first heading, then its content.
-fn page_markdown(
+pub(super) fn page_markdown(
     title: &str,
     mut document: Document,
     titles: &dyn PageTitles,
@@ -226,6 +230,23 @@ fn page_markdown(
     };
     document.blocks.insert(0, heading);
     to_markdown_with(&document, titles, links)
+}
+
+/// The page as a standalone HTML file: no script, no style, the title as its `<h1>`.
+pub(super) fn page_html(
+    title: &str,
+    document: &Document,
+    titles: &dyn PageTitles,
+    links: &dyn Links,
+) -> String {
+    let mut out = String::from("<!doctype html><html><head><meta charset=\"utf-8\"><title>");
+    escape(title, &mut out);
+    out.push_str("</title></head><body><article><h1>");
+    escape(title, &mut out);
+    out.push_str("</h1>");
+    out.push_str(&to_html_with(document, titles, links));
+    out.push_str("</article></body></html>");
+    out
 }
 
 /// Takes the first block as the title when it is a top level heading, as an export writes it.
@@ -246,7 +267,10 @@ fn take_title(document: &mut Document) -> Option<String> {
     Some(title)
 }
 
-fn download_headers(kind: &'static str, name: &str) -> [(axum::http::HeaderName, HeaderValue); 3] {
+pub(super) fn download_headers(
+    kind: &'static str,
+    name: &str,
+) -> [(axum::http::HeaderName, HeaderValue); 3] {
     [
         (CONTENT_TYPE, HeaderValue::from_static(kind)),
         (CONTENT_DISPOSITION, header(&disposition(false, name))),
@@ -261,9 +285,23 @@ async fn export<S: DocStore + PageStore + AttachmentStore + RevisionStore, A>(
     RawQuery(query): RawQuery,
 ) -> Result<Response, ApiError> {
     let query = query.as_deref();
-    if !matches!(param(query, "format"), None | Some("md")) {
-        return Err(invalid("format", "invalid"));
-    }
+    let html = match param(query, "format") {
+        None | Some("md") => false,
+        Some("html") => true,
+        Some(_) => return Err(invalid("format", "invalid")),
+    };
+    let (extension, kind) = if html {
+        ("html", HTML_TYPE)
+    } else {
+        ("md", MARKDOWN_TYPE)
+    };
+    let render = |title: &str, document: Document, titles: &dyn PageTitles, links: &dyn Links| {
+        if html {
+            page_html(title, &document, titles, links)
+        } else {
+            page_markdown(title, document, titles, links)
+        }
+    };
     let bundle = match param(query, "attachments") {
         None | Some("0") => false,
         Some("1") => true,
@@ -278,9 +316,9 @@ async fn export<S: DocStore + PageStore + AttachmentStore + RevisionStore, A>(
     };
     let stem = safe_name(&title, "page");
     if !bundle {
-        let markdown = page_markdown(&title, document, &titles, &absolute);
-        let headers = download_headers(MARKDOWN_TYPE, &format!("{stem}.md"));
-        return Ok((headers, markdown).into_response());
+        let text = render(&title, document, &titles, &absolute);
+        let headers = download_headers(kind, &format!("{stem}.{extension}"));
+        return Ok((headers, text).into_response());
     }
 
     let mut files = Vec::new();
@@ -292,12 +330,13 @@ async fn export<S: DocStore + PageStore + AttachmentStore + RevisionStore, A>(
     let links = Bundle {
         absolute,
         files: &files,
+        up: "",
     };
-    let markdown = page_markdown(&title, document, &titles, &links);
+    let markdown = render(&title, document, &titles, &links);
     let (pipe, reader) = tokio::io::duplex(PIPE_BYTES);
     let (done, finished) = oneshot::channel();
     let store = state.files.clone();
-    let entry = format!("{stem}.md");
+    let entry = format!("{stem}.{extension}");
     tokio::spawn(async move {
         let written = write_zip(pipe, &entry, markdown, &files, &*store).await;
         if let Err(error) = &written {

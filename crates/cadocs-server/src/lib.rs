@@ -87,6 +87,8 @@ pub struct AppState<S, A> {
     pub public_requests: Arc<RateLimiter>,
     /// Guesses at the code of an authenticator app, per account.
     pub totp_guesses: Arc<AccountLimiter>,
+    /// The space exports, running or waiting to be downloaded.
+    pub exports: Arc<api::exports::Exports>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
     sockets: watch::Sender<()>,
     /// Wakes the recheck of every socket.
@@ -115,6 +117,7 @@ impl<S, A> Clone for AppState<S, A> {
             mail_addresses: self.mail_addresses.clone(),
             public_requests: self.public_requests.clone(),
             totp_guesses: self.totp_guesses.clone(),
+            exports: self.exports.clone(),
             sockets: self.sockets.clone(),
             access: self.access.clone(),
         }
@@ -169,6 +172,7 @@ impl<S, A> AppState<S, A> {
                 api::auth::TOTP_BURST,
                 api::auth::TOTP_REFILL,
             )),
+            exports: Arc::default(),
             sockets: watch::Sender::new(()),
             access: Arc::default(),
         }

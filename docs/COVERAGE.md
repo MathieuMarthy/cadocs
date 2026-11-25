@@ -38,6 +38,7 @@ Plugins have no route before V2: their rows are tested in the rules only, and th
 | Live updates of the tree and titles | `server/events.rs`, `e2e/navigation` `two browsers see each other…`, `e2e/browsers` (title) |
 | Collaborative editor and its blocks | `e2e/editor` (slash menu, headings, lists, tasks, code, quotes, dividers, links, shortcuts), `e2e/blocks` (callouts, toggles, tables, links to pages), `e2e/attachments` (images, files), `e2e/browsers` (cursors, restart), `content/*.rs`, `collab/*.rs` |
 | Table of contents | `e2e/blocks` `the table of contents lists the headings…` |
+| Exports (step 52) | `server/markdown.rs` `an_html_export_is_one_escaped_file_or_a_zip_with_its_attachments`, `a_space_export_is_a_zip_of_folders_and_pages_only_its_starter_downloads` (folders, duplicate titles, attachments once with `../` links, md and html, starter only, no access `404`), `server/matrix.rs` (`export a space`) |
 | Markdown shortcuts, import and export | `e2e/editor` `Markdown shortcuts make the blocks and marks`, `server/markdown.rs`, `content/markdown.rs`, `e2e/transfer` |
 | Print stylesheet | `e2e/transfer` `printing shows the page alone` |
 | Attachments on disk or S3, limits | `server/attachments.rs`, `files/local.rs`, `files/s3.rs` (fake S3, and MinIO in CI), `e2e/attachments` |
