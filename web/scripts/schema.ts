@@ -11,12 +11,12 @@ const tests = (name: string) =>
   fileURLToPath(new URL(`../../crates/cadocs-content/tests/${name}`, import.meta.url));
 
 const { module } = await runnerImport<{
-  schemaJson: () => unknown;
+  schemaText: () => string;
   editorUpdate: (json: unknown) => Uint8Array;
 }>(fileURLToPath(new URL("../src/editor/schema.ts", import.meta.url)));
 
 const outputs: [string, Buffer][] = [
-  ["tiptap-schema.json", Buffer.from(`${JSON.stringify(module.schemaJson(), null, 2)}\n`)],
+  ["tiptap-schema.json", Buffer.from(module.schemaText())],
   [
     "every-node.bin",
     Buffer.from(module.editorUpdate(JSON.parse(readFileSync(tests("every-node.json"), "utf8")))),

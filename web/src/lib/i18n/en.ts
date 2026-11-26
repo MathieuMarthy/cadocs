@@ -284,6 +284,7 @@ export const en = {
   "page.openParent": "open the parent page",
   "page.openWorkspace": "open the workspace",
   "page.stale": "this page holds content this version cannot show. reload to edit it.",
+  "page.outdated": "cadocs was updated since this tab opened. reload to edit this page.",
 
   "share.title": "public links",
   "share.intro": "anyone with a public link can read this page, without an account.",

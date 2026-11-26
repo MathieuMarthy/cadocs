@@ -1193,7 +1193,8 @@ struct Running {
 impl Running {
     /// The request of a logged-in client.
     fn request(&self, doc: &str) -> WsRequest {
-        let url = format!("ws://{}/ws/pages/{doc}", self.addr);
+        let schema = cadocs_content::schema::editor_fingerprint();
+        let url = format!("ws://{}/ws/pages/{doc}?schema={schema}", self.addr);
         let mut request = url.into_client_request().unwrap();
         let cookie = format!("{COOKIE}={TOKEN}").parse().unwrap();
         request.headers_mut().insert(header::COOKIE, cookie);

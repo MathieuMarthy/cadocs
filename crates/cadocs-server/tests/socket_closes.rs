@@ -88,7 +88,8 @@ impl Wiki {
     }
 
     async fn socket_on(&self, page: &str, by: &Login) -> Socket {
-        let url = format!("ws://{}/ws/pages/{page}", self.api.addr);
+        let schema = cadocs_content::schema::editor_fingerprint();
+        let url = format!("ws://{}/ws/pages/{page}?schema={schema}", self.api.addr);
         let mut request = url.into_client_request().unwrap();
         let headers = request.headers_mut();
         headers.insert(COOKIE, by.cookie.parse().unwrap());

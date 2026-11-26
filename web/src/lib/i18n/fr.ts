@@ -305,6 +305,8 @@ export const fr: Catalogue = {
   "page.openWorkspace": "ouvrir l'espace de travail",
   "page.stale":
     "cette page contient des éléments que cette version ne sait pas afficher. rechargez pour la modifier.",
+  "page.outdated":
+    "cadocs a été mis à jour depuis l'ouverture de cet onglet. rechargez pour modifier cette page.",
 
   "share.title": "liens publics",
   "share.intro": "toute personne disposant d'un lien public peut lire cette page, sans compte.",

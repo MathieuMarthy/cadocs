@@ -13,6 +13,7 @@ use cadocs_collab::{
     Authorizer, CLOSE_FRAME_TOO_LARGE, CLOSE_PROTOCOL_ERROR, CLOSE_TOO_SLOW, Close, CollabError,
     Connection, EventConnection, EventOutbound, EventSeat, EventStanding, Outbound, Seat,
 };
+use cadocs_content::schema::editor_fingerprint;
 use cadocs_core::permissions::SocketOutcome;
 use cadocs_store::DocStore;
 use tokio::time::{Instant, MissedTickBehavior, interval_at, timeout};
@@ -34,13 +35,30 @@ const EVENTS_MAX_FRAME_BYTES: usize = 1024;
 /// How long a closing socket may wait for the client's side of the close handshake.
 const CLOSE_GRACE: Duration = Duration::from_secs(1);
 
+/// The socket's `?schema=` is not that of the editor this server ships: the tab must reload.
+const CLOSE_STALE_CLIENT: u16 = 4426;
+
 /// Behind `api::check_origin` and `session::require`, so a request that gets here has a user.
 pub async fn upgrade<S: DocStore, A: Authorizer>(
     Path(page_id): Path<String>,
+    RawQuery(query): RawQuery,
     State(state): State<AppState<S, A>>,
     Extension(session): Extension<CurrentSession>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
+    // A tab of another release, or of one from before fingerprints, would delete the nodes and
+    // marks its schema lacks (ADR 0016). A close code reaches the tab, a refused upgrade does not.
+    if param(query.as_deref(), "schema=") != Some(editor_fingerprint().as_str()) {
+        // Its frames are dropped unread, so the smallest limits do, as old tabs keep reconnecting.
+        return upgrade
+            .read_buffer_size(EVENTS_BUFFER_BYTES)
+            .write_buffer_size(EVENTS_BUFFER_BYTES)
+            .max_frame_size(EVENTS_MAX_FRAME_BYTES)
+            .max_message_size(EVENTS_MAX_FRAME_BYTES)
+            .on_upgrade(|mut socket| async move {
+                let _ = timeout(CLOSE_GRACE, close(&mut socket, Some(CLOSE_STALE_CLIENT))).await;
+            });
+    }
     let user_id = &session.user.id;
     let mode = match state.authorizer.authorize(&page_id, user_id).await {
         Ok(Some(mode)) => mode,
@@ -94,10 +112,10 @@ pub async fn upgrade<S: DocStore, A: Authorizer>(
         })
 }
 
-/// `?workspace=` holds an id, which needs no decoding.
-fn workspace_param(query: Option<&str>) -> Option<&str> {
+/// `?workspace=` holds an id and `?schema=` a hex hash, which need no decoding.
+fn param<'a>(query: Option<&'a str>, key: &str) -> Option<&'a str> {
     let mut pairs = query.unwrap_or_default().split('&');
-    pairs.find_map(|pair| pair.strip_prefix("workspace="))
+    pairs.find_map(|pair| pair.strip_prefix(key))
 }
 
 /// Behind `api::check_origin` and `session::require`, as a page socket is. A workspace the user is
@@ -108,7 +126,7 @@ pub async fn upgrade_events<S: DocStore, A: Authorizer>(
     Extension(session): Extension<CurrentSession>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    let Some(workspace_id) = workspace_param(query.as_deref()) else {
+    let Some(workspace_id) = param(query.as_deref(), "workspace=") else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let user_id = &session.user.id;

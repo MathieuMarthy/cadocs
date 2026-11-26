@@ -292,18 +292,19 @@ Public routes are rate limited, send an `ETag` of what they serve, and render th
 ### Connection
 
 ```
-GET /ws/pages/{page_id}
+GET /ws/pages/{page_id}?schema={fingerprint}
 Upgrade: websocket
 Cookie: __Host-session=...
 Origin: https://wiki.example.org
 ```
 
-The URL matches what `y-websocket` builds: the server URL followed by `/` and the room name. Checks happen before the upgrade:
+The URL matches what `y-websocket` builds: the server URL followed by `/` and the room name, then its `params`. Checks happen before the upgrade:
 
 1. `Origin` must match the configured public URL. Cookies are sent on cross-site WebSocket requests, so this check is what prevents cross-site WebSocket hijacking.
 2. The session must be valid, otherwise `401`.
-3. The page must exist and be readable, otherwise `404`.
-4. The resulting role sets the connection mode: read-write for `editor` and above, read-only otherwise. A `commenter` is read-only on the wire: comments go through REST.
+3. `schema` must be the fingerprint of the editor schema this server ships: FNV-1a (32 bits, 8 lowercase hex digits) of `crates/cadocs-content/tests/tiptap-schema.json`, which the editor computes from its own schema (`web/src/editor/fingerprint.ts`). Otherwise the socket opens and closes at once with `4426`, before any frame is read, since a client of another schema would delete the nodes and marks it lacks (ADR 0016). What such a tab typed while the server was down is dropped with its frames, and lost on reload.
+4. The page must exist and be readable, otherwise `404`.
+5. The resulting role sets the connection mode: read-write for `editor` and above, read-only otherwise. A `commenter` is read-only on the wire: comments go through REST.
 
 A client outside a browser sends no `Origin`, and is accepted. At capacity, during shutdown or when the database does not answer, the answer is `503`. An upgrade extends the session like any request, so the `101` may carry a `Set-Cookie`.
 
@@ -368,8 +369,9 @@ client                                  server
 | 4404 | Page deleted | Stop, leave the page |
 | 4408 | Client too slow, or idle timeout | Reconnect with backoff |
 | 4409 | Role changed, page still readable | Refetch the role, reconnect in the new mode |
+| 4426 | `schema` is not the server's: the client runs another release | Stop, ask for a reload |
 
-By default, `y-websocket` reconnects after any close code except 4400 to 4499, where it stops for good. That range includes `4408` and `4409`, so the front end passes its own `shouldReconnect`, which stops only on `4401`, `4403` and `4404`. On `4409` it updates the editor's mode and lets the provider reconnect.
+By default, `y-websocket` reconnects after any close code except 4400 to 4499, where it stops for good. That range includes `4408` and `4409`, so the front end passes its own `shouldReconnect`, which stops only on `4401`, `4403`, `4404` and `4426`. On `4409` it updates the editor's mode and lets the provider reconnect.
 
 ## Events WebSocket
 

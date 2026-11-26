@@ -1,12 +1,18 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { fingerprint } from "../src/editor/fingerprint.ts";
+
 const STARTUP_MS = 10_000;
 const STOP_MS = 15_000;
 export const PASSWORD = "correct horse battery";
+/** What the editor of this release sends on a page socket (ADR 0016). */
+const SCHEMA = fingerprint(
+  readFileSync(resolve(import.meta.dirname, "../../crates/cadocs-content/tests/tiptap-schema.json"), "utf8"),
+);
 
 function binary() {
   const path = process.env.CADOCS_BIN
@@ -210,13 +216,16 @@ export class TestServer {
     return id;
   }
 
-  /** The `WebSocket` of a logged-in client outside a browser: a browser sends the cookie itself. */
+  /** The `WebSocket` of a logged-in client outside a browser, of this release's schema: a
+   * browser sends the cookie itself, and the editor the fingerprint. */
   async webSocketClass(): Promise<typeof WebSocket> {
     const { token } = await this.session();
     return class extends WebSocket {
       constructor(url: string | URL, protocols?: string | string[]) {
         const options = { protocols, headers: { cookie: `session=${token}` } };
-        super(url, options as unknown as string[]);
+        const address = new URL(url);
+        address.searchParams.set("schema", SCHEMA);
+        super(address, options as unknown as string[]);
       }
     };
   }

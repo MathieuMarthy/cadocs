@@ -52,7 +52,7 @@ Page metadata (title, tree position, permissions) lives in SQL tables. Page cont
 
 ### WebSocket
 
-1. `GET /ws/pages/{id}` carries the session cookie. The server checks `Origin`, resolves the session, and computes the role **before** the upgrade. A failure is a plain HTTP 401, 403 or 404.
+1. `GET /ws/pages/{id}` carries the session cookie. The server checks `Origin`, resolves the session, and computes the role **before** the upgrade. A failure is a plain HTTP 401, 403 or 404. A `?schema=` fingerprint other than that of the editor the server ships opens a socket that closes at once with `4426`, so a tab of another release cannot delete what its schema lacks (ADR 0016).
 2. The registry returns the room, loading it if needed: latest snapshot, then every later row of `doc_updates`.
 3. Both sides run the y-sync handshake (SyncStep1, SyncStep2), then exchange updates and awareness.
 4. An update from a client with write access is applied to the `Doc`, broadcast to the other clients and queued for persistence. An update from a read-only client is dropped and answered with an auth message.

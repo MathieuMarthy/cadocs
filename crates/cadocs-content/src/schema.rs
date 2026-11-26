@@ -172,3 +172,31 @@ pub const MARKS: &[MarkSpec] = &[
         attrs: &[],
     },
 ];
+
+/// What a page socket must carry (ADR 0016): `fingerprint` of the editor's schema file, which
+/// the web build keeps equal to what the embedded front end computes, and `tests/schema.rs` to
+/// [`NODES`] and [`MARKS`].
+pub fn editor_fingerprint() -> String {
+    fingerprint(include_bytes!("../tests/tiptap-schema.json"))
+}
+
+/// FNV-1a, 32 bits, in hex, as `web/src/editor/fingerprint.ts` computes it.
+pub fn fingerprint(bytes: &[u8]) -> String {
+    let hash = bytes.iter().fold(0x811c_9dc5_u32, |hash, &byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+    });
+    format!("{hash:08x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fingerprint;
+
+    #[test]
+    fn fingerprint_is_fnv_1a() {
+        // The same vectors as `web/scripts/fingerprint.test.ts`.
+        assert_eq!(fingerprint(b""), "811c9dc5");
+        assert_eq!(fingerprint(b"a"), "e40c292c");
+        assert_eq!(fingerprint("é".as_bytes()), "1e9de8c1");
+    }
+}
