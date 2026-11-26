@@ -1,8 +1,9 @@
 // The editor's schema as plain data, which `cadocs-content` compares with its own (ADR 0008),
 // and the Yjs document the editor's binding writes for a given content, which it reads back.
-// Not part of the app: `scripts/schema.ts` loads it.
+// `scripts/schema.ts` loads it, and the page socket sends the fingerprint of `schemaText`.
 
 import { getSchema } from "@tiptap/core";
+import type { Schema } from "@tiptap/pm/model";
 import { prosemirrorJSONToYXmlFragment } from "@tiptap/y-tiptap";
 import * as Y from "yjs";
 
@@ -19,8 +20,8 @@ const defaults = (attrs: Attrs) =>
 
 const schema = () => getSchema(extensionsOf(entries));
 
-export function schemaJson() {
-  const { nodes, marks } = schema();
+export function schemaJson(current: Schema = schema()) {
+  const { nodes, marks } = current;
   return {
     nodes: Object.fromEntries(
       byName(nodes).map(([name, type]) => [
@@ -39,6 +40,9 @@ export function schemaJson() {
     ),
   };
 }
+
+/** What `tiptap-schema.json` holds, byte for byte, which the server's fingerprint hashes. */
+export const schemaText = (current?: Schema) => `${JSON.stringify(schemaJson(current), null, 2)}\n`;
 
 /** The Yjs update the editor writes for ProseMirror JSON, checked against the schema first. */
 export function editorUpdate(json: unknown) {

@@ -12,6 +12,8 @@ import { MentionPicker } from "./mention";
 import { forgetTitles, PagePicker } from "./pagelink";
 import { freeSlot, renderAvatars, renderCaret, renderSelection, type User } from "./presence";
 import { commandsOf, entries, extensionsOf } from "./registry";
+import { fingerprint } from "./fingerprint";
+import { schemaText } from "./schema";
 import { SlashMenu } from "./slash";
 import { bindTitle } from "./title";
 import { Uploads } from "./uploads";
@@ -23,6 +25,8 @@ const CLOSE_STORAGE_FAILING = 1013;
 /** The closes where reconnecting cannot help. See `Close codes` in `docs/API.md`. */
 const CLOSES_FINAL = [4401, 4403, 4404];
 const CLOSE_ROLE_CHANGED = 4409;
+/** The server ships another schema: syncing would delete what this one lacks (ADR 0016). */
+const CLOSE_STALE_CLIENT = 4426;
 /** Failed connections in a row before asking REST what is wrong. */
 const FAILURES_BEFORE_CHECK = 3;
 
@@ -50,6 +54,8 @@ interface Callbacks {
   onRoleChanged: () => void;
   /** The page holds content this schema cannot show, and this tab stopped syncing. */
   onContentError: () => void;
+  /** The server runs another release, and this tab stopped syncing until a reload. */
+  onOutdated: () => void;
   /** A sync ended: anchors resolve against the real document from now on. */
   onSynced: () => void;
   /** The threads whose anchor spans text changed. */
@@ -69,8 +75,10 @@ export function openPage(page: string, elements: Elements, options: Options, cal
   // Tabs go through the server like any other client, instead of a BroadcastChannel shortcut.
   const provider = new WebsocketProvider(`${scheme}://${location.host}/ws/pages`, page, ydoc, {
     disableBc: true,
+    // It connects once the editor's schema is known, for its fingerprint.
+    connect: false,
     // By default it gives up on all of 4400 to 4499, which includes 4408 and 4409.
-    shouldReconnect: (event) => !CLOSES_FINAL.includes(event.code),
+    shouldReconnect: (event) => ![...CLOSES_FINAL, CLOSE_STALE_CLIENT].includes(event.code),
   });
   const { awareness } = provider;
 
@@ -88,12 +96,8 @@ export function openPage(page: string, elements: Elements, options: Options, cal
     enableContentCheck: true,
     onContentError: ({ disableCollaboration }) => {
       if (stopped) return;
-      stopped = true;
-      problem = t("editor.stopped");
-      provider.destroy();
+      stop();
       disableCollaboration();
-      applyMode();
-      renderStatus();
       callbacks.onContentError();
     },
     extensions: [
@@ -117,6 +121,16 @@ export function openPage(page: string, elements: Elements, options: Options, cal
     ],
     editorProps: { attributes: { "aria-label": t("editor.content") } },
   });
+  provider.params = { schema: fingerprint(schemaText(editor.schema)) };
+  provider.connect();
+
+  function stop() {
+    stopped = true;
+    problem = t("editor.stopped");
+    provider.destroy();
+    applyMode();
+    renderStatus();
+  }
 
   const unbindTitle = bindTitle(title, ydoc.getText("title"), (text) => {
     document.title = text ? t("document.title", { title: text }) : "cadocs";
@@ -156,6 +170,11 @@ export function openPage(page: string, elements: Elements, options: Options, cal
       return;
     }
     if (stopped) return;
+    if (event?.code === CLOSE_STALE_CLIENT) {
+      stop();
+      callbacks.onOutdated();
+      return;
+    }
     if (event?.code === CLOSE_ROLE_CHANGED) {
       // Read-only at once, so nothing typed before the role is read stays in this tab alone.
       // The provider reconnects in the new mode, and the role read turns writing back on.

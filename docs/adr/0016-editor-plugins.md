@@ -15,6 +15,8 @@ A ProseMirror schema has no catch-all node type: the binding calls `schema.node(
 
 **Safety net, from the MVP.** The editor sets `enableContentCheck: true`. Content that does not fit the schema is then never deleted. The editor gets a `contentError` event, disables collaboration in that tab, and shows a banner asking the user to reload.
 
+**Stale tabs, from V1 (step 56).** The content check did not stop a tab opened before an upgrade from erasing the blocks added since. A page socket therefore carries a fingerprint of the editor schema, and the server closes one that differs or is missing with `4426` before it reads a frame. The tab stops and asks for a reload ([API.md](../API.md#connection)).
+
 **Installation.** The operator installs plugin code on the server, in `data/plugins/<id>/<version>/`, with a manifest. This is the only way code enters cadocs. The admin interface lists installed plugins but never accepts uploaded code. cadocs may also ship built-in plugins embedded in the binary, such as alternative themes. They are file-backed like the rest of the front end, so they cost no RAM until served.
 
 **Two families.** The manifest declares one of them.

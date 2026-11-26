@@ -744,6 +744,25 @@ async fn confirm_email<S: AccountStore, A>(
         now: now_ms(),
     };
     state.store.change_email(&user.id, &attempt).await?;
+    // The owner may not be the one who moved it: the old address hears of it.
+    if let Some(outbox) = &state.mail {
+        let origin = state.http.public_url.origin();
+        let queued = outbox.queue(Mail {
+            to: user.email.clone(),
+            subject: "Your cadocs address changed".to_owned(),
+            text: format!(
+                "Your account on\n\
+                 {origin}\n\
+                 now uses the address\n\
+                 {email}\n\
+                 If you did not ask for it, someone else holds your account: ask\n\
+                 an admin of the instance to get it back.\n"
+            ),
+        });
+        if !queued {
+            tracing::warn!("the notice of an address change could not be queued");
+        }
+    }
     Ok(Json(UserBody {
         email,
         ..UserBody::from(user)
@@ -812,8 +831,10 @@ async fn enable_email_2fa<S: AccountStore, A>(
     };
     state
         .store
-        .enable_email_2fa(&current.user.id, &attempt)
+        .enable_email_2fa(&current.user.id, &attempt, &current.token_hash())
         .await?;
+    // The other sessions are gone: their sockets close.
+    state.access_changed();
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -973,8 +994,10 @@ async fn enable_totp<S: AccountStore, A>(
     let (response, hashes) = recovery_codes()?;
     state
         .store
-        .enable_totp(user_id, &secret, step, &hashes, now)
+        .enable_totp(user_id, &secret, step, &hashes, &current.token_hash(), now)
         .await?;
+    // The other sessions are gone: their sockets close.
+    state.access_changed();
     Ok(response)
 }
 

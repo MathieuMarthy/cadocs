@@ -273,10 +273,11 @@ async fn a_proven_address_keeps_the_factor() {
     assert_eq!(reply.status, 200, "{reply:?}");
     assert_eq!(reply.body["email_2fa"], true);
 
-    // The next login code goes to the new address.
+    // After the notice to the old address, the next login code goes to the new one.
+    messages(&relay, 2).await;
     let reply = api.login(NEW, PASSWORD).await;
     refused(&reply, "code", "required");
-    assert_eq!(messages(&relay, 2).await[1].to, "<new@example.org>");
+    assert_eq!(messages(&relay, 3).await[2].to, "<new@example.org>");
 }
 
 #[tokio::test]
@@ -353,4 +354,34 @@ async fn without_mail_a_new_address_voids_the_reset_link() {
     assert_eq!(api.number(RESETS).await, 1);
     assert_eq!(api.ask_address(&login, NEW).await.status, 200);
     assert_eq!(api.number(RESETS).await, 0);
+}
+
+#[tokio::test]
+async fn a_proven_address_is_told_to_the_old_one() {
+    let (api, relay, login) = mail_and_login().await;
+    let code = mailed_code(&api, &relay, &login, NEW, 1).await;
+    let reply = api.confirm_address(&login, NEW, &code).await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    let message = &messages(&relay, 2).await[1];
+    assert_eq!(message.to, "<ada@example.org>");
+    assert!(
+        message
+            .data
+            .contains("Subject: Your cadocs address changed")
+    );
+    let text = body(message);
+    assert!(text.contains(NEW), "{text}");
+    assert!(text.lines().all(|line| line.len() < 76), "{text}");
+}
+
+#[tokio::test]
+async fn a_new_password_voids_the_pending_codes() {
+    let (api, relay, login) = mail_and_login().await;
+    let code = mailed_code(&api, &relay, &login, NEW, 1).await;
+    let body = json!({ "password": "another horse battery", "current_password": PASSWORD });
+    let reply = api.send("PATCH", "/me", &login.headers(), body).await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert_eq!(api.codes().await, 0);
+    let reply = api.confirm_address(&login, NEW, &code).await;
+    refused(&reply, "code", "wrong");
 }

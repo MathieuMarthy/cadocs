@@ -259,3 +259,15 @@ async fn login_codes_share_the_limits_of_mail() {
     let reply = api.login(ADA, PASSWORD).await;
     assert_eq!(reply.status, 429, "{reply:?}");
 }
+
+#[tokio::test]
+async fn turning_the_factor_on_ends_the_other_sessions() {
+    let (api, relay) = with_mail().await;
+    let login = Login::from(&api.login(ADA, PASSWORD).await);
+    let other = Login::from(&api.login(ADA, PASSWORD).await);
+    assert_eq!(api.ask_factor(&login).await.status, 204);
+    let code = code(&messages(&relay, 1).await[0]);
+    assert_eq!(api.confirm_factor(&login, &code).await.status, 204);
+    assert_eq!(api.session(&login).await.status, 200);
+    assert_eq!(api.session(&other).await.status, 401);
+}

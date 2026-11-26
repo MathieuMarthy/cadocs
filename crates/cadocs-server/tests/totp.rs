@@ -357,3 +357,12 @@ async fn one_account_cannot_touch_the_app_of_another() {
     assert_eq!(api.session(&ada).await.body["user"]["totp"], true);
     assert_eq!(api.login(ADA, PASSWORD).await.status, 400);
 }
+
+#[tokio::test]
+async fn turning_the_app_on_ends_the_other_sessions() {
+    let (api, login) = logged_in().await;
+    let other = Login::from(&api.login(ADA, PASSWORD).await);
+    totp_on(&api, &login).await;
+    assert_eq!(api.session(&login).await.status, 200);
+    assert_eq!(api.session(&other).await.status, 401);
+}

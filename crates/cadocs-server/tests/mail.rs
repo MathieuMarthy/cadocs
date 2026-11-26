@@ -57,6 +57,34 @@ async fn a_reset_link_arrives_by_mail_and_works() {
 }
 
 #[tokio::test]
+async fn a_reset_voids_the_pending_codes() {
+    let (api, relay) = with_mail().await;
+    // A code of the account, and a registration code of nobody's.
+    api.sql(
+        "INSERT INTO email_codes (purpose, email, user_id, code_hash, expires_at, created_at)
+         SELECT 'email', 'new@example.org', id, 'hash', 9999999999999, 1 FROM users LIMIT 1",
+    )
+    .await;
+    api.sql(
+        "INSERT INTO email_codes (purpose, email, code_hash, expires_at, created_at)
+         VALUES ('register', 'grace@example.org', 'hash', 9999999999999, 1)",
+    )
+    .await;
+    api.forgot("ada@example.org").await;
+    let path = format!(
+        "/auth/password-reset/{}",
+        reset_token(&messages(&relay, 1).await[0])
+    );
+    let reply = api
+        .send("POST", &path, &[], json!({ "password": NEW_PASSWORD }))
+        .await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    let left = "SELECT count(*) FROM email_codes WHERE user_id IS NULL";
+    assert_eq!(api.number(left).await, 1);
+    assert_eq!(api.number("SELECT count(*) FROM email_codes").await, 1);
+}
+
+#[tokio::test]
 async fn only_a_hash_of_the_mailed_token_is_stored() {
     let (api, relay) = with_mail().await;
     api.forgot("ada@example.org").await;

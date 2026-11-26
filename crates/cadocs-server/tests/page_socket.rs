@@ -4,6 +4,7 @@ mod common;
 
 use std::time::Duration;
 
+use cadocs_content::schema::editor_fingerprint;
 use cadocs_store::MAX_TITLE_CHARS;
 use common::{Api, Login, ORIGIN, Reply, logged_in};
 use futures_util::{SinkExt, StreamExt};
@@ -61,7 +62,8 @@ fn id(reply: &Reply) -> String {
 
 impl Wiki {
     fn request(&self, page: &str, by: Option<&Login>) -> Request {
-        let url = format!("ws://{}/ws/pages/{page}", self.api.addr);
+        let schema = editor_fingerprint();
+        let url = format!("ws://{}/ws/pages/{page}?schema={schema}", self.api.addr);
         let mut request = url.into_client_request().unwrap();
         if let Some(login) = by {
             let cookie = login.cookie.parse().unwrap();
@@ -281,6 +283,26 @@ async fn the_old_route_is_gone() {
     let cookie = wiki.ada.cookie.parse().unwrap();
     request.headers_mut().insert(COOKIE, cookie);
     assert!(connect_async(request).await.is_err());
+}
+
+// Schema
+
+/// A tab of another release would delete the nodes and marks its schema lacks (ADR 0016).
+#[tokio::test]
+async fn a_client_of_another_schema_leaves_the_page_as_it_was() {
+    let wiki = wiki(Value::Null).await;
+    for query in ["?schema=00000000", "", "?schema="] {
+        let mut request = wiki.request(&wiki.page, Some(&wiki.ada));
+        let url = format!("ws://{}/ws/pages/{}{query}", wiki.api.addr, wiki.page);
+        *request.uri_mut() = url.parse().unwrap();
+        let mut socket = connect_async(request).await.unwrap().0;
+        socket.send(title_frame("Stale")).await.unwrap();
+        let code = close_code(&mut socket).await;
+        assert_eq!(code, Some(CloseCode::from(4426)), "{query:?}");
+    }
+    sleep(FLUSHED).await;
+    assert_eq!(wiki.stored_rows().await, 0);
+    assert_eq!(wiki.row().await.body["title"], "");
 }
 
 // Mode

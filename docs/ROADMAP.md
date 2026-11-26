@@ -28,7 +28,7 @@ Accepted risk: a user who can invite learns whether an address has an account ([
 
 ## V1
 
-Purpose: a credible replacement for Docmost. Done in steps 33 to 55: upgrade tests and the size checks of CI (33), the string catalogue and French (34, 54), groups (35, 36), comments, mentions, backlinks and notifications in the app and by mail (37 to 42), math and Mermaid (43), revision diff (44), public shares (45, 46), TOTP and OIDC (47 to 49), duplication and templates (50, 51), exports and bulk import (52, 53), and the exit review (55). What each step taught is in `docs/notes/`, its tests in [COVERAGE.md](COVERAGE.md), its measures in [ARCHITECTURE.md](ARCHITECTURE.md#v1-results).
+Purpose: a credible replacement for Docmost. Done in steps 33 to 56: upgrade tests and the size checks of CI (33), the string catalogue and French (34, 54), groups (35, 36), comments, mentions, backlinks and notifications in the app and by mail (37 to 42), math and Mermaid (43), revision diff (44), public shares (45, 46), TOTP and OIDC (47 to 49), duplication and templates (50, 51), exports and bulk import (52, 53), the exit review (55), and stale clients (56). What each step taught is in `docs/notes/`, its tests in [COVERAGE.md](COVERAGE.md), its measures in [ARCHITECTURE.md](ARCHITECTURE.md#v1-results).
 
 Scope: comments with threads, resolution and mentions of users and pages, notifications in the app and by mail through the relay of ADR 0026, public sharing with server-rendered pages and optional indexing, groups and group grants, OIDC login and TOTP (a code by mail came first, ADR 0026), bulk Markdown import and export and space export, backlinks, page duplication and copy to another space, math and Mermaid loaded on demand in the browser, revision diff, page templates, the interface in English and French.
 
@@ -36,15 +36,13 @@ Decided when the stage started: math and Mermaid render in the browser only, so 
 
 Rules later stages keep: every new screen takes its strings from the catalogue of step 34, in English and French. Branches worked side by side renumber their migrations at merge (`crates/cadocs-store/migrations/sqlite/`) and keep the upgrade test of step 33 green.
 
-Remaining step:
-- [ ] Step 56: stale clients. `@tiptap/y-tiptap` deletes the nodes and marks its schema lacks, and syncs that deletion (ADR 0016), so a tab opened before an upgrade erases the blocks added since, such as `mention` and `inlineMath` from v0.2 to v1. A page socket carries the fingerprint of the editor schema, the server refuses one whose fingerprint differs or is missing (which covers tabs of releases from before this step), and the tab shows a notice asking for a reload. Done when a test shows a client of another schema leaves the page as it was, and an end-to-end test shows the notice.
+- [x] Step 56: stale clients, a page socket carries the fingerprint of the editor schema and another one closes with `4426` (ADR 0016).
 
-Exit criteria met: public pages need no JavaScript, and a test shows a script in content cannot run; the binary stays under 30 MB, and a default build contains no S3 code; the idle RSS and active-user thresholds of the MVP still hold; upgrade from every earlier release is tested through migrations.
+Exit criteria met: public pages need no JavaScript, and a test shows a script in content cannot run; the binary stays under 30 MB, and a default build contains no S3 code; the idle RSS and active-user thresholds of the MVP still hold; upgrade from every earlier release is tested through migrations; a tab opened before an upgrade cannot remove content its schema does not know (step 56).
 
 Exit criteria open:
 
 - [ ] OIDC works with at least two providers (for example Authentik and Keycloak). The manual check of [OPERATIONS.md](OPERATIONS.md#single-sign-on-oidc) has not been run.
-- [ ] A tab opened before an upgrade cannot remove content its schema does not know.
 
 ## V1.1
 
@@ -54,7 +52,7 @@ Scope: what `docs/notes/` lists as left open and V1 users would meet: sessions o
 
 Steps. The rules of the MVP steps apply. Each step removes the items it fixes from the "Left open" lines of `docs/notes/`.
 
-- [ ] Step 57: sessions and account changes. Turning on a second factor (authenticator app or code by mail) ends the person's other sessions, a password change or reset voids the pending codes by mail, and an address change mails the old address. Done when a test covers each.
+- [x] Step 57: sessions and account changes. Turning on a second factor (authenticator app or code by mail) ends the person's other sessions, a password change or reset voids the pending codes by mail, and an address change mails the old address. Done when a test covers each.
 - [ ] Step 58: shares follow their creator. A share stops answering once its creator can no longer edit its page or has left the workspace, recorded in an ADR as a refinement of ADR 0009. An expired share leaves the share dialog's list. Done when tests show the share of a removed member and of a demoted one answer `404`.
 - [ ] Step 59: room panics. A room task that panics frees its `Unloading` slot and its memory estimate, so callers no longer get `ShuttingDown` until a restart. Done when a test with an injected panic shows the budget back where it was and the page opening again.
 - [ ] Step 60: prefix search. A prefix typed past the end of its stem finds the word: `deploym` finds `deployment`. Done when search tests cover it in English and French, whole words stem as before, and the index size is measured before and after.

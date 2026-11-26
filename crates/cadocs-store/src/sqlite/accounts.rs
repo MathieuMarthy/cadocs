@@ -22,6 +22,12 @@ const VERIFY_ADDRESS: &str = "UPDATE users SET email_verified_at = coalesce(emai
 
 const DELETE_RESETS: &str = "DELETE FROM password_resets WHERE user_id = ?1";
 
+/// The codes mailed for user `?1`: none outlives a change of what lets them in.
+const DELETE_CODES: &str = "DELETE FROM email_codes WHERE user_id = ?1";
+
+/// Every session of user `?1` but `?2`, the one that changed what lets them in.
+const DELETE_OTHER_SESSIONS: &str = "DELETE FROM sessions WHERE user_id = ?1 AND token_hash <> ?2";
+
 /// The links an admin made outlive neither their role nor their account: each one can take over
 /// another account, possibly another admin's.
 const DELETE_RESETS_MADE_BY: &str = "DELETE FROM password_resets WHERE created_by = ?1";
@@ -99,16 +105,15 @@ async fn enabled_admins(
     Ok((is_enabled_admin, count as usize))
 }
 
-/// Ends everything that lets a user in: their sessions and their reset link.
+/// Ends everything that lets a user in: their sessions, their reset link and their codes.
 async fn revoke_access(tx: &mut SqliteConnection, user_id: &str) -> Result<(), StoreError> {
     sqlx::query("DELETE FROM sessions WHERE user_id = ?1")
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query(DELETE_RESETS)
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
+    for query in [DELETE_RESETS, DELETE_CODES] {
+        sqlx::query(query).bind(user_id).execute(&mut *tx).await?;
+    }
     Ok(())
 }
 
@@ -465,9 +470,13 @@ impl AccountStore for SqliteStore {
         })?;
 
         if changes.password_hash.is_some() {
-            sqlx::query("DELETE FROM sessions WHERE user_id = ?1 AND token_hash <> ?2")
+            sqlx::query(DELETE_OTHER_SESSIONS)
                 .bind(user_id)
                 .bind(basis.session)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query(DELETE_CODES)
+                .bind(user_id)
                 .execute(&mut *tx)
                 .await?;
         }
@@ -792,6 +801,7 @@ impl AccountStore for SqliteStore {
         &self,
         user_id: &str,
         attempt: &CodeAttempt<'_>,
+        session: &str,
     ) -> Result<(), StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
         let right = use_code(&mut tx, attempt).await?;
@@ -810,6 +820,13 @@ impl AccountStore for SqliteStore {
         } else {
             0
         };
+        if changed == 1 {
+            sqlx::query(DELETE_OTHER_SESSIONS)
+                .bind(user_id)
+                .bind(session)
+                .execute(&mut *tx)
+                .await?;
+        }
         // A wrong try stays counted, and a right code for an old address stays used.
         tx.commit().await?;
         if changed == 1 {
@@ -929,6 +946,7 @@ impl AccountStore for SqliteStore {
         secret: &[u8],
         step: i64,
         recovery_hashes: &[String],
+        session: &str,
         now: i64,
     ) -> Result<(), StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
@@ -947,6 +965,11 @@ impl AccountStore for SqliteStore {
             return Err(StoreError::WrongCode);
         }
         insert_recovery_codes(&mut tx, user_id, recovery_hashes).await?;
+        sqlx::query(DELETE_OTHER_SESSIONS)
+            .bind(user_id)
+            .bind(session)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
     }

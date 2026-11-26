@@ -200,7 +200,8 @@ impl Wiki {
     }
 
     fn socket_request(&self, page: &str, by: &Login) -> impl IntoClientRequest + Unpin + use<> {
-        let url = format!("ws://{}/ws/pages/{page}", self.api.addr);
+        let schema = cadocs_content::schema::editor_fingerprint();
+        let url = format!("ws://{}/ws/pages/{page}?schema={schema}", self.api.addr);
         let mut request = url.into_client_request().unwrap();
         request
             .headers_mut()

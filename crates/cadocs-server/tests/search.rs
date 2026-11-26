@@ -90,7 +90,8 @@ impl Wiki {
             write(&mut txn, &fragment, &Document { blocks });
             txn.encode_update_v1()
         };
-        let url = format!("ws://{}/ws/pages/{page}", self.api.addr);
+        let schema = cadocs_content::schema::editor_fingerprint();
+        let url = format!("ws://{}/ws/pages/{page}?schema={schema}", self.api.addr);
         let mut request = url.into_client_request().unwrap();
         let cookie = self.ada.cookie.parse().unwrap();
         request.headers_mut().insert(COOKIE, cookie);

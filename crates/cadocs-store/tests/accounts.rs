@@ -54,7 +54,7 @@ async fn app_on(store: &SqliteStore) {
     };
     store.start_totp("ada", b"secret", &basis, 2).await.unwrap();
     store
-        .enable_totp("ada", b"secret", 1, &[], 3)
+        .enable_totp("ada", b"secret", 1, &[], "first", 3)
         .await
         .unwrap();
 }

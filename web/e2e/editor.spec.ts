@@ -331,6 +331,32 @@ test("a page stopped on content it cannot show still learns it was deleted", asy
   }
 });
 
+test("a tab of another release stops and asks for a reload", async ({ left, server }) => {
+  await editor(left).click();
+  await left.keyboard.type("kept");
+  await expect(status(left)).toContainText("synced");
+
+  const stale = await (await left.context().browser()!.newContext()).newPage();
+  // As a tab opened before an upgrade: the fingerprint of its schema is not the server's.
+  await stale.addInitScript(() => {
+    const Native = WebSocket;
+    window.WebSocket = class extends Native {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(String(url).replace(/schema=\w+/, "schema=00000000"), protocols);
+      }
+    };
+  });
+  await logIn(stale, server, (await server.session()).token);
+  await stale.goto(left.url());
+  const banner = stale.getByRole("alert");
+  await expect(banner).toContainText("cadocs was updated since this tab opened");
+  await expect(banner.getByRole("button", { name: "reload" })).toBeVisible();
+  await expect(editor(stale)).toHaveAttribute("contenteditable", "false");
+  await expect(status(stale)).toContainText("stopped");
+  await stale.close();
+  await expectText(editor(left).locator("p"), "kept");
+});
+
 test("a plugin block shows its text and stays intact", async ({ left, right, server }) => {
   // No plugin runs before V2: every plugin block is one whose plugin is missing (ADR 0016).
   await bothOnline(left, right);

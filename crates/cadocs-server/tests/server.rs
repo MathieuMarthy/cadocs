@@ -928,8 +928,9 @@ impl AccountStore for FlakyStore {
         &self,
         user_id: &str,
         attempt: &CodeAttempt<'_>,
+        session: &str,
     ) -> Result<(), StoreError> {
-        self.inner.enable_email_2fa(user_id, attempt).await
+        self.inner.enable_email_2fa(user_id, attempt, session).await
     }
 
     async fn change_email(
@@ -964,10 +965,11 @@ impl AccountStore for FlakyStore {
         secret: &[u8],
         step: i64,
         recovery_hashes: &[String],
+        session: &str,
         now: i64,
     ) -> Result<(), StoreError> {
         self.inner
-            .enable_totp(user_id, secret, step, recovery_hashes, now)
+            .enable_totp(user_id, secret, step, recovery_hashes, session, now)
             .await
     }
 
@@ -1193,7 +1195,8 @@ struct Running {
 impl Running {
     /// The request of a logged-in client.
     fn request(&self, doc: &str) -> WsRequest {
-        let url = format!("ws://{}/ws/pages/{doc}", self.addr);
+        let schema = cadocs_content::schema::editor_fingerprint();
+        let url = format!("ws://{}/ws/pages/{doc}?schema={schema}", self.addr);
         let mut request = url.into_client_request().unwrap();
         let cookie = format!("{COOKIE}={TOKEN}").parse().unwrap();
         request.headers_mut().insert(header::COOKIE, cookie);

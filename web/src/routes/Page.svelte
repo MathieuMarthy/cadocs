@@ -40,8 +40,9 @@
   let row = $state<PageView | null>(null);
   /** REST did not refuse the page, so the editor shows, even if REST failed for a moment. */
   let showing = $state(false);
-  /** The page holds content this version cannot show, so the editor stopped (ADR 0016). */
-  let stale = $state(false);
+  /** Why the editor stopped and asks for a reload: content this version cannot show, or a
+   * server of another release (ADR 0016). */
+  let stale = $state<Key | null>(null);
   /** Read-only until a read says the role may write. */
   const editable = $derived(row ? canEdit(row.role) : false);
 
@@ -281,7 +282,8 @@
         onName: (text) => (name = text),
         // A `4409` closed the socket: no close code will follow, so a `404` here is the answer.
         onRoleChanged: () => void check(),
-        onContentError: () => (stale = true),
+        onContentError: () => (stale = "page.stale"),
+        onOutdated: () => (stale = "page.outdated"),
         onSynced: () => comments.editorSynced(),
         onCommentsFound: (found) => comments.foundChanged(found),
         onCommentActivated(thread) {
@@ -356,7 +358,7 @@
         {/if}
         {#if stale}
           <div class="banner" role="alert">
-            <span>{t("page.stale")}</span>
+            <span>{t(stale)}</span>
             <button type="button" class="button" onclick={() => location.reload()}>{t("app.reload")}</button>
           </div>
         {/if}

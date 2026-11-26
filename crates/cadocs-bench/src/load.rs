@@ -106,7 +106,8 @@ fn upgrade(url: &str, path: &str, user: usize) -> anyhow::Result<Request> {
 }
 
 fn page_request(url: &str, doc: &str, user: usize) -> anyhow::Result<Request> {
-    upgrade(url, &format!("/ws/pages/{doc}"), user)
+    let schema = cadocs_content::schema::editor_fingerprint();
+    upgrade(url, &format!("/ws/pages/{doc}?schema={schema}"), user)
 }
 
 /// Apart from the seeds of the documents, or a client would continue its author's clock.
