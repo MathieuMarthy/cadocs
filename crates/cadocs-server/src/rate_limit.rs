@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash, RandomState};
 use std::net::IpAddr;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 /// About 300 KiB at most, reached only under a flood of addresses.
@@ -155,6 +155,65 @@ impl<K: Hash + Eq> Buckets<K> {
     }
 }
 
+/// Turns of work held for as long as an answer is being sent: `total` at once, at most
+/// `per_client` for one address, so one client alone cannot take them all.
+pub struct Turns {
+    total: usize,
+    per_client: usize,
+    taken: Mutex<HashMap<IpAddr, usize>>,
+}
+
+/// One turn, given back when dropped.
+pub struct Turn {
+    turns: Arc<Turns>,
+    client: IpAddr,
+}
+
+impl Turns {
+    pub fn new(total: usize, per_client: usize) -> Self {
+        Self {
+            total,
+            per_client,
+            taken: Mutex::default(),
+        }
+    }
+
+    /// A turn for `client`, if one is free for it.
+    pub fn take(self: &Arc<Self>, client: IpAddr) -> Option<Turn> {
+        let client = key(client);
+        let mut taken = self.taken.lock().unwrap_or_else(PoisonError::into_inner);
+        let all: usize = taken.values().sum();
+        let mine = taken.entry(client).or_default();
+        if all >= self.total || *mine >= self.per_client {
+            if *mine == 0 {
+                taken.remove(&client);
+            }
+            return None;
+        }
+        *mine += 1;
+        Some(Turn {
+            turns: self.clone(),
+            client,
+        })
+    }
+}
+
+impl Drop for Turn {
+    fn drop(&mut self) {
+        let mut taken = self
+            .turns
+            .taken
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(mine) = taken.get_mut(&self.client) {
+            *mine -= 1;
+            if *mine == 0 {
+                taken.remove(&self.client);
+            }
+        }
+    }
+}
+
 /// One site can get a whole IPv6 /48. Counting /64s would give it 65,536 clients, enough to fill
 /// the table and make every newcomer wait.
 fn key(client: IpAddr) -> IpAddr {
@@ -167,6 +226,24 @@ fn key(client: IpAddr) -> IpAddr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_client_takes_its_share_of_turns_and_gives_them_back() {
+        let turns = Arc::new(Turns::new(3, 2));
+        let one: IpAddr = "192.0.2.1".parse().unwrap();
+        let other: IpAddr = "2001:db8:1:2::1".parse().unwrap();
+        let same_site: IpAddr = "2001:db8:1:3::1".parse().unwrap();
+        let a = turns.take(one).unwrap();
+        let b = turns.take(one).unwrap();
+        assert!(turns.take(one).is_none(), "its share is two");
+        let c = turns.take(other).unwrap();
+        assert!(turns.take(same_site).is_none(), "three in all");
+        drop(c);
+        let c = turns.take(same_site).unwrap();
+        assert!(turns.take(other).is_none(), "a /48 is one client");
+        drop((a, b, c));
+        assert!(turns.taken.lock().unwrap().is_empty());
+    }
 
     const REFILL: Duration = Duration::from_secs(10);
 

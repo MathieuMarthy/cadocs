@@ -41,13 +41,13 @@ use cadocs_store::{
     RevisionStore, SearchStore, ShareStore, SpaceStore, TemplateStore, WorkspaceStore,
 };
 use rust_embed::RustEmbed;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Notify, oneshot, watch};
 use tokio::time::{MissedTickBehavior, interval, timeout};
 
 use crate::config::{AttachmentLimits, HttpConfig, Registration, SocketConfig};
 use crate::password::Passwords;
-use crate::rate_limit::{AccountLimiter, AddressLimiter, RateLimiter};
+use crate::rate_limit::{AccountLimiter, AddressLimiter, RateLimiter, Turns};
 
 /// How long shutdown waits for HTTP requests in progress.
 const HTTP_GRACE: Duration = Duration::from_secs(2);
@@ -85,8 +85,12 @@ pub struct AppState<S, A> {
     pub mail_addresses: Arc<AddressLimiter>,
     /// Shared by the public pages of shares and their files.
     pub public_requests: Arc<RateLimiter>,
+    /// Turns of public pages rendering or sending (`public::MAX_RENDERS`).
+    pub public_renders: Arc<Turns>,
     /// Guesses at the code of an authenticator app, per account.
     pub totp_guesses: Arc<AccountLimiter>,
+    /// Comments written per account (`api::comments::WRITE_BURST`).
+    pub comment_writes: Arc<AccountLimiter>,
     /// The space exports, running or waiting to be downloaded.
     pub exports: Arc<api::exports::Exports>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
@@ -116,7 +120,9 @@ impl<S, A> Clone for AppState<S, A> {
             mail_requests: self.mail_requests.clone(),
             mail_addresses: self.mail_addresses.clone(),
             public_requests: self.public_requests.clone(),
+            public_renders: self.public_renders.clone(),
             totp_guesses: self.totp_guesses.clone(),
+            comment_writes: self.comment_writes.clone(),
             exports: self.exports.clone(),
             sockets: self.sockets.clone(),
             access: self.access.clone(),
@@ -168,9 +174,14 @@ impl<S, A> AppState<S, A> {
                 public::PUBLIC_BURST,
                 public::PUBLIC_REFILL,
             )),
+            public_renders: Arc::new(Turns::new(public::MAX_RENDERS, public::CLIENT_RENDERS)),
             totp_guesses: Arc::new(AccountLimiter::new(
                 api::auth::TOTP_BURST,
                 api::auth::TOTP_REFILL,
+            )),
+            comment_writes: Arc::new(AccountLimiter::new(
+                api::comments::WRITE_BURST,
+                api::comments::WRITE_REFILL,
             )),
             exports: Arc::default(),
             sockets: watch::Sender::new(()),
@@ -326,6 +337,7 @@ pub async fn serve<
     ));
     let (stop, stopped) = oneshot::channel::<()>();
     let app = router::<S, A, E>(state).into_make_service_with_connect_info::<SocketAddr>();
+    let listener = axum::serve::ListenerExt::tap_io(listener, cut_stalled_reader);
     let mut http = axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = stopped.await;
@@ -352,4 +364,34 @@ pub async fn serve<
         tracing::warn!("some sockets did not close in time");
     }
     flushed.context("some edits could not be flushed")
+}
+/// How long sent data may wait for the client to take it before the kernel closes the connection.
+/// A client that never reads would otherwise hold its answer, and a public page its turn, forever.
+const SEND_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Sets `TCP_USER_TIMEOUT` on an accepted socket. Elsewhere than Linux nothing cuts such a client.
+fn cut_stalled_reader(stream: &mut TcpStream) {
+    #[cfg(target_os = "linux")]
+    if let Err(error) = socket2::SockRef::from(&*stream).set_tcp_user_timeout(Some(SEND_TIMEOUT)) {
+        tracing::debug!(%error, "TCP_USER_TIMEOUT not set");
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_accepted_socket_cuts_a_client_that_never_reads() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let _client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut accepted, _) = listener.accept().await.unwrap();
+        cut_stalled_reader(&mut accepted);
+        let set = socket2::SockRef::from(&accepted)
+            .tcp_user_timeout()
+            .unwrap();
+        assert_eq!(set, Some(SEND_TIMEOUT));
+    }
 }

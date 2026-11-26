@@ -7,15 +7,23 @@
 
 use std::collections::HashMap;
 use std::fmt::Write;
-use std::sync::Arc;
+use std::io;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::task::Poll;
+use std::time::Duration;
 
-use axum::extract::State;
-use axum::http::header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, ETAG, HeaderName};
+use axum::body::Body;
+use axum::extract::{ConnectInfo, State};
+use axum::http::header::{
+    CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, ETAG, HeaderName, RETRY_AFTER,
+};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
+use bytes::Bytes;
 use cadocs_collab::Authorizer;
 use cadocs_content::Links;
 use cadocs_content::html::to_html_with;
@@ -23,10 +31,12 @@ use cadocs_content::yjs::read_page;
 use cadocs_store::{DocStore, ShareStore, SharedPage, SharedView, now_ms};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use sha2::{Digest, Sha256};
+use tokio::sync::oneshot;
 
 use crate::AppState;
 use crate::api::attachments::{matches_etag, send};
 use crate::api::{self, ApiError, PathParam};
+use crate::rate_limit::Turn;
 
 /// How many children a public page lists below its content.
 pub const CHILDREN_LIMIT: u32 = 200;
@@ -35,6 +45,16 @@ pub const PUBLIC_BURST: u32 = 120;
 /// Then one request every this long.
 pub const PUBLIC_REFILL: std::time::Duration = std::time::Duration::from_millis(100);
 
+/// Public pages rendered or sending at once, whoever asks: beyond, `503`. A client that never
+/// reads its answer holds one until it leaves.
+pub const MAX_RENDERS: usize = 16;
+/// Of those, what one client may hold.
+pub const CLIENT_RENDERS: usize = 4;
+/// How long a public answer may take to send. A client that reads too slowly to finish by then
+/// loses its turn and its connection.
+const SEND_LIMIT: Duration = Duration::from_secs(60);
+/// A body goes out in chunks of this size, so its turn ends only once its last one is taken.
+const CHUNK_BYTES: usize = 16 * 1024;
 const X_ROBOTS_TAG: HeaderName = HeaderName::from_static("x-robots-tag");
 /// Revalidated on each view, so a revoked share closes at once.
 const CACHE: &str = "no-cache";
@@ -121,18 +141,20 @@ async fn shared<S: DocStore + ShareStore, A>(
     State(state): State<AppState<S, A>>,
     Extension(public): Extension<Arc<PublicHeaders>>,
     PathParam(token): PathParam,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    page(&state, &public, &token, None, &headers).await
+    page(&state, &public, &token, None, peer, &headers).await
 }
 
 async fn descendant<S: DocStore + ShareStore, A>(
     State(state): State<AppState<S, A>>,
     Extension(public): Extension<Arc<PublicHeaders>>,
     PathParam((token, slug)): PathParam<(String, String)>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    page(&state, &public, &token, Some(&slug), &headers).await
+    page(&state, &public, &token, Some(&slug), peer, &headers).await
 }
 
 async fn file<S: ShareStore, A>(
@@ -158,6 +180,7 @@ async fn page<S: DocStore + ShareStore, A>(
     public: &PublicHeaders,
     token: &str,
     slug: Option<&str>,
+    peer: SocketAddr,
     headers: &HeaderMap,
 ) -> Result<Response, ApiError> {
     let now = now_ms();
@@ -167,6 +190,10 @@ async fn page<S: DocStore + ShareStore, A>(
         .await?;
     let Some(view) = view else {
         return Ok(not_found(public));
+    };
+    let client = state.http.trusted_proxies.client_ip(peer.ip(), headers);
+    let Some(turn) = state.public_renders.take(client) else {
+        return Ok(busy(public));
     };
     // A revalidation renders too: the room may hold edits no date shows yet, and a `304` must
     // never keep content an editor removed. It saves the body, not the read.
@@ -207,7 +234,53 @@ async fn page<S: DocStore + ShareStore, A>(
         CONTENT_TYPE,
         HeaderValue::from_static("text/html; charset=utf-8"),
     ));
-    Ok((headers_of(fixed), html).into_response())
+    Ok((headers_of(fixed), held(html, turn)).into_response())
+}
+
+/// The page in chunks, holding `turn` until the connection took the last one or `SEND_LIMIT`
+/// passed. Then the page is dropped, and the next chunk asked for ends the connection.
+fn held(html: String, turn: Turn) -> Body {
+    let page = Arc::new(Mutex::new(Some(Bytes::from(html))));
+    let (sending, sent) = oneshot::channel::<()>();
+    let late = page.clone();
+    tokio::spawn(async move {
+        // `sent` ends when the body is dropped: sent, or its connection gone.
+        if tokio::time::timeout(SEND_LIMIT, sent).await.is_err() {
+            late.lock().unwrap_or_else(PoisonError::into_inner).take();
+        }
+        drop(turn);
+    });
+    let mut at = 0;
+    let chunks = futures_util::stream::poll_fn(move |_| {
+        let _sending = &sending;
+        let page = page.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(page) = page.as_ref() else {
+            return Poll::Ready(Some(Err(io::Error::from(io::ErrorKind::TimedOut))));
+        };
+        if at >= page.len() {
+            return Poll::Ready(None);
+        }
+        let end = page.len().min(at + CHUNK_BYTES);
+        // A copy, not a slice: a chunk left in a buffer must not keep the whole page.
+        let chunk = Bytes::copy_from_slice(&page[at..end]);
+        at = end;
+        Poll::Ready(Some(Ok(chunk)))
+    });
+    Body::from_stream(chunks)
+}
+
+/// Every turn is taken: the client comes back in a second.
+fn busy(public: &PublicHeaders) -> Response {
+    let headers = [
+        (
+            CONTENT_TYPE,
+            HeaderValue::from_static("text/plain; charset=utf-8"),
+        ),
+        (CONTENT_SECURITY_POLICY, public.policy.clone()),
+        (RETRY_AFTER, HeaderValue::from_static("1")),
+        (CACHE_CONTROL, HeaderValue::from_static("no-store")),
+    ];
+    (StatusCode::SERVICE_UNAVAILABLE, headers, "Busy, try again").into_response()
 }
 
 fn headers_of(list: Vec<(HeaderName, HeaderValue)>) -> HeaderMap {
@@ -373,7 +446,57 @@ fn base64(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::base64;
+    use std::sync::Arc;
+
+    use http_body_util::BodyExt;
+
+    use super::{CHUNK_BYTES, SEND_LIMIT, base64, held};
+    use crate::rate_limit::Turns;
+
+    /// A render keeps its turn until the connection took its last byte, so a client that never
+    /// reads holds a turn, not an unbounded copy of the page.
+    #[tokio::test]
+    async fn a_body_keeps_its_turn_until_its_last_chunk_is_taken() {
+        let turns = Arc::new(Turns::new(1, 1));
+        let client = "192.0.2.1".parse().unwrap();
+        let page = "x".repeat(CHUNK_BYTES * 2 + 1);
+        let mut body = held(page.clone(), turns.take(client).unwrap());
+        let mut read = Vec::new();
+        for _ in 0..3 {
+            assert!(turns.take(client).is_none());
+            let frame = body.frame().await.unwrap().unwrap();
+            read.extend_from_slice(&frame.into_data().unwrap());
+        }
+        assert!(body.frame().await.is_none());
+        drop(body);
+        assert_eq!(read, page.as_bytes());
+        given_back(&turns, client).await;
+    }
+
+    /// A client that reads a trickle loses its turn, then the page, then the connection, once
+    /// the answer took `SEND_LIMIT`.
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_reader_loses_its_turn_and_its_page_at_the_deadline() {
+        let turns = Arc::new(Turns::new(1, 1));
+        let client = "192.0.2.1".parse().unwrap();
+        let mut body = held("x".repeat(CHUNK_BYTES * 2), turns.take(client).unwrap());
+        assert!(body.frame().await.unwrap().is_ok());
+        tokio::time::sleep(SEND_LIMIT / 2).await;
+        assert!(turns.take(client).is_none());
+        tokio::time::sleep(SEND_LIMIT).await;
+        given_back(&turns, client).await;
+        assert!(body.frame().await.unwrap().is_err(), "the connection ends");
+    }
+
+    async fn given_back(turns: &Arc<Turns>, client: std::net::IpAddr) {
+        for _ in 0..10 {
+            if turns.take(client).is_some() {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("the turn was not given back");
+    }
 
     #[test]
     fn base64_pads_as_the_standard_does() {

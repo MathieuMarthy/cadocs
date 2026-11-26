@@ -1,8 +1,28 @@
 //! Mentions of users by a page's body or by a comment, kept in step with what that text names.
 
+use cadocs_core::permissions::SpaceAction;
 use sqlx::{AssertSqlSafe, SqliteConnection};
 
+use super::pages;
 use crate::{MAIL_NOTIFICATIONS, StoreError};
+
+/// Those of `users` who may read the page now: no one else is told about it, so that rows they
+/// would never see take no place in their inbox.
+pub(super) async fn readers(
+    conn: &mut SqliteConnection,
+    page_id: &str,
+    users: &[String],
+) -> Result<Vec<String>, StoreError> {
+    let mut readers = Vec::with_capacity(users.len());
+    for user in users {
+        match pages::authorize(conn, page_id, user, SpaceAction::ReadPage).await {
+            Ok(_) => readers.push(user.clone()),
+            Err(StoreError::PageNotFound | StoreError::NotAllowed) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(readers)
+}
 
 /// Where mentions come from: the body of a page, or one of its comments.
 pub(super) struct Place<'a> {
@@ -25,6 +45,23 @@ pub(super) async fn replace(
     mail_at: i64,
 ) -> Result<(), StoreError> {
     let users = serde_json::to_string(users).expect("strings make JSON");
+    // Only those who would be told are checked, each with a query, in the writer's transaction.
+    let named_anew: Vec<String> = sqlx::query_scalar(
+        "SELECT m.user_id FROM workspace_members m
+         WHERE m.workspace_id = ?4 AND m.user_id IN (SELECT value FROM json_each(?3))
+           AND m.user_id IS NOT ?5
+           AND NOT EXISTS (SELECT 1 FROM mentions x
+                           WHERE x.page_id = ?1 AND x.comment_id IS ?2 AND x.user_id = m.user_id)",
+    )
+    .bind(place.page_id)
+    .bind(place.comment_id)
+    .bind(&users)
+    .bind(place.workspace_id)
+    .bind(author)
+    .fetch_all(&mut *conn)
+    .await?;
+    let told = serde_json::to_string(&readers(conn, place.page_id, &named_anew).await?)
+        .expect("strings make JSON");
     sqlx::query(
         "DELETE FROM mentions WHERE page_id = ?1 AND comment_id IS ?2
              AND (user_id NOT IN (SELECT value FROM json_each(?3))
@@ -73,7 +110,7 @@ pub(super) async fn replace(
     )
     .bind(place.page_id)
     .bind(place.comment_id)
-    .bind(&users)
+    .bind(&told)
     .bind(place.workspace_id)
     .bind(author)
     .bind(now)

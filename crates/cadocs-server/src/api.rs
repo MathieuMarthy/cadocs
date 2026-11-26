@@ -3,7 +3,7 @@
 mod admin;
 pub(crate) mod attachments;
 pub mod auth;
-mod comments;
+pub mod comments;
 mod copies;
 pub mod exports;
 mod groups;
@@ -232,6 +232,7 @@ impl From<StoreError> for ApiError {
             StoreError::UnknownParent => invalid("parent_id", "unknown"),
             StoreError::NestedReply => invalid("parent_id", "nested"),
             StoreError::NotAThread => conflict.with_message("Only a thread can be resolved"),
+            StoreError::TooManyReplies => conflict.with_message("A thread takes no more replies"),
             StoreError::PageCycle => invalid("parent_id", "cycle"),
             StoreError::TooDeep => invalid("parent_id", "too_deep"),
             StoreError::UnknownSibling => invalid("after", "unknown"),

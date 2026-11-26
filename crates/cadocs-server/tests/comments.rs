@@ -595,3 +595,49 @@ async fn a_comment_records_the_members_it_mentions() {
     assert_eq!(w.delete(&w.bob, &comment).await.status, 204);
     assert_eq!(w.api.number("SELECT count(*) FROM mentions").await, 0);
 }
+
+// Limits
+
+/// A thread takes `MAX_REPLIES` replies, so a list of threads stays bounded in memory.
+#[tokio::test]
+async fn a_thread_takes_a_bounded_number_of_replies() {
+    let wiki = wiki().await;
+    let thread = wiki.thread(&wiki.ada, "Thread").await;
+    let page = &wiki.page;
+    wiki.api
+        .sql(&format!(
+            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < {})
+             INSERT INTO comments (id, page_id, parent_id, author_id, body, created_at, updated_at)
+             SELECT 'reply-' || i, '{page}', '{thread}', '{}', 'Me too', 1, 1 FROM n",
+            cadocs_store::MAX_REPLIES - 1,
+            wiki.ada_id
+        ))
+        .await;
+    wiki.reply_to(&wiki.bob, &thread, "The last one").await;
+
+    let body = json!({ "body": "One more", "parent_id": thread });
+    let got = wiki.comment(&wiki.bob, body).await;
+    assert_eq!(got.status, 409, "{got:?}");
+    // A new thread is still welcome.
+    wiki.thread(&wiki.bob, "Another").await;
+}
+
+/// Each account writes comments at a bounded pace, edits included.
+#[tokio::test]
+async fn comments_are_written_at_a_bounded_pace() {
+    let wiki = wiki().await;
+    let thread = wiki.thread(&wiki.bob, "Thread").await;
+    let mut got = wiki.edit(&wiki.bob, &thread, "Edited").await;
+    for _ in 0..cadocs_server::api::comments::WRITE_BURST {
+        if got.status == 429 {
+            break;
+        }
+        got = wiki.edit(&wiki.bob, &thread, "Edited").await;
+    }
+    assert_eq!(got.status, 429, "{got:?}");
+    assert!(got.header("retry-after").is_some(), "{got:?}");
+    let got = wiki.comment(&wiki.bob, json!({ "body": "More" })).await;
+    assert_eq!(got.status, 429, "{got:?}");
+    // Another account keeps its own pace.
+    wiki.thread(&wiki.ada, "Mine").await;
+}
