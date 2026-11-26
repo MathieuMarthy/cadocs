@@ -76,6 +76,8 @@ pub struct MemStore {
     /// Appends that fail before the store recovers.
     pub fail_next_appends: AtomicUsize,
     pub fail_compact: AtomicBool,
+    /// A compaction panics, as yrs can on a stored document, to test the guard of a room task.
+    pub panic_compact: AtomicBool,
     pub load_gate: Gate,
     pub append_gate: Gate,
     pub compact_gate: Gate,
@@ -189,6 +191,7 @@ impl DocStore for MemStore {
     async fn compact(&self, doc_id: &str, snapshot: &Snapshot) -> Result<(), StoreError> {
         self.stats.lock().unwrap().compacts += 1;
         self.compact_gate.pass().await;
+        assert!(!self.panic_compact.load(Ordering::SeqCst), "injected panic");
         if self.page_gone.load(Ordering::SeqCst) {
             return Err(StoreError::PageNotFound);
         }
