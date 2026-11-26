@@ -320,7 +320,6 @@ export const fr: Catalogue = {
   "share.hidden": "caché aux moteurs de recherche",
   "share.noExpiry": "sans expiration",
   "share.until": "jusqu'au {date}",
-  "share.expired": "expiré",
   "share.revoke": "révoquer",
   "share.confirmRevoke": "révoquer le lien",
   "share.revoked": "lien révoqué",

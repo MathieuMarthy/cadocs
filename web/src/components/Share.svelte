@@ -117,7 +117,6 @@
     }
   }
 
-  const expired = (share: PageShare) => share.expires_at !== null && share.expires_at <= Date.now();
   /** The last day a link works, as the field picked it: the millisecond before it expires. */
   const lastDay = (expiresAt: number) => new Date(expiresAt - 1).toLocaleDateString(formatLocale());
 </script>
@@ -138,7 +137,7 @@
   {:else}
     <ul class="share-list" aria-label={t("share.title")}>
       {#each shares as share (share.id)}
-        <li class="share-row" class:expired={expired(share)}>
+        <li class="share-row">
           <div class="share-link">
             <code>{publicUrl(share)}</code>
             <IconButton icon="copy" verb={t("share.copy")} label={t("share.copyLink")} onclick={() => copyLink(share)} />
@@ -150,8 +149,6 @@
               <span>{share.indexable ? t("share.indexed") : t("share.hidden")}</span>
               {#if share.expires_at === null}
                 <span>{t("share.noExpiry")}</span>
-              {:else if expired(share)}
-                <span class="share-expired">{t("share.expired")}</span>
               {:else}
                 <span title={exact(new Date(share.expires_at))}>{t("share.until", { date: lastDay(share.expires_at) })}</span>
               {/if}

@@ -120,7 +120,10 @@ struct Editor {
 impl Editor {
     async fn open(wiki: &Wiki, by: &Login) -> Self {
         let schema = cadocs_content::schema::editor_fingerprint();
-        let url = format!("ws://{}/ws/pages/{}?schema={schema}", wiki.api.addr, wiki.page);
+        let url = format!(
+            "ws://{}/ws/pages/{}?schema={schema}",
+            wiki.api.addr, wiki.page
+        );
         let mut request = url.into_client_request().unwrap();
         request
             .headers_mut()

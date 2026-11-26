@@ -298,7 +298,6 @@ export const en = {
   "share.hidden": "hidden from search engines",
   "share.noExpiry": "no expiry",
   "share.until": "until {date}",
-  "share.expired": "expired",
   "share.revoke": "revoke",
   "share.confirmRevoke": "revoke the link",
   "share.revoked": "link revoked",
