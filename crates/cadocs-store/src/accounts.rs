@@ -280,9 +280,10 @@ pub trait AccountStore: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Vec<Membership>, StoreError>> + Send;
 
     /// Applies `changes` in one transaction. A new password also voids the user's reset link and
-    /// ends every session of the user but `basis.session`. A new email is one nobody proved: it
-    /// clears `email_verified_at`, turns the second factor off and voids the reset link. An email another account uses
-    /// is an `EmailTaken`, and a `basis` that no longer holds is a `StaleCredentials`.
+    /// mailed codes, and ends every session of the user but `basis.session`. A new email is one
+    /// nobody proved: it clears `email_verified_at`, turns the second factor off and voids the
+    /// reset link. An email another account uses is an `EmailTaken`, and a `basis` that no longer
+    /// holds is a `StaleCredentials`.
     fn update_user(
         &self,
         user_id: &str,
@@ -304,9 +305,9 @@ pub trait AccountStore: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Vec<UserRecord>, StoreError>> + Send;
 
     /// Applies `changes` and returns the account. Disabling also ends the user's sessions and
-    /// voids their reset link, so that enabling them again revives neither. Disabling or demoting
-    /// voids the links they made for others. Refused with `LastInstanceAdmin` or `UserNotFound`,
-    /// checked inside the transaction.
+    /// voids their reset link and codes, so that enabling them again revives none. Disabling or
+    /// demoting voids the links they made for others. Refused with `LastInstanceAdmin` or
+    /// `UserNotFound`, checked inside the transaction.
     fn administer_user(
         &self,
         user_id: &str,
@@ -329,9 +330,9 @@ pub trait AccountStore: Send + Sync + 'static {
         now: i64,
     ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 
-    /// Sets the password, ends every session of the user and voids their link, in one transaction.
-    /// Returns whether the link was still usable: hashing takes a while, and it may have been
-    /// used, replaced or expired in the meantime.
+    /// Sets the password, ends every session of the user and voids their link and mailed codes,
+    /// in one transaction. Returns whether the link was still usable: hashing takes a while, and
+    /// it may have been used, replaced or expired in the meantime.
     fn use_password_reset(
         &self,
         token_hash: &str,
@@ -370,12 +371,14 @@ pub trait AccountStore: Send + Sync + 'static {
     ) -> impl Future<Output = Result<bool, StoreError>> + Send;
 
     /// Uses a code sent to the account's address, then turns the second factor on and marks the
-    /// address verified. A code that is missing, expired or other, or for an address the account
-    /// no longer has, is a `WrongCode`, counted as for `register_user`.
+    /// address verified, and ends every session of the user but `session`. A code that is
+    /// missing, expired or other, or for an address the account no longer has, is a `WrongCode`,
+    /// counted as for `register_user`.
     fn enable_email_2fa(
         &self,
         user_id: &str,
         attempt: &CodeAttempt<'_>,
+        session: &str,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// Uses an `email` code that went to `attempt.email` for this account, then makes it the
@@ -416,13 +419,15 @@ pub trait AccountStore: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Option<Vec<u8>>, StoreError>> + Send;
 
     /// Turns the app on with the code of `step`, if the setup still holds `secret`, and stores
-    /// the recovery codes. Anything else is a `WrongCode`.
+    /// the recovery codes, and ends every session of the user but `session`. Anything else is a
+    /// `WrongCode`.
     fn enable_totp(
         &self,
         user_id: &str,
         secret: &[u8],
         step: i64,
         recovery_hashes: &[String],
+        session: &str,
         now: i64,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 

@@ -928,8 +928,9 @@ impl AccountStore for FlakyStore {
         &self,
         user_id: &str,
         attempt: &CodeAttempt<'_>,
+        session: &str,
     ) -> Result<(), StoreError> {
-        self.inner.enable_email_2fa(user_id, attempt).await
+        self.inner.enable_email_2fa(user_id, attempt, session).await
     }
 
     async fn change_email(
@@ -964,10 +965,11 @@ impl AccountStore for FlakyStore {
         secret: &[u8],
         step: i64,
         recovery_hashes: &[String],
+        session: &str,
         now: i64,
     ) -> Result<(), StoreError> {
         self.inner
-            .enable_totp(user_id, secret, step, recovery_hashes, now)
+            .enable_totp(user_id, secret, step, recovery_hashes, session, now)
             .await
     }
 

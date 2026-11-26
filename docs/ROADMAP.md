@@ -52,7 +52,7 @@ Scope: what `docs/notes/` lists as left open and V1 users would meet: sessions o
 
 Steps. The rules of the MVP steps apply. Each step removes the items it fixes from the "Left open" lines of `docs/notes/`.
 
-- [ ] Step 57: sessions and account changes. Turning on a second factor (authenticator app or code by mail) ends the person's other sessions, a password change or reset voids the pending codes by mail, and an address change mails the old address. Done when a test covers each.
+- [x] Step 57: sessions and account changes. Turning on a second factor (authenticator app or code by mail) ends the person's other sessions, a password change or reset voids the pending codes by mail, and an address change mails the old address. Done when a test covers each.
 - [ ] Step 58: shares follow their creator. A share stops answering once its creator can no longer edit its page or has left the workspace, recorded in an ADR as a refinement of ADR 0009. An expired share leaves the share dialog's list. Done when tests show the share of a removed member and of a demoted one answer `404`.
 - [ ] Step 59: room panics. A room task that panics frees its `Unloading` slot and its memory estimate, so callers no longer get `ShuttingDown` until a restart. Done when a test with an injected panic shows the budget back where it was and the page opening again.
 - [ ] Step 60: prefix search. A prefix typed past the end of its stem finds the word: `deploym` finds `deployment`. Done when search tests cover it in English and French, whole words stem as before, and the index size is measured before and after.

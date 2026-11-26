@@ -32,7 +32,8 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 - `AppState::totp_guesses` (`AccountLimiter`, by user id) bounds guesses per account, counted after the password matched and before the code is looked at, so an email alone locks nobody out. A test that logs in more than 5 times with the app in a minute hits it; `forget_step` in `tests/totp.rs` resets the replay guard instead of waiting.
 - Replay: the step a login uses is stored by `create_session_with_totp` with `last_step < step`, in the session's transaction. A confirmed setup stores its step too, so the next login needs a later code (e2e uses step + 1).
 - `cadocs reset-totp <email>` is the way back for someone who lost the app and the codes. A reset link leaves the app on, on purpose.
-- Left open: turning the app on ends no other session, as for the code by mail; no screen shows how many recovery codes are left; a setup abandoned without `DELETE` keeps its pending row until the next setup or `DELETE`; the per-account limit counts right codes too, so someone who holds the password can keep the owner at `429` (they could log in anyway).
+- Turning the app or the code by mail on ends every other session of the account (`enable_totp` and `enable_email_2fa` take the session to keep), and calls `access_changed`.
+- Left open: no screen shows how many recovery codes are left; a setup abandoned without `DELETE` keeps its pending row until the next setup or `DELETE`; the per-account limit counts right codes too, so someone who holds the password can keep the owner at `429` (they could log in anyway).
 
 ## OIDC (step 48, ADR 0028)
 
@@ -122,8 +123,9 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 - `Credentials::needs_code(mail)` is the one rule for the second factor, which counts only with a relay. `main` warns at start when it is off and accounts have the factor.
 - `SmtpMailer` builds its transport for each message. Keep message lines under 76 ASCII characters, or lettre sends quoted-printable and cuts links with `=`. A code sits alone on a line indented 4 spaces. Keep `normalize_email` before `Mail::to`, which accepts a quoted local part.
 - `FakeRelay` (`cadocs_mail::fake`, dev only) is a real plain text SMTP server.
+- Account changes (step 57): a new password, from `PATCH /me` or a reset link, deletes the codes of the account (`DELETE_CODES`, by `user_id`, so a registration code of the same address stays), and so does disabling it (`revoke_access`). `confirm_email` queues a notice to the old address, which names the new one; without a relay the address changes with no one told.
 - Mail of notifications (step 42): `PUT /me/email-notifications` sits in the mail block. The job runs in `cadocs-jobs` with a clone of `state.mail`, so `start_jobs` must follow the line that sets it (`main` and `tests/common` do). The message is queued before `mark_mailed`: a crash between the two mails twice, a full outbox fails the job for a retry. Left open: the address is not proven before the first message; the message is English whatever the user's language.
-- Left open: no `CADOCS_SMTP_CA_FILE`; asking for a reset link voids earlier ones, up to the per-address limit; the per-address table refuses newcomers silently past 4096; a registration code for an address taken meanwhile answers `409 email: taken`; a login started just before the factor went on ends without a code; turning the factor on ends no other session; the old address is not told when an account moves; a pending code survives a password change; two asks at once can store one code while the other's message goes out last.
+- Left open: no `CADOCS_SMTP_CA_FILE`; asking for a reset link voids earlier ones, up to the per-address limit; the per-address table refuses newcomers silently past 4096; a registration code for an address taken meanwhile answers `409 email: taken`; a login started just before the factor went on ends without a code; two asks at once can store one code while the other's message goes out last.
 
 ## Bulk import (step 53)
 
