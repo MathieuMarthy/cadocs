@@ -28,79 +28,54 @@ Accepted risk: a user who can invite learns whether an address has an account ([
 
 ## V1
 
-Purpose: a credible replacement for Docmost.
+Purpose: a credible replacement for Docmost. Done in steps 33 to 55: upgrade tests and the size checks of CI (33), the string catalogue and French (34, 54), groups (35, 36), comments, mentions, backlinks and notifications in the app and by mail (37 to 42), math and Mermaid (43), revision diff (44), public shares (45, 46), TOTP and OIDC (47 to 49), duplication and templates (50, 51), exports and bulk import (52, 53), and the exit review (55). What each step taught is in `docs/notes/`, its tests in [COVERAGE.md](COVERAGE.md), its measures in [ARCHITECTURE.md](ARCHITECTURE.md#v1-results).
 
-Scope:
+Scope: comments with threads, resolution and mentions of users and pages, notifications in the app and by mail through the relay of ADR 0026, public sharing with server-rendered pages and optional indexing, groups and group grants, OIDC login and TOTP (a code by mail came first, ADR 0026), bulk Markdown import and export and space export, backlinks, page duplication and copy to another space, math and Mermaid loaded on demand in the browser, revision diff, page templates, the interface in English and French.
 
-- Comments, threads, resolution, mentions of users and pages, in-app notifications
-- Public sharing with server-rendered pages, and optional indexing by search engines
-- Groups and group grants
-- OIDC login, TOTP multi-factor authentication (a code by mail came first, ADR 0026)
-- Bulk Markdown import and export, space export
-- Backlinks, page duplication and copy to another space
-- Math (KaTeX) and Mermaid blocks, loaded on demand in the browser
-- Diff between revisions
-- Email notifications through the relay of ADR 0026
-- Internationalized interface, in English and French
-- Page templates
+Decided when the stage started: math and Mermaid render in the browser only, so public pages and exports show their source as a code block. OIDC is tested against a fake provider in Rust, and checked by hand against real providers.
 
-Decided when the stage started: math and Mermaid render in the browser only, so public pages and exports show their source as a code block. OIDC is tested against a fake provider in Rust, and checked by hand once with Authentik and Keycloak.
+Rules later stages keep: every new screen takes its strings from the catalogue of step 34, in English and French. Branches worked side by side renumber their migrations at merge (`crates/cadocs-store/migrations/sqlite/`) and keep the upgrade test of step 33 green.
 
-Steps. The rules of the MVP steps apply, and every new screen takes its strings from the catalogue of step 34.
+Remaining step:
+- [ ] Step 56: stale clients. `@tiptap/y-tiptap` deletes the nodes and marks its schema lacks, and syncs that deletion (ADR 0016), so a tab opened before an upgrade erases the blocks added since, such as `mention` and `inlineMath` from v0.2 to v1. A page socket carries the fingerprint of the editor schema, the server refuses one whose fingerprint differs or is missing (which covers tabs of releases from before this step), and the tab shows a notice asking for a reload. Done when a test shows a client of another schema leaves the page as it was, and an end-to-end test shows the notice.
 
-- [x] Step 33: upgrade tests. One fixture database per release (`v0.1.0`, `v0.2.0`), opened by the current build in a test that checks its data. CI fails if the release binary passes 30 MB or a default build links S3 code. Done when both checks run in CI.
-- [x] Step 34: i18n foundation. A string catalogue in `web/`, English as the source, a language setting per user that falls back to the browser's, every existing string moved into it. Done when the UI looks the same in English and a test fails on a string left out of the catalogue.
-- [x] Step 35: groups, server. REST routes of groups and their members, `access_changed()` on each change, the permission matrix extended. Done when group grants change what a member reaches, over REST and sockets.
-- [x] Step 36: groups, screens. Groups in workspace settings, groups in space grants.
-- [x] Step 37: comments, server. Migration, REST routes, resolve and reopen, one level of replies, anchors stored as given (ADR 0012), a `comment` event on the events socket, permission tests.
-- [x] Step 38: comments, screens. The side panel, anchors from the selection, highlights as decorations, lost anchors shown with their quote, resolve and reopen.
-- [x] Step 39: mentions. A user mention node in the editor and in `cadocs-content`, mentions of users and pages in comments, body mentions diffed by the reindex job into `mentions`.
-- [x] Step 40: backlinks. `page_links` filled by the reindex job, a route and a panel listing the pages that link here.
-- [x] Step 41: in-app notifications. `notifications` for mentions, replies and comments on one's pages, the `notification` event, a list with unread count and read state.
-- [x] Step 42: mail notifications. Through the relay only, a setting per user, grouped by a job so one burst sends one message. Done when, with no relay, nothing of it answers.
-- [x] Step 43: math and Mermaid. Block and inline math, Mermaid blocks, loaded on demand in the editor. `cadocs-content` writes their source to Markdown and as a code block in HTML.
-- [x] Step 44: revision diff. Compare a revision with the current page or another revision, on the screen of revisions.
-- [x] Step 45: public shares, server. `page_shares`, its routes, `/s/{token}` rendered by the bounded reader, descendants, files, `ETag`, the strict CSP, `X-Robots-Tag` unless indexable, a rate limit. Done when a test shows a script in content cannot run there.
-- [x] Step 46: public shares, screens. A share dialog on the page: children, indexing, expiry, revoke.
-- [x] Step 47: TOTP. `user_totp`, recovery codes, login asking for the code, the account screen. Mail codes (ADR 0026) keep working beside it.
-- [x] Step 48: OIDC, server. Providers in `CADOCS_OIDC_*`, code flow with PKCE, `user_identities`, how an identity meets an existing account, tests against a fake provider. An ADR for the HTTP client and its RAM and binary cost.
-- [x] Step 49: OIDC, screens and providers. Login buttons, linking on the account screen, a manual check with Authentik and Keycloak written into `OPERATIONS.md`.
-- [x] Step 50: duplication. `POST /pages/{page}/duplicate`, with descendants and attachments, into the same space or another, through a room.
-- [x] Step 51: templates. `templates`, saving a page as one, a new page from one.
-- [x] Step 52: exports. `format=html` for one page, the space export as a job behind `/jobs/{id}`, in Markdown or HTML, streamed as a zip.
-- [x] Step 53: bulk import. A zip of Markdown files and folders becomes a tree of pages with its attachments, as a job.
-- [x] Step 54: French. Every string of the catalogue translated, the language picker on the account screen.
-- [ ] Step 55: V1 exit. Benchmark, binary size, security review of shares, OIDC, TOTP and comments, `COVERAGE.md` and the permission matrix for the new routes.
+Exit criteria met: public pages need no JavaScript, and a test shows a script in content cannot run; the binary stays under 30 MB, and a default build contains no S3 code; the idle RSS and active-user thresholds of the MVP still hold; upgrade from every earlier release is tested through migrations.
 
-Parallel work. Steps 38 to 53 fall into independent lanes. Each lane runs in order, and lanes can run side by side in separate branches or worktrees:
+Exit criteria open:
 
-| Lane | Steps | Depends on |
-| --- | --- | --- |
-| Discussion | 38 → 39 → 41 → 42 | 39 needs the comment panel of 38 for mentions in comments; 41 notifies mentions; 42 mails what 41 stores |
-| Content | 40, 43, 44, in any order | none |
-| Shares | 45 → 46 | none |
-| Login | 47 → 48 → 49 | none, but 47 and 48 both change the login flow, so not at once |
-| Page copies | 50 → 51 | 51 reuses the copy of 50 to create a page from a template |
-| Archives | 52 → 53 | 53 reuses the job and zip handling of 52 |
+- [ ] OIDC works with at least two providers (for example Authentik and Keycloak). The manual check of [OPERATIONS.md](OPERATIONS.md#single-sign-on-oidc) has not been run.
+- [ ] A tab opened before an upgrade cannot remove content its schema does not know.
 
-Step 54 comes after every step with a screen (38, 41, 42, 44, 46, 47, 49, 51, 52, 53), and step 55 after all of them.
+## V1.1
 
-Lanes do not depend on each other, but they share files, so merge one branch at a time and rebase the others:
+Purpose: close the gaps V1 left open, before new features.
 
-- Migrations are numbered in sequence (`crates/cadocs-store/migrations/sqlite/`): renumber at merge, and keep the upgrade test of step 33 green.
-- The string catalogue `web/src/lib/i18n/en.ts` grows in every screen step.
-- 39 and 40 both change the reindex job (`crates/cadocs-jobs/src/index.rs`); 39 and 43 both add nodes to the editor schema and to `cadocs-content`.
-- 43, 45 and 52 all touch the HTML renderer of `cadocs-content`.
-- `ROADMAP.md`, `COVERAGE.md`, `docs/notes/` and the permission matrix change at the end of every step.
-- The idle RSS each step reports is measured on its own branch, then again once merged if the step added a dependency or a background task.
+Scope: what `docs/notes/` lists as left open and V1 users would meet: sessions on account changes, shares of people who left, room panics, prefix search, live mentions, the language of mails, links in copies and exports, two screen faults.
+
+Steps. The rules of the MVP steps apply. Each step removes the items it fixes from the "Left open" lines of `docs/notes/`.
+
+- [ ] Step 57: sessions and account changes. Turning on a second factor (authenticator app or code by mail) ends the person's other sessions, a password change or reset voids the pending codes by mail, and an address change mails the old address. Done when a test covers each.
+- [ ] Step 58: shares follow their creator. A share stops answering once its creator can no longer edit its page or has left the workspace, recorded in an ADR as a refinement of ADR 0009. An expired share leaves the share dialog's list. Done when tests show the share of a removed member and of a demoted one answer `404`.
+- [ ] Step 59: room panics. A room task that panics frees its `Unloading` slot and its memory estimate, so callers no longer get `ShuttingDown` until a restart. Done when a test with an injected panic shows the budget back where it was and the page opening again.
+- [ ] Step 60: prefix search. A prefix typed past the end of its stem finds the word: `deploym` finds `deployment`. Done when search tests cover it in English and French, whole words stem as before, and the index size is measured before and after.
+- [ ] Step 61: live body mentions. A mention the indexing job finds in a page body publishes the `notification` event, as a mention in a comment does. Done when a test sees it on the events socket.
+- [ ] Step 62: language of mails. The server knows a person's language with no choice made: their setting, else the last browser language it saw (`Accept-Language`, or what the front end reports), else the workspace's language, else English. An invitation takes the workspace's. Every mail (notifications, codes, reset links, invitations) comes from a server-side catalogue in English and French. No IP geolocation: a GeoIP database costs RAM and binary size, and guesses wrong in countries with several languages. Done when a person with no setting and a French browser gets French mail, and a test fails on a mail string left untranslated.
+- [ ] Step 63: links in copies. Links between pages of a duplicated subtree point at the copies, not the sources. Done when a test duplicates a tree whose pages link to each other, into the same space and another.
+- [ ] Step 64: links in exports. A space export writes links between exported pages as relative file links, in Markdown and HTML, so the zip reads offline. Done when a test follows every page link of an exported zip to a file inside it.
+- [ ] Step 65: screen faults. A wrong second-factor code says so, not `wrong email or password`, and a page link clicked inside a comment composer keeps the draft. Done when end-to-end tests cover both.
+- [ ] Step 66: V1.1 exit. Benchmark, binary size, `COVERAGE.md`, and a review of what stays left open in `docs/notes/`.
+
+Steps 57 to 65 are independent and can run in any order. 57 and 62 both touch mail, and 63 and 64 both rewrite page links, so rebase the second of each pair on the first.
+
+Set aside, not in this stage:
+
+- Accessibility: no keyboard way to move a page in the tree.
+- OIDC: only RS256; an account made by a provider has no password, so the routes that need the current one are closed to it.
+- Authenticator app: the per-account limit counts right codes too, so someone who holds the password can keep the owner at `429`; no screen shows how many recovery codes are left.
 
 Exit criteria:
-
-- [ ] Public pages contain no JavaScript requirement, and a test confirms a script in content cannot execute.
-- [ ] OIDC works with at least two providers (for example Authentik and Keycloak).
-- [ ] Binary size stays under 30 MB, and a default build contains no S3 code.
-- [ ] Idle RSS and active-user thresholds of the MVP still hold.
-- [ ] Upgrade from every earlier release is tested through migrations.
+- [ ] Every step's fix has a test listed in `COVERAGE.md`, and its item is gone from `docs/notes/`.
+- [ ] Binary size stays under 30 MB, and the RSS thresholds of the MVP still hold.
 
 ## V2
 
