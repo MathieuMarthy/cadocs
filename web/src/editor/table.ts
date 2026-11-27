@@ -9,6 +9,7 @@ import {
   addRowAfter,
   addRowBefore,
   CellSelection,
+  columnResizing,
   deleteColumn,
   deleteRow,
   deleteTable,
@@ -20,6 +21,9 @@ import { TableView } from "@tiptap/extension-table";
 
 import { type IconName, iconMarkup } from "../components/icons";
 import { type Key, t } from "../lib/i18n";
+
+/** The narrowest a column gets, as the cells' `min-width` in `page.css`. */
+export const CELL_MIN_WIDTH = 80;
 
 type Command = (state: EditorState, dispatch?: (tr: Transaction) => void) => boolean;
 
@@ -218,6 +222,20 @@ class TableMenu {
     this.onClose();
   }
 }
+
+/**
+ * A writer drags a column's edge to store its width as the cells' `colwidth`. Tiptap's own
+ * `resizable` adds this plugin only to an editor created editable, so a reader made writer could
+ * not drag; this one is always there and checks `view.editable` on each move and press.
+ * Before the table's own plugins (priority 100), as Tiptap orders them.
+ */
+export const ColumnResizing = Extension.create({
+  name: "columnResizing",
+  priority: 101,
+  addProseMirrorPlugins: () => [
+    columnResizing({ cellMinWidth: CELL_MIN_WIDTH, defaultCellMinWidth: CELL_MIN_WIDTH, View: null }),
+  ],
+});
 
 /** A right click on a cell of a writer's table opens the table menu instead of the browser's. */
 export const TableMenuOnRightClick = Extension.create({

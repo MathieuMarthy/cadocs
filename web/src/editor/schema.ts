@@ -7,7 +7,7 @@ import type { Schema } from "@tiptap/pm/model";
 import { prosemirrorJSONToYXmlFragment } from "@tiptap/y-tiptap";
 import * as Y from "yjs";
 
-import { entries, extensionsOf } from "./registry";
+import { entries, extensionsOf, levels } from "./registry";
 
 type Attrs = Record<string, { default?: unknown }> | undefined;
 
@@ -38,6 +38,7 @@ export function schemaJson(current: Schema = schema()) {
     marks: Object.fromEntries(
       byName(marks).map(([name, type]) => [name, { attrs: defaults(type.spec.attrs) }]),
     ),
+    headingLevels: levels,
   };
 }
 

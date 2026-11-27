@@ -76,7 +76,7 @@ body{margin:0;background:var(--bg);color:var(--ink);\
 font:16px/1.6 \"IBM Plex Sans\",system-ui,sans-serif}\
 main{max-width:46rem;margin:0 auto;padding:2rem 1rem 4rem}\
 a{color:var(--accent)}\
-h1,h2,h3{line-height:1.25}\
+h1,h2,h3,h4,h5,h6{line-height:1.25}h5,h6{font-size:.875rem}\
 .title{font-size:2rem;margin:0 0 1.5rem}\
 .trail{color:var(--muted);font-size:.875rem}\
 .trail a{color:inherit}\
@@ -93,6 +93,8 @@ img{max-width:100%;height:auto}figure{margin:1rem 0}\
 margin:1rem 0}\
 .toc ol{list-style:none;padding-left:0}\
 .toc [data-depth=\"1\"]{padding-left:1rem}.toc [data-depth=\"2\"]{padding-left:2rem}\
+.toc [data-depth=\"3\"]{padding-left:3rem}.toc [data-depth=\"4\"]{padding-left:4rem}\
+.toc [data-depth=\"5\"]{padding-left:5rem}\
 .page-link-missing,.mention-missing{color:var(--muted)}\
 .plugin{border:1px dashed var(--line);padding:.5rem 1rem}\
 .children{margin-top:3rem;border-top:1px solid var(--line)}\

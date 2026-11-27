@@ -204,7 +204,7 @@ fn visit_mut(blocks: &mut [Block], action: &mut impl FnMut(&mut Block)) {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     Paragraph(Vec<Inline>),
-    /// `level` is 1 to 6. The editor offers 1 to 3.
+    /// `level` is 1 to 6, as the editor offers.
     Heading {
         level: u8,
         content: Vec<Inline>,
@@ -277,7 +277,7 @@ pub struct TableCell {
     pub header: bool,
     pub colspan: u32,
     pub rowspan: u32,
-    /// Stays `None` while the editor's tables are not resizable.
+    /// Pixel widths of the columns the cell spans, `0` for one never dragged. Markdown drops them.
     pub colwidth: Option<Vec<i64>>,
     /// `left`, `center` or `right`.
     pub align: Option<String>,

@@ -1,6 +1,6 @@
 // The editor's blocks, slash menu, shortcuts, read-only mode and content check, in two browsers.
 
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
@@ -29,7 +29,7 @@ test("the slash menu lists the blocks, filters them, and moves with the arrows",
   await left.keyboard.type("/");
 
   await expect(commands(left)).toBeVisible();
-  await expect(left.getByText("commands · 21")).toBeVisible();
+  await expect(left.getByText("commands · 24")).toBeVisible();
   const options = commands(left).getByRole("option");
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
   await left.keyboard.press("ArrowDown");
@@ -437,6 +437,30 @@ test("arrowing onto the hashes edits them as text, and leaving applies them", as
   await expect(editor(right).locator("h2")).toHaveCount(0);
 });
 
+test("six hashes make a level 6 heading, typed or written in its source", async ({
+  left,
+  right,
+}) => {
+  await bothOnline(left, right);
+  await editor(left).click();
+  await left.keyboard.type("# Top");
+  await newLine(left);
+  await left.keyboard.type("###### Typed");
+  await expect(editor(left).locator("h6 .md-hint")).toHaveText("######");
+  await expectText(editor(right).locator("h6"), "Typed");
+  await expect(editor(right).locator("h6")).toHaveAttribute("data-number", "01.1");
+
+  await newLine(left);
+  await left.keyboard.type("##### Written");
+  await left.keyboard.press("Home");
+  await left.keyboard.press("ArrowLeft");
+  await left.keyboard.type("#");
+  await left.keyboard.press("End");
+  await left.keyboard.press("Enter");
+  await expectText(editor(right).locator("h6"), "Typed", "Written");
+  await expect(editor(right).locator("h5")).toHaveCount(0);
+});
+
 test("backspace at the start of a heading edits its hashes, down to plain text", async ({
   left,
   right,
@@ -521,10 +545,11 @@ test("a code block shows its language, and its fence edits it", async ({ left, r
   await left.keyboard.type("fn main() {}");
   const block = (page: Page) => editor(page).locator("pre");
   await expect(block(right)).toHaveAttribute("data-language", "rust");
+
+  // With the caret elsewhere: inside, the fence takes the label's place.
+  await left.keyboard.press("Control+Home");
   const label = await block(left).evaluate((pre) => getComputedStyle(pre, "::before").content);
   expect(label).toBe('"rust"');
-
-  await left.keyboard.press("Control+Home");
   await left.keyboard.press("ArrowDown");
   await left.keyboard.press("Home");
   await left.keyboard.press("ArrowLeft");
@@ -535,6 +560,98 @@ test("a code block shows its language, and its fence edits it", async ({ left, r
   await expect(block(right)).toHaveAttribute("data-language", "python");
   await expect(block(right).locator("code")).toHaveClass(/language-python/);
   await expectText(block(right).locator("code"), "fn main() {}");
+});
+
+test("Tab indents the selected lines of a code block, Shift-Tab outdents them", async ({
+  left,
+  right,
+}) => {
+  await bothOnline(left, right);
+  await editor(left).click();
+  await left.keyboard.type("```js ");
+  await left.keyboard.type("a();");
+  await left.keyboard.press("Enter");
+  await left.keyboard.type("b();");
+  const code = (page: Page) => editor(page).locator("pre code");
+  await left.keyboard.press("Home");
+  await left.keyboard.press("Tab");
+  await expectText(code(right), "a();\n  b();");
+  // A selection from the middle of a line still indents that whole line.
+  await left.keyboard.press("Shift+ArrowUp");
+  await left.keyboard.press("Tab");
+  await expectText(code(right), "  a();\n    b();");
+  await left.keyboard.press("Shift+Tab");
+  await expectText(code(right), "a();\n  b();");
+  await left.keyboard.press("Shift+Tab");
+  await expectText(code(right), "a();\nb();");
+  await expect(editor(left)).toBeFocused();
+
+  // The way out: Escape, then Tab leaves the editor as anywhere else.
+  await left.keyboard.press("Escape");
+  await left.keyboard.press("Tab");
+  await expect(editor(left)).not.toBeFocused();
+  await expectText(code(right), "a();\nb();");
+});
+
+test("the caret in a code block shows its fence, and a click on it edits the language", async ({
+  left,
+  right,
+}) => {
+  await bothOnline(left, right);
+  // The fence is the `pre`'s own `::before`, on the line above the code.
+  const shown = (pre: Locator) => pre.evaluate((element) => getComputedStyle(element, "::before").content);
+  const press = (pre: Locator) => pre.click({ position: { x: 30, y: 24 } });
+  await editor(left).click();
+  await left.keyboard.type("``` ");
+  await left.keyboard.type("plain");
+  const first = editor(left).locator("pre").first();
+  await expect.poll(() => shown(first)).toBe('"```"');
+  await left.keyboard.press("Enter");
+  await left.keyboard.press("Enter");
+  await left.keyboard.press("Enter");
+  await expect.poll(() => shown(first)).toBe('"auto"');
+  await left.keyboard.type("```rust ");
+  await left.keyboard.type("fn main() {}");
+  const block = (page: Page) => editor(page).locator("pre").nth(1);
+  await expectText(block(right).locator("code"), "fn main() {}");
+  await expect.poll(() => shown(block(left))).toBe('"```rust"');
+  await expect.poll(() => shown(block(right))).toBe('"rust"');
+
+  await press(block(left));
+  await expectText(block(right).locator("code"), "```rust\nfn main() {}");
+  // Tab leaves a written fence alone, or the block would no longer read as code.
+  await left.keyboard.press("Home");
+  await left.keyboard.press("Tab");
+  await left.keyboard.press("Shift+ArrowDown");
+  await left.keyboard.press("Shift+End");
+  await left.keyboard.press("Tab");
+  await expectText(block(right).locator("code"), "```rust\n  fn main() {}");
+  await left.keyboard.press("Control+Home");
+  await expect(block(right)).toHaveAttribute("data-language", "rust");
+  await expectText(block(right).locator("code"), "  fn main() {}");
+
+  await block(left).locator("code").click();
+  await press(block(left));
+  for (let i = 0; i < 4; i++) await left.keyboard.press("Backspace");
+  await left.keyboard.type("python");
+  await left.keyboard.press("Control+Home");
+  await expect(block(right)).toHaveAttribute("data-language", "python");
+  await expectText(block(right).locator("code"), "  fn main() {}");
+});
+
+test("Escape, then Tab leaves the editor from code in a table cell too", async ({ left, right }) => {
+  await bothOnline(left, right);
+  await editor(left).click();
+  // `table of contents` matches too, below `table`.
+  await left.keyboard.type("/table");
+  await expect(commands(left).getByRole("option")).toHaveText(["table", "table of contents"]);
+  await left.keyboard.press("Enter");
+  await left.keyboard.type("```js ");
+  await left.keyboard.type("x");
+  await expect(editor(right).locator("td pre, th pre")).toHaveCount(1);
+  await left.keyboard.press("Escape");
+  await left.keyboard.press("Tab");
+  await expect(editor(left)).not.toBeFocused();
 });
 
 test("a source being edited survives the other browser's typing", async ({ left, right }) => {

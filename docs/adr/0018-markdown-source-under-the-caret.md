@@ -16,6 +16,7 @@ The shared document holds blocks, not Markdown text, so the source has to be dra
 The source is written as text (the second model), in `editor/source.ts`:
 
 - A heading or quote paragraph under the caret of a focused writer shows its marker (`##`, `>`) beside it, drawn by that tab alone, in place of the heading number.
+- A code block under the caret shows its fence (` ```rust `, or ` ``` ` with no language) on its own line above, in place of its language (step 71), so the language reads where it is set.
 - ArrowLeft at the start of a block, a click on the marker, or Backspace at the start (which then deletes the source's last character) writes the source into the block: `## ` in a heading, `[ ] ` or `[x] ` in a task, `- ` or `N. ` in a list item, `> ` in a quote paragraph, the fence line in code. A divider the caret lands on becomes the text `---`.
 - When the caret leaves the block, its text is read again and the block becomes what it says: a heading of another level, a paragraph, a checked task, a bullet, a list item out of its list, a code block in another language or plain lines. A block this tab edited that starts with its source, such as a paragraph whose shortcut was undone, is read the same way. A block it did not edit is never read: another tab may be writing its source out, and code may hold Markdown on purpose.
 - While a block is written out, the block shortcuts stay silent in it, so that `- ` typed there is text and not a nested list.

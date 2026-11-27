@@ -10,6 +10,9 @@ use crate::headings::numbered;
 use crate::url::allowed;
 use crate::{ATTACHMENT_PATH, Links, PAGE_PATH, PageTitles, UNKNOWN_USER};
 
+/// The most `<col>` a table's `<colgroup>` gets, far above what a page shows.
+const MAX_COLUMNS: usize = 1000;
+
 /// HTML whose links point to the application's own addresses.
 pub fn to_html(document: &Document, titles: &dyn PageTitles) -> String {
     to_html_with(document, titles, &Encoded)
@@ -194,7 +197,27 @@ fn block(context: &mut Context, block: &Block, out: &mut String) {
             out.push_str("</details>");
         }
         Block::Table(rows) => {
-            out.push_str("<table><tbody>");
+            out.push_str("<table>");
+            // The first row spans every column. `width`, not `style`: shares forbid inline styles.
+            let first = rows.first().map_or(&[][..], |row| &row.cells[..]);
+            if first.iter().any(|cell| cell.colwidth.is_some()) {
+                out.push_str("<colgroup>");
+                let widths = first.iter().flat_map(|cell| {
+                    (0..cell.colspan as usize)
+                        .map(|i| cell.colwidth.as_ref().and_then(|w| w.get(i)).copied())
+                });
+                // A document's `colspan` is anyone's number: bound the columns written.
+                for width in widths.take(MAX_COLUMNS) {
+                    match width {
+                        Some(width) if width > 0 => {
+                            let _ = write!(out, r#"<col width="{width}">"#);
+                        }
+                        _ => out.push_str("<col>"),
+                    }
+                }
+                out.push_str("</colgroup>");
+            }
+            out.push_str("<tbody>");
             for row in rows {
                 out.push_str("<tr>");
                 for cell in &row.cells {

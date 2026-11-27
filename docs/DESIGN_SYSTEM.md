@@ -50,6 +50,7 @@ Those subsets have no box-drawing characters, so the tree prefixes of the MVP ne
 | Page title | `page-title` 34/1.2, 600, spacing -0.01em | mono |
 | Section heading (H2) | `section-title` 19/1.3, 600, after its `section-number` | mono |
 | Section number | `section-number` 13/1.3, 500, `accent-text` | mono |
+| Content headings H1 to H6 | `heading-1` 24, `heading-2` 19 (the section heading), `heading-3` 15, `heading-4` 14, `heading-5` 13, all 600 at 1.3; `heading-6` 13, 500, `ink-2`. Tokens in `tokens.css` | mono |
 | Lede | `lede` 19/1.6, `ink-2` | sans |
 | Body | `body` 17/1.7 | sans |
 | Interface | `ui` 13/1.4 | mono |
@@ -145,7 +146,7 @@ Motion says where something went, and nothing more. It is short, linear and plai
 | The confirm buttons | Opacity, each branch | None: the branch it replaces goes at once, so both never show side by side |
 
 - Only a level that opens or closes moves, once its rows are there, so it unfolds to their height. The ancestors of the page on screen unfold too when it opens them. A level already loaded when the tree shows, and the levels inside one being closed, do not move.
-- Everything else stays still: pages, rows, hover, selection and focus change at once.
+- Everything else stays still: pages, rows, hover, selection and focus change at once. A [loading skeleton](#loading-skeleton) is still too: it has no pulse or shimmer, with or without reduced motion.
 
 ## Components
 
@@ -155,7 +156,7 @@ The icons, the action menu, the drawer and the lowercase labels come from ADR 00
 
 - `measure` column, centered, `space-14` top margin.
 - Metadata in `meta`, title in `page-title`, lede in `lede`.
-- H2 as described above, with a `space-10` top margin.
+- H1 and H2 with a `space-10` top margin, H3 to H6 with `space-6` above and `space-2` below.
 - Checklist: `[x]` in `accent-text` with a struck, `muted` label when done, `[ ]` in `muted` otherwise.
 - Inline code and blocks on `panel`. Blocks have a `line` border, and the `$` prompt is `muted`.
 - Code highlighting adds no color: comments in `muted`, keywords, types and numbers in `accent-text`, strings in `ok`, titles at 600.
@@ -251,6 +252,14 @@ The short message after an action, such as `moved to trash` or `link copied`, at
 - `bg` surface, 1px `ink` border, no shadow, mono 13px, inside a `status` region that exists only while it shows.
 - At most one action, a secondary button (`undo`). When it has one, the notice takes focus, so a keyboard reaches it without hunting.
 - It goes after 8 seconds, unless the pointer or focus is on it.
+
+### Loading skeleton
+
+The shape of what is loading, in place of an empty screen: a page (its title, then lines of text), the tree's spaces, the search results. Brut has none, so it is drawn from the tokens.
+
+- Bars in `line`, square, with no border, text or shadow: a title bar 34px high on 60% of `measure` for a page, then 12px bars at the body's line height; `row-height` rows for the tree; a title bar and an excerpt bar per result for search.
+- It shows only after 300ms, so a load faster than that does not flash. A page keeps one skeleton from its read to its first sync, so nothing empty shows in between.
+- It never moves (see [Motion](#motion)). For screen readers it is a `status` region whose only text is `loading…` (or `searching…`), hidden on screen; the bars are hidden from them.
 
 ### Comments
 

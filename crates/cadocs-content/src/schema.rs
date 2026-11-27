@@ -61,6 +61,10 @@ const CELL: &[(&str, Default)] = &[
     ("rowspan", Default::Int(1)),
 ];
 
+/// The heading levels the editor offers. Part of the schema file, so of its fingerprint, since an
+/// editor lacking a level turns such a heading into a paragraph once its caret leaves it.
+pub const HEADING_LEVELS: u8 = 6;
+
 pub const NODES: &[NodeSpec] = &[
     block("doc", "block+", "", &[]),
     block("paragraph", "inline*", "block", &[]),

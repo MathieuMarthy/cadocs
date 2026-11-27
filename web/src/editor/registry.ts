@@ -17,11 +17,11 @@ import StarterKit from "@tiptap/starter-kit";
 
 import { FileBlock, ImageBlock } from "./attachments";
 import { Callout, PluginBlock, TableOfContents, Toggle } from "./blocks";
-import { lowlight } from "./code";
+import { CodeIndent, lowlight } from "./code";
 import { CodePreview, InlineMath } from "./math";
 import { Mention } from "./mention";
 import { PageLink } from "./pagelink";
-import { TableMenuOnRightClick, TableWithControls } from "./table";
+import { CELL_MIN_WIDTH, ColumnResizing, TableMenuOnRightClick, TableWithControls } from "./table";
 import { MarkdownSource, quietInSource } from "./source";
 import { type Key, t } from "../lib/i18n";
 
@@ -79,7 +79,10 @@ const tableCommand = (
   when: inTable,
 });
 
-const heading = (level: 1 | 2 | 3): SlashCommand => ({
+/** In the schema file too (`HEADING_LEVELS`), so a tab lacking a level reloads (ADR 0016). */
+export const levels = [1, 2, 3, 4, 5, 6] as const;
+
+const heading = (level: (typeof levels)[number]): SlashCommand => ({
   get label() {
     return t("slash.heading", { level });
   },
@@ -117,8 +120,8 @@ export const entries: Entry[] = [
   },
   {
     name: "heading",
-    extensions: [quietInSource(Heading).configure({ levels: [1, 2, 3] })],
-    commands: [heading(1), heading(2), heading(3)],
+    extensions: [quietInSource(Heading).configure({ levels: [...levels] })],
+    commands: levels.map((level) => heading(level)),
   },
   {
     name: "lists",
@@ -166,7 +169,7 @@ export const entries: Entry[] = [
   },
   {
     name: "code",
-    extensions: [quietInSource(CodeBlockLowlight).configure({ lowlight, defaultLanguage: null })],
+    extensions: [quietInSource(CodeBlockLowlight).configure({ lowlight, defaultLanguage: null }), CodeIndent],
     commands: [
       {
         get label() {
@@ -274,11 +277,12 @@ export const entries: Entry[] = [
     ],
   },
   {
-    // Column widths are not stored: `resizable` would write them into the document. Writers also
-    // get `+` buttons on the edges and a menu on a cell's right click (`table.ts`).
+    // Writers drag a column's edge (`ColumnResizing`, not `resizable`), get `+` buttons on the
+    // edges and a menu on a cell's right click (`table.ts`).
     name: "table",
     extensions: [
-      TableKit.configure({ table: { resizable: false, View: TableWithControls } }),
+      TableKit.configure({ table: { cellMinWidth: CELL_MIN_WIDTH, View: TableWithControls } }),
+      ColumnResizing,
       TableMenuOnRightClick,
     ],
     commands: [

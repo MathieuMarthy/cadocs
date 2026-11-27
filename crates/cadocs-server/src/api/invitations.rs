@@ -1,17 +1,20 @@
 //! Invitation links (ADR 0013): admins make them, and whoever holds one joins with it.
 
-use axum::extract::{DefaultBodyLimit, State};
+use std::time::Duration;
+
+use axum::extract::{DefaultBodyLimit, RawQuery, State};
 use axum::http::header::CACHE_CONTROL;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
-use cadocs_collab::Authorizer;
+use cadocs_collab::{Authorizer, Event};
 use cadocs_core::permissions::WorkspaceRole;
+use cadocs_mail::{Lang, Mail, Text};
 use cadocs_store::{
-    AccountStore, DocStore, Invitation, InvitationPreview, InvitedUser, StoreError, User,
-    WorkspaceStore, now_ms,
+    AccountStore, DocStore, Invitation, InvitationPreview, InvitedUser, Invitee, Membership,
+    PendingInvitation, StoreError, User, WorkspaceStore, now_ms,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -27,6 +30,13 @@ use crate::session::{self, CurrentSession, new_invitation, token_hash};
 
 const NO_STORE: (axum::http::HeaderName, HeaderValue) =
     (CACHE_CONTROL, HeaderValue::from_static("no-store"));
+/// People one search finds, and the characters it needs: fewer would list the whole instance.
+const INVITEES: u32 = 10;
+const MIN_QUERY_CHARS: usize = 3;
+/// Each account searches this many times at once, then once per `SEARCH_REFILL`: enough to type
+/// a few names, slow to go through the accounts of the instance.
+pub const SEARCH_BURST: u32 = 30;
+pub const SEARCH_REFILL: Duration = Duration::from_secs(1);
 
 pub fn routes<S, A>(state: &AppState<S, A>) -> Router<AppState<S, A>>
 where
@@ -46,7 +56,11 @@ where
         );
     let authenticated = Router::new()
         .route("/workspaces/{ws}/invitations", get(list).post(create))
+        .route("/workspaces/{ws}/invitees", get(invitees))
         .route("/invitations/{token}", delete(revoke))
+        .route("/me/invitations", get(pending))
+        .route("/me/invitations/{id}", delete(decline))
+        .route("/me/invitations/{id}/accept", post(accept_pending))
         .route_layer(from_fn_with_state(state.clone(), session::require::<S, A>));
     public
         .merge(authenticated)
@@ -123,7 +137,19 @@ async fn create<S: WorkspaceStore, A>(
     let public_url = &state.http.public_url;
     let (link, new) = new_invitation(public_url, &workspace, email, role, &current.user.id)
         .map_err(ApiError::internal)?;
-    state.store.create_invitation(&new).await?;
+    let invitee = state.store.create_invitation(&new).await?;
+    if let Some(user) = invitee {
+        state
+            .registry
+            .publish_to_user(Event::invitation(&user, &new.id));
+    }
+    // Past the limit of the address, the admin still has the link to give by hand.
+    if state.mail.is_some() && state.mail_addresses.check(&new.email) {
+        let mailed = mail_invitation(&state, &workspace, &current.user, &new.email, &link).await;
+        if let Err(error) = mailed {
+            tracing::warn!("an invitation could not be mailed, {error}");
+        }
+    }
     let invitation = InvitationBody {
         id: new.id,
         email: new.email,
@@ -134,6 +160,36 @@ async fn create<S: WorkspaceStore, A>(
     };
     let body = CreatedBody { invitation, link };
     Ok((StatusCode::CREATED, [NO_STORE], Json(body)).into_response())
+}
+
+/// In the language of the workspace, which the invited person is about to join (step 62).
+async fn mail_invitation<S: WorkspaceStore, A>(
+    state: &AppState<S, A>,
+    workspace_id: &str,
+    inviter: &User,
+    email: &str,
+    link: &str,
+) -> Result<(), StoreError> {
+    let Some(outbox) = &state.mail else {
+        return Ok(());
+    };
+    // Gone since, or the inviter with it: the link died too.
+    let Some(workspace) = state.store.workspace(workspace_id, &inviter.id).await? else {
+        return Ok(());
+    };
+    let lang = Lang::of(Some(&workspace.language));
+    let values = [
+        ("who", inviter.name.as_str()),
+        ("workspace", workspace.membership.name.as_str()),
+        ("origin", state.http.public_url.origin()),
+        ("link", link),
+    ];
+    outbox.queue(Mail {
+        to: email.to_owned(),
+        subject: Text::InvitationSubject.get(lang).to_owned(),
+        text: Text::Invitation.fill(lang, &values),
+    });
+    Ok(())
 }
 
 async fn revoke<S: WorkspaceStore, A>(
@@ -254,11 +310,118 @@ async fn join<S: WorkspaceStore, A>(
 ) -> Result<Response, ApiError> {
     let id = &current.user.id;
     let workspaces = state.store.accept_as_user(hash, id, now_ms()).await?;
+    Ok(joined(state, current, workspaces))
+}
+
+fn joined<S, A>(
+    state: &AppState<S, A>,
+    current: CurrentSession,
+    workspaces: Vec<Membership>,
+) -> Response {
     state.access_changed();
-    Ok(session_body(
-        state,
-        current.user,
-        workspaces,
-        &current.token,
-    ))
+    session_body(state, current.user, workspaces, &current.token)
+}
+
+#[derive(Serialize)]
+struct InviteeBody {
+    id: String,
+    name: String,
+    email: String,
+}
+
+#[derive(Serialize)]
+struct Invitees {
+    items: Vec<InviteeBody>,
+}
+
+/// Accounts of the whole instance an admin may invite, an accepted risk (`OPERATIONS.md`).
+async fn invitees<S: WorkspaceStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    PathParam(workspace): PathParam,
+    RawQuery(query): RawQuery,
+) -> Result<Json<Invitees>, ApiError> {
+    let q = super::search::parse(query.as_deref())?.q;
+    let q = q.trim();
+    if q.chars().count() < MIN_QUERY_CHARS {
+        return Err(ApiError::new(ErrorCode::ValidationFailed)
+            .with_message("A search needs 3 characters at least")
+            .with_field("q", "too_short"));
+    }
+    if let Err(wait) = state.people_searches.check(&current.user.id) {
+        return Err(ApiError::rate_limited(wait));
+    }
+    let found = state
+        .store
+        .find_invitees(&workspace, &current.user.id, q, INVITEES)
+        .await?;
+    let items = found
+        .into_iter()
+        .map(|Invitee { id, name, email }| InviteeBody { id, name, email })
+        .collect();
+    Ok(Json(Invitees { items }))
+}
+
+#[derive(Serialize)]
+struct PendingBody {
+    id: String,
+    workspace_id: String,
+    workspace_name: String,
+    role: &'static str,
+    invited_by_name: String,
+    expires_at: i64,
+    created_at: i64,
+}
+
+impl From<PendingInvitation> for PendingBody {
+    fn from(pending: PendingInvitation) -> Self {
+        Self {
+            id: pending.id,
+            workspace_id: pending.workspace_id,
+            workspace_name: pending.workspace_name,
+            role: pending.role.as_str(),
+            invited_by_name: pending.invited_by_name,
+            expires_at: pending.expires_at,
+            created_at: pending.created_at,
+        }
+    }
+}
+
+async fn pending<S: WorkspaceStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    page: PageQuery,
+) -> Result<Json<Page<PendingBody>>, ApiError> {
+    let after = page.cursor.as_deref();
+    let found = state
+        .store
+        .pending_invitations(&current.user.id, now_ms(), after, page.fetch())
+        .await?;
+    Ok(Json(page.cut(found, |row| row.id.clone())))
+}
+
+async fn accept_pending<S: WorkspaceStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    PathParam(invitation): PathParam,
+) -> Result<Response, ApiError> {
+    let id = &current.user.id;
+    let workspaces = state
+        .store
+        .accept_pending(&invitation, id, now_ms())
+        .await?;
+    Ok(joined(&state, current, workspaces))
+}
+
+async fn decline<S: WorkspaceStore, A>(
+    State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
+    PathParam(invitation): PathParam,
+) -> Result<StatusCode, ApiError> {
+    let id = &current.user.id;
+    state
+        .store
+        .decline_pending(&invitation, id, now_ms())
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }

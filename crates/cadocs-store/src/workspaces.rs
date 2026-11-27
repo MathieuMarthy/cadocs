@@ -85,6 +85,26 @@ pub struct InvitationPreview {
     pub has_account: bool,
 }
 
+/// An account an admin may invite: enabled, and not a member.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Invitee {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+}
+
+/// An invitation as the account it was made for sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingInvitation {
+    pub id: String,
+    pub workspace_id: String,
+    pub workspace_name: String,
+    pub role: WorkspaceRole,
+    pub invited_by_name: String,
+    pub expires_at: i64,
+    pub created_at: i64,
+}
+
 /// The account a link makes.
 #[derive(Debug, Clone)]
 pub struct InvitedUser {
@@ -163,11 +183,51 @@ pub trait WorkspaceStore: Send + Sync + 'static {
         user_id: &str,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
-    /// Stores an invitation in place of the last one for that email. Refused with
-    /// `WorkspaceNotFound`, `NotAllowed`, or `AlreadyMember`.
+    /// Stores an invitation in place of the last one for that email, for the account that holds
+    /// the email now, whose id it returns. Refused with `WorkspaceNotFound`, `NotAllowed`, or
+    /// `AlreadyMember`.
     fn create_invitation(
         &self,
         invitation: &NewInvitation,
+    ) -> impl Future<Output = Result<Option<String>, StoreError>> + Send;
+
+    /// At most `limit` enabled accounts that are not members, by name, whose address or a word of
+    /// whose name starts with `query`, whatever the ASCII case. Refused with `WorkspaceNotFound`
+    /// or `NotAllowed` for whoever may not invite.
+    fn find_invitees(
+        &self,
+        workspace_id: &str,
+        actor: &str,
+        query: &str,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<Invitee>, StoreError>> + Send;
+
+    /// At most `limit` usable invitations made for `user_id` while it held the address it still
+    /// holds, oldest first, after the one with the id `after`.
+    fn pending_invitations(
+        &self,
+        user_id: &str,
+        now: i64,
+        after: Option<&str>,
+        limit: u32,
+    ) -> impl Future<Output = Result<Vec<PendingInvitation>, StoreError>> + Send;
+
+    /// Uses one of `pending_invitations` by its id, as `accept_as_user` does, and returns the
+    /// workspaces of the account. Any other id is an `InvitationNotFound`.
+    fn accept_pending(
+        &self,
+        invitation_id: &str,
+        user_id: &str,
+        now: i64,
+    ) -> impl Future<Output = Result<Vec<Membership>, StoreError>> + Send;
+
+    /// Deletes one of `pending_invitations`, its link with it. Any other id is an
+    /// `InvitationNotFound`.
+    fn decline_pending(
+        &self,
+        invitation_id: &str,
+        user_id: &str,
+        now: i64,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// At most `limit` invitations that can still be used, oldest first. Refused with

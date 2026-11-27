@@ -313,6 +313,36 @@ async fn a_notification_is_sent_to_its_user_alone() {
 }
 
 #[tokio::test]
+async fn an_invitation_is_sent_to_the_sockets_of_the_invited_account() {
+    let wiki = wiki().await;
+    let bob = wiki.bob().await;
+    let mut ada_socket = wiki.socket(&wiki.ada).await;
+    let mut bob_socket = wiki.socket(&bob).await;
+    let reply = wiki
+        .call("POST", "/workspaces", json!({ "name": "Other" }))
+        .await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let other = id(&reply);
+
+    // Bob's socket is in another workspace than the one he is invited to.
+    let path = format!("/workspaces/{other}/invitations");
+    let body = json!({ "email": BOB_EMAIL, "role": "member" });
+    let reply = wiki.call("POST", &path, body).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let told = event(&mut bob_socket).await;
+    assert_eq!(told, json!({ "type": "invitation", "id": id(&reply) }));
+
+    // An address with no account tells nobody, and Ada never heard of Bob's.
+    let body = json!({ "email": "eve@example.org", "role": "member" });
+    let reply = wiki.call("POST", &path, body).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let page = wiki.new_page_in(&wiki.space, &wiki.ada).await;
+    let created = page_event("page.created", &wiki.space, &page);
+    assert_eq!(event(&mut ada_socket).await, created);
+    assert_eq!(event(&mut bob_socket).await, created);
+}
+
+#[tokio::test]
 async fn a_move_across_spaces_is_sent_to_both() {
     let wiki = wiki().await;
     let bob = wiki.bob().await;

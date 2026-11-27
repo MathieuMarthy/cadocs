@@ -8,8 +8,9 @@ use sqlx::{AssertSqlSafe, Row, SqliteConnection};
 use super::accounts::{INSERT_SESSION, membership, select_memberships};
 use super::{BEGIN_WRITE, SqliteStore, mentions, search};
 use crate::{
-    Invitation, InvitationPreview, InvitedUser, MAX_SLUG_CHARS, Member, Membership, NewInvitation,
-    NewSession, NewWorkspace, StoreError, Workspace, WorkspaceChanges, WorkspaceStore,
+    Invitation, InvitationPreview, InvitedUser, Invitee, MAX_SLUG_CHARS, Member, Membership,
+    NewInvitation, NewSession, NewWorkspace, PendingInvitation, StoreError, Workspace,
+    WorkspaceChanges, WorkspaceStore,
 };
 
 const SELECT_WORKSPACE: &str =
@@ -24,6 +25,13 @@ pub(super) const SELECT_MEMBER: &str =
 
 const SELECT_USABLE: &str = "SELECT id, workspace_id, email, role FROM workspace_invitations
      WHERE token_hash = ?1 AND expires_at > ?2";
+
+/// The invitations of `?1` it may use by id at `?2`: made for it while it held the address it
+/// still holds, so an address taken since the invitation needs the link.
+const FROM_PENDING: &str = "FROM workspace_invitations i
+     JOIN users u ON u.id = i.invitee_id AND u.email = i.email AND u.disabled_at IS NULL
+     JOIN workspaces w ON w.id = i.workspace_id JOIN users b ON b.id = i.invited_by
+     WHERE i.invitee_id = ?1 AND i.expires_at > ?2";
 
 const INSERT_MEMBER: &str =
     "INSERT INTO workspace_members (workspace_id, user_id, role, created_at)
@@ -427,22 +435,24 @@ impl WorkspaceStore for SqliteStore {
         Ok(())
     }
 
-    async fn create_invitation(&self, new: &NewInvitation) -> Result<(), StoreError> {
+    async fn create_invitation(&self, new: &NewInvitation) -> Result<Option<String>, StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
         let action = WorkspaceAction::ManageInvitations;
         authorize(&mut tx, &new.workspace_id, &new.invited_by, action).await?;
 
-        let member: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM workspace_members m JOIN users u ON u.id = m.user_id
-                            WHERE m.workspace_id = ?1 AND u.email = ?2)",
+        let holder: Option<(String, bool)> = sqlx::query_as(
+            "SELECT u.id, EXISTS (SELECT 1 FROM workspace_members m
+                                  WHERE m.workspace_id = ?1 AND m.user_id = u.id)
+             FROM users u WHERE u.email = ?2",
         )
         .bind(&new.workspace_id)
         .bind(&new.email)
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
-        if member {
+        if holder.as_ref().is_some_and(|(_, member)| *member) {
             return Err(StoreError::AlreadyMember);
         }
+        let invitee = holder.map(|(id, _)| id);
 
         sqlx::query("DELETE FROM workspace_invitations WHERE workspace_id = ?1 AND email = ?2")
             .bind(&new.workspace_id)
@@ -450,9 +460,9 @@ impl WorkspaceStore for SqliteStore {
             .execute(&mut *tx)
             .await?;
         sqlx::query(
-            "INSERT INTO workspace_invitations
-                 (id, workspace_id, email, role, token_hash, invited_by, expires_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO workspace_invitations (id, workspace_id, email, role, token_hash,
+                                                invited_by, expires_at, created_at, invitee_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )
         .bind(&new.id)
         .bind(&new.workspace_id)
@@ -462,9 +472,124 @@ impl WorkspaceStore for SqliteStore {
         .bind(&new.invited_by)
         .bind(new.expires_at)
         .bind(new.now)
+        .bind(&invitee)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
+        Ok(invitee)
+    }
+
+    async fn find_invitees(
+        &self,
+        workspace_id: &str,
+        actor: &str,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<Invitee>, StoreError> {
+        let mut reader = self.reader.acquire().await?;
+        let action = WorkspaceAction::ManageInvitations;
+        authorize(&mut reader, workspace_id, actor, action).await?;
+        let escaped = query
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let rows = sqlx::query(
+            "SELECT u.id, u.name, u.email FROM users u
+             WHERE u.disabled_at IS NULL
+               AND (u.email LIKE ?2 || '%' ESCAPE '\\' OR u.name LIKE ?2 || '%' ESCAPE '\\'
+                    OR u.name LIKE '% ' || ?2 || '%' ESCAPE '\\')
+               AND NOT EXISTS (SELECT 1 FROM workspace_members m
+                               WHERE m.workspace_id = ?1 AND m.user_id = u.id)
+             ORDER BY u.name, u.id LIMIT ?3",
+        )
+        .bind(workspace_id)
+        .bind(escaped)
+        .bind(limit)
+        .fetch_all(&mut *reader)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| Invitee {
+                id: row.get("id"),
+                name: row.get("name"),
+                email: row.get("email"),
+            })
+            .collect())
+    }
+
+    async fn pending_invitations(
+        &self,
+        user_id: &str,
+        now: i64,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<PendingInvitation>, StoreError> {
+        let rows = sqlx::query(AssertSqlSafe(format!(
+            "SELECT i.id, i.workspace_id, w.name AS workspace_name, i.role,
+                    b.name AS invited_by_name, i.expires_at, i.created_at
+             {FROM_PENDING} AND i.id > coalesce(?3, '')
+             ORDER BY i.id LIMIT ?4"
+        )))
+        .bind(user_id)
+        .bind(now)
+        .bind(after)
+        .bind(limit)
+        .fetch_all(&self.reader)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| PendingInvitation {
+                id: row.get("id"),
+                workspace_id: row.get("workspace_id"),
+                workspace_name: row.get("workspace_name"),
+                role: role(row),
+                invited_by_name: row.get("invited_by_name"),
+                expires_at: row.get("expires_at"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+
+    async fn accept_pending(
+        &self,
+        invitation_id: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<Vec<Membership>, StoreError> {
+        let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        let invitation = sqlx::query(AssertSqlSafe(format!(
+            "SELECT i.id, i.workspace_id, i.role {FROM_PENDING} AND i.id = ?3"
+        )))
+        .bind(user_id)
+        .bind(now)
+        .bind(invitation_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(StoreError::InvitationNotFound)?;
+        join(&mut tx, &invitation, user_id, now).await?;
+        let memberships = select_memberships(&mut *tx, user_id, None, -1).await?;
+        tx.commit().await?;
+        Ok(memberships)
+    }
+
+    async fn decline_pending(
+        &self,
+        invitation_id: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let done = sqlx::query(AssertSqlSafe(format!(
+            "DELETE FROM workspace_invitations
+             WHERE id = (SELECT i.id {FROM_PENDING} AND i.id = ?3)"
+        )))
+        .bind(user_id)
+        .bind(now)
+        .bind(invitation_id)
+        .execute(&self.writer)
+        .await?;
+        if done.rows_affected() == 0 {
+            return Err(StoreError::InvitationNotFound);
+        }
         Ok(())
     }
 

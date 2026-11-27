@@ -265,6 +265,27 @@ fn the_title_reads_from_its_own_root() {
 }
 
 #[test]
+fn a_dragged_width_with_a_fraction_keeps_its_column() {
+    // A merged cell's width is its DOM width shared out, and the pointer moves by fractions.
+    let doc = Doc::new();
+    let fragment = doc.get_or_insert_xml_fragment(yjs::FRAGMENT);
+    {
+        let mut txn = doc.transact_mut();
+        let table = fragment.push_back(&mut txn, XmlElementPrelim::empty("table"));
+        let row = table.push_back(&mut txn, XmlElementPrelim::empty("tableRow"));
+        let cell = row.push_back(&mut txn, XmlElementPrelim::empty("tableCell"));
+        cell.insert_attribute(&mut txn, "colspan", Any::from(2.0));
+        let widths: Vec<Any> = vec![Any::from(150.5), Any::from(0.0)];
+        cell.insert_attribute(&mut txn, "colwidth", Any::Array(widths.into()));
+        cell.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
+    }
+    let Some(Block::Table(rows)) = yjs::read_doc(&doc).blocks.into_iter().next() else {
+        panic!("no table");
+    };
+    assert_eq!(rows[0].cells[0].colwidth, Some(vec![151, 0]));
+}
+
+#[test]
 fn odd_children_of_lists_and_tables_keep_their_text() {
     let doc = Doc::new();
     let fragment = doc.get_or_insert_xml_fragment(yjs::FRAGMENT);

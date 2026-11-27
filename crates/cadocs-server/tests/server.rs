@@ -25,14 +25,15 @@ use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, CodeAttempt,
     CommentChange, CommentStore, Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant,
     Group, GroupStore, IdentityUser, IndexTarget, Indexed, Invitation, InvitationPreview,
-    InvitedUser, MailDigest, Member, Membership, MovedPage, NewAttachment, NewComment,
+    InvitedUser, Invitee, MailDigest, Member, Membership, MovedPage, NewAttachment, NewComment,
     NewEmailCode, NewGrant, NewGroup, NewInvitation, NewPage, NewPasswordReset, NewRevision,
     NewSession, NewShare, NewSpace, NewTemplate, NewUser, NewWorkspace, PageCopy, PageCrumb,
-    PageIndex, PageMove, PageRecord, PageSite, PageStore, Revision, RevisionStore, RevisionSummary,
-    SearchHit, SearchStore, SessionStanding, Share, ShareStore, SharedPage, SharedView, Snapshot,
-    Space, SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, SubtreePage,
-    Template, TemplateStore, TemplateToUse, Thread, TotpProof, UpdateBasis, UploadTarget,
-    UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
+    PageIndex, PageMove, PageRecord, PageSite, PageStore, PendingInvitation, Revision,
+    RevisionStore, RevisionSummary, SearchHit, SearchStore, SessionStanding, Share, ShareStore,
+    SharedPage, SharedView, Snapshot, Space, SpaceChanges, SpaceStore, SqliteStore, StoreError,
+    StoredDoc, StoredUpdate, SubtreePage, Template, TemplateStore, TemplateToUse, Thread,
+    TotpProof, UpdateBasis, UploadTarget, UserChanges, UserRecord, Workspace, WorkspaceChanges,
+    WorkspaceReach, WorkspaceStore, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use rust_embed::Embed;
@@ -729,8 +730,46 @@ impl WorkspaceStore for FlakyStore {
         self.inner.remove_member(id, actor, user_id).await
     }
 
-    async fn create_invitation(&self, invitation: &NewInvitation) -> Result<(), StoreError> {
+    async fn create_invitation(
+        &self,
+        invitation: &NewInvitation,
+    ) -> Result<Option<String>, StoreError> {
         self.inner.create_invitation(invitation).await
+    }
+
+    async fn find_invitees(
+        &self,
+        id: &str,
+        actor: &str,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<Invitee>, StoreError> {
+        self.inner.find_invitees(id, actor, query, limit).await
+    }
+
+    async fn pending_invitations(
+        &self,
+        user_id: &str,
+        now: i64,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<PendingInvitation>, StoreError> {
+        self.inner
+            .pending_invitations(user_id, now, after, limit)
+            .await
+    }
+
+    async fn accept_pending(
+        &self,
+        id: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<Vec<Membership>, StoreError> {
+        self.inner.accept_pending(id, user_id, now).await
+    }
+
+    async fn decline_pending(&self, id: &str, user_id: &str, now: i64) -> Result<(), StoreError> {
+        self.inner.decline_pending(id, user_id, now).await
     }
 
     async fn list_invitations(

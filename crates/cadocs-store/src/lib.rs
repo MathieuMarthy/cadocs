@@ -46,8 +46,8 @@ pub use spaces::{
 pub use sqlite::SqliteStore;
 pub use templates::{MAX_TEMPLATES, NewTemplate, Template, TemplateStore, TemplateToUse};
 pub use workspaces::{
-    Invitation, InvitationPreview, InvitedUser, MAX_SLUG_CHARS, Member, NewInvitation,
-    NewWorkspace, Workspace, WorkspaceChanges, WorkspaceStore,
+    Invitation, InvitationPreview, InvitedUser, Invitee, MAX_SLUG_CHARS, Member, NewInvitation,
+    NewWorkspace, PendingInvitation, Workspace, WorkspaceChanges, WorkspaceStore,
 };
 
 /// The current time as stored: milliseconds since the Unix epoch.

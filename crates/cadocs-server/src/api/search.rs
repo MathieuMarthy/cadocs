@@ -86,13 +86,13 @@ impl From<Segment> for Piece {
     }
 }
 
-struct SearchQuery {
-    q: String,
+pub(super) struct SearchQuery {
+    pub(super) q: String,
     space: Option<String>,
 }
 
 /// `q` and `space`. `+` is a space, as `URLSearchParams` writes it.
-fn parse(query: Option<&str>) -> Result<SearchQuery, ApiError> {
+pub(super) fn parse(query: Option<&str>) -> Result<SearchQuery, ApiError> {
     let invalid = |problem| {
         ApiError::new(ErrorCode::ValidationFailed)
             .with_message("A search needs 1 to 200 characters")
