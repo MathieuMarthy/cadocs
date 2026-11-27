@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use cadocs_content::ast::{Block, Document};
 use cadocs_content::yjs::{FRAGMENT, TITLE, write};
-use common::{Api, Login, Reply, logged_in};
-use futures_util::SinkExt;
+use common::{Api, Login, ORIGIN, Reply, logged_in};
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use tokio::time::{Instant, sleep};
+use tokio::time::{Instant, sleep, timeout};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -477,6 +477,48 @@ async fn the_reindex_records_the_members_the_body_mentions() {
     }
     assert_eq!(wiki.api.number(&recorded).await, 1);
     assert_eq!(wiki.api.number("SELECT count(*) FROM mentions").await, 1);
+}
+
+#[tokio::test]
+async fn a_body_mention_is_sent_live_to_its_user() {
+    let wiki = wiki().await;
+    let space = wiki.space("Open", json!("viewer")).await;
+    let page = wiki.page(&space).await;
+    let url = format!(
+        "ws://{}/ws/events?workspace={}",
+        wiki.api.addr, wiki.workspace
+    );
+    let mut request = url.into_client_request().unwrap();
+    let headers = request.headers_mut();
+    headers.insert(COOKIE, wiki.bob.cookie.parse().unwrap());
+    headers.insert("origin", ORIGIN.parse().unwrap());
+    let (mut events, _) = connect_async(request).await.unwrap();
+
+    let mention = cadocs_content::ast::Inline::Mention { id: BOB.to_owned() };
+    wiki.write(&page, "Plan", vec![Block::Paragraph(vec![mention])])
+        .await;
+
+    // The page's own events come first: the reindex follows the flush.
+    let told = timeout(PATIENCE, async {
+        loop {
+            match events.next().await {
+                Some(Ok(Message::Text(text))) => {
+                    let event: Value = serde_json::from_str(&text).unwrap();
+                    if event["type"] == "notification" {
+                        return event;
+                    }
+                }
+                Some(Ok(_)) => {}
+                other => panic!("expected an event, got {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("a notification");
+    let inbox = wiki.api.get(&wiki.bob, "/me/notifications").await;
+    assert_eq!(inbox.body["items"][0]["kind"], "mention");
+    let id = inbox.body["items"][0]["id"].clone();
+    assert_eq!(told, json!({ "type": "notification", "id": id }));
 }
 
 fn link_to(page: &str) -> Block {

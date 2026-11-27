@@ -38,7 +38,7 @@ pub use revisions::{
     CREATE_REVISION, NewRevision, Revision, RevisionAuthor, RevisionStore, RevisionSummary,
     RevisionTiming, THIN_REVISIONS,
 };
-pub use search::{IndexTarget, PageIndex, REINDEX_PAGE, SearchHit, SearchStore};
+pub use search::{IndexTarget, Indexed, PageIndex, REINDEX_PAGE, SearchHit, SearchStore};
 pub use shares::{NewShare, Share, ShareStore, SharedPage, SharedView};
 pub use spaces::{
     Grant, GrantTarget, NewGrant, NewSpace, Space, SpaceChanges, SpaceStore, WorkspaceReach,

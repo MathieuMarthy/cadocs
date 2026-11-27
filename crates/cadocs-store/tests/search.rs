@@ -305,12 +305,19 @@ async fn the_target_of_an_index_is_the_language_of_the_workspace() {
 #[tokio::test]
 async fn indexing_twice_replaces_the_text() {
     let (store, dir) = open().await;
-    assert!(store.index_page(&index("doc", "first", &[])).await.unwrap());
+    assert!(
+        store
+            .index_page(&index("doc", "first", &[]))
+            .await
+            .unwrap()
+            .is_some()
+    );
     assert!(
         store
             .index_page(&index("doc", "second", &[]))
             .await
             .unwrap()
+            .is_some()
     );
 
     let mut connection = connection(&dir.path().join("cadocs.db")).await;
@@ -332,7 +339,13 @@ async fn indexing_twice_replaces_the_text() {
 #[tokio::test]
 async fn indexing_a_page_that_is_gone_does_nothing() {
     let (store, _dir) = open().await;
-    assert!(!store.index_page(&index("gone", "text", &[])).await.unwrap());
+    assert!(
+        store
+            .index_page(&index("gone", "text", &[]))
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]

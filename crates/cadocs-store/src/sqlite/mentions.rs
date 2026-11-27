@@ -1,10 +1,10 @@
 //! Mentions of users by a page's body or by a comment, kept in step with what that text names.
 
 use cadocs_core::permissions::SpaceAction;
-use sqlx::{AssertSqlSafe, SqliteConnection};
+use sqlx::{AssertSqlSafe, Row, SqliteConnection};
 
 use super::pages;
-use crate::{MAIL_NOTIFICATIONS, StoreError};
+use crate::{MAIL_NOTIFICATIONS, Notified, StoreError};
 
 /// Those of `users` who may read the page now: no one else is told about it, so that rows they
 /// would never see take no place in their inbox.
@@ -34,8 +34,9 @@ pub(super) struct Place<'a> {
 
 /// Makes the mentions of `place` those of `users`: a user no longer named, or no longer a member,
 /// loses their row, a user named anew gets one by `author`, and a user still named keeps theirs as
-/// it was, read or not. A user named anew, `author` apart, is told of it (`notifications`). Only members of the workspace are recorded: anyone else is an id no one
-/// may be told about.
+/// it was, read or not. A user named anew, `author` apart, is told of it (`notifications`), and
+/// answered. Only members of the workspace are recorded: anyone else is an id no one may be told
+/// about.
 pub(super) async fn replace(
     conn: &mut SqliteConnection,
     place: &Place<'_>,
@@ -43,7 +44,7 @@ pub(super) async fn replace(
     author: Option<&str>,
     now: i64,
     mail_at: i64,
-) -> Result<(), StoreError> {
+) -> Result<Vec<Notified>, StoreError> {
     let users = serde_json::to_string(users).expect("strings make JSON");
     // Only those who would be told are checked, each with a query, in the writer's transaction.
     let named_anew: Vec<String> = sqlx::query_scalar(
@@ -99,14 +100,15 @@ pub(super) async fn replace(
     .bind(&users)
     .execute(&mut *conn)
     .await?;
-    sqlx::query(
+    let notified = sqlx::query(
         "INSERT INTO notifications (id, user_id, kind, page_id, comment_id, actor_id, created_at)
          SELECT lower(hex(randomblob(16))), m.user_id, 'mention', ?1, ?2, ?5, ?6
          FROM workspace_members m
          WHERE m.workspace_id = ?4 AND m.user_id IN (SELECT value FROM json_each(?3))
            AND m.user_id IS NOT ?5
            AND NOT EXISTS (SELECT 1 FROM mentions x
-                           WHERE x.page_id = ?1 AND x.comment_id IS ?2 AND x.user_id = m.user_id)",
+                           WHERE x.page_id = ?1 AND x.comment_id IS ?2 AND x.user_id = m.user_id)
+         RETURNING id, user_id",
     )
     .bind(place.page_id)
     .bind(place.comment_id)
@@ -114,8 +116,14 @@ pub(super) async fn replace(
     .bind(place.workspace_id)
     .bind(author)
     .bind(now)
-    .execute(&mut *conn)
-    .await?;
+    .fetch_all(&mut *conn)
+    .await?
+    .iter()
+    .map(|row| Notified {
+        id: row.get("id"),
+        user_id: row.get("user_id"),
+    })
+    .collect();
     sqlx::query(
         "INSERT INTO mentions (id, user_id, page_id, comment_id, author_id, created_at)
          SELECT lower(hex(randomblob(16))), m.user_id, ?1, ?2, ?5, ?6
@@ -132,7 +140,8 @@ pub(super) async fn replace(
     .bind(now)
     .execute(&mut *conn)
     .await?;
-    queue_mail(conn, now, mail_at).await
+    queue_mail(conn, now, mail_at).await?;
+    Ok(notified)
 }
 
 /// Queues, for each user who wants mail and has a notification no message told, the job that
