@@ -265,11 +265,20 @@
     if (done) signOut();
   }
 
-  /** An account with no password deletes itself only from a fresh login. */
-  async function logInAgain() {
-    if (await removal.run(() => api("POST", "/auth/logout"))) signOut();
+  /** An account with no password links a provider or deletes itself only from a fresh login. */
+  async function logInAgain(form: Form) {
+    if (await form.run(() => api("POST", "/auth/logout"))) signOut();
   }
 </script>
+
+{#snippet stale(form: Form)}
+  <p class="problem" role="alert">{t("account.stale")}</p>
+  <div class="actions">
+    <button class="button" type="button" disabled={form.busy} onclick={() => logInAgain(form)}>
+      {t("account.logInAgain")}
+    </button>
+  </div>
+{/snippet}
 
 <Shell title={t("shell.account")} crumbWorkspace={false}>
   <h1>{t("shell.account")}</h1>
@@ -435,6 +444,7 @@
         <p class="problem" role="alert">{t("account.ssoFailed")}</p>
       {/if}
       {#if sso.problem}<p class="problem" role="alert">{sso.problem}</p>{/if}
+      {#if sso.fields.session}{@render stale(sso)}{/if}
       {#if hasPassword && providers.some((id) => !linked.includes(id))}
         <Field
           label={t("form.currentPassword")}
@@ -560,14 +570,7 @@
       />
     {/if}
     {#if removal.problem}<p class="problem" role="alert">{removal.problem}</p>{/if}
-    {#if removal.fields.session}
-      <p class="problem" role="alert">{t("account.deleteStale")}</p>
-      <div class="actions">
-        <button class="button" type="button" disabled={removal.busy} onclick={logInAgain}>
-          {t("account.logInAgain")}
-        </button>
-      </div>
-    {/if}
+    {#if removal.fields.session}{@render stale(removal)}{/if}
     <div class="actions">
       <Confirm
         label={t("account.delete")}

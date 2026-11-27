@@ -19,7 +19,8 @@ use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use super::auth::{
-    MAX_NAME_CHARS, PasswordRequest, clean_email, clean_name, new_session, require_password,
+    MAX_NAME_CHARS, PasswordRequest, clean_email, clean_name, new_session,
+    require_password_or_fresh_session,
 };
 use super::{ApiError, ErrorCode, JsonBody, PathParam, rate_limit};
 use crate::config::{HttpConfig, Registration};
@@ -173,11 +174,9 @@ async fn start_link<S: AccountStore, A>(
 ) -> Result<Response, ApiError> {
     let provider = provider(&state, &id)?;
     // A provider is a way in that skips this account's factors: a stolen session must not tie its
-    // own. An account with no password has none to give, and only its provider to prove it by.
-    let (_, has_password) = state.store.identities(&current.user.id).await?;
-    if has_password {
-        require_password(&state, &current, (peer, &headers), body.current_password).await?;
-    }
+    // own. An account with no password proves itself by a fresh login instead.
+    let client = (peer, &headers);
+    require_password_or_fresh_session(&state, &current, client, body.current_password).await?;
     let Some((url, cookie)) = begin(&state, provider, Some(&current.user.id)).await else {
         return Err(
             ApiError::new(ErrorCode::Unavailable).with_message("The provider cannot be reached")

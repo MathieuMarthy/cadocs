@@ -210,7 +210,8 @@ pub struct CodeAttempt<'a> {
 pub struct UpdateBasis<'a> {
     /// The hash of the session making the change.
     pub session: &'a str,
-    /// The password hash the caller verified, if the change needed that.
+    /// The password hash the caller verified, if the change needed that. Where a basis is
+    /// checked with `None`, the account must have no password.
     pub checked_hash: Option<&'a str>,
 }
 

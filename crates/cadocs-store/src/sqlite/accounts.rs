@@ -161,7 +161,7 @@ async fn check_basis(
     let holds: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM sessions s JOIN users u ON u.id = s.user_id
                         WHERE s.token_hash = ?1 AND u.id = ?2
-                          AND (?3 IS NULL OR u.password_hash = ?3))",
+                          AND u.password_hash IS ?3)",
     )
     .bind(basis.session)
     .bind(user_id)

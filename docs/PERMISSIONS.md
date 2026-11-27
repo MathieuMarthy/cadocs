@@ -80,7 +80,7 @@ A workspace always keeps at least one owner. Any change that would remove the la
 
 Whoever creates a workspace owns it (ADR 0024).
 
-Deleting one's own account needs the current password, or for an account with none, made by a provider, a session opened in the last 10 minutes ([API.md](API.md#auth-and-session)), so that a stolen session cannot do it.
+Deleting one's own account, or linking a provider to it, needs the current password, or for an account with none, made by a provider, a session opened in the last 10 minutes ([API.md](API.md#auth-and-session)), so that a stolen session cannot do it. An instance admin deletes their own account that way too, never through the administration routes.
 
 Installing plugin code is not an instance action: only the operator does it, on the server (ADR 0016).
 

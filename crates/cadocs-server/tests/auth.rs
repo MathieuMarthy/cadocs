@@ -735,6 +735,11 @@ async fn a_deletion_checked_against_an_old_password_is_refused() {
             session: "revoked",
             checked_hash: None,
         },
+        // No password checked: only an account that has none.
+        UpdateBasis {
+            session: &session,
+            checked_hash: None,
+        },
     ];
     for basis in stale {
         let result = api.store.delete_user("other", Some(&basis)).await;

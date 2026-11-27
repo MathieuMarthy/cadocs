@@ -410,7 +410,7 @@ export const en = {
   "account.recoveryNew": "new recovery codes",
   "account.delete": "delete account",
   "account.deleteHint": "this removes the account for good",
-  "account.deleteStale": "an account with no password is deleted within 10 minutes of a login: log in again first",
+  "account.stale": "with no password, this needs a login of the last 10 minutes: log in again first",
   "account.logInAgain": "log in again",
 
   "admin.users": "users",

@@ -666,6 +666,36 @@ async fn a_stolen_session_cannot_tie_its_own_provider_to_an_account_with_a_passw
     assert_eq!(set_cookie(&wrong, "__Host-oidc"), None);
 }
 
+/// An account with no password has only a fresh login to give: an old session, maybe stolen,
+/// must not tie the thief's own identity to it (step 67).
+#[tokio::test]
+async fn an_old_session_cannot_tie_a_provider_to_an_account_without_a_password() {
+    let fake = fake_provider().await;
+    let api = server(&fake, &[]).await;
+    api.setup().await;
+    let reply = api.oidc_login(&fake, "grace-1", "grace@example.org").await;
+    let cookie = set_cookie(&reply, common::COOKIE).unwrap();
+    let session = api
+        .raw("GET", "/session", &[("cookie", &cookie)], b"")
+        .await;
+    let grace = Login {
+        cookie,
+        csrf: session.body["csrf_token"].as_str().unwrap().to_owned(),
+    };
+    let path = "/me/identities/fake";
+    api.sql("UPDATE sessions SET created_at = created_at - 11 * 60 * 1000")
+        .await;
+    let old = api.send("POST", path, &grace.headers(), json!({})).await;
+    assert_eq!(old.status, 400, "{old:?}");
+    assert_eq!(old.body["error"]["fields"], json!({ "session": "too_old" }));
+    assert_eq!(set_cookie(&old, "__Host-oidc"), None);
+
+    api.sql("UPDATE sessions SET created_at = created_at + 2 * 60 * 1000")
+        .await;
+    let fresh = api.send("POST", path, &grace.headers(), json!({})).await;
+    assert_eq!(fresh.status, 200, "{fresh:?}");
+}
+
 /// A reset proves who holds the account, so it unties every provider: someone who claimed an
 /// address through a provider that does not prove it, or tied one to a stolen session, loses the
 /// account once its owner takes it back.
