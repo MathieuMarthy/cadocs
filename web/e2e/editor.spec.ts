@@ -537,6 +537,90 @@ test("a code block shows its language, and its fence edits it", async ({ left, r
   await expectText(block(right).locator("code"), "fn main() {}");
 });
 
+test("Tab indents the selected lines of a code block, Shift-Tab outdents them", async ({
+  left,
+  right,
+}) => {
+  await bothOnline(left, right);
+  await editor(left).click();
+  await left.keyboard.type("```js ");
+  await left.keyboard.type("a();");
+  await left.keyboard.press("Enter");
+  await left.keyboard.type("b();");
+  const code = (page: Page) => editor(page).locator("pre code");
+  await left.keyboard.press("Home");
+  await left.keyboard.press("Tab");
+  await expectText(code(right), "a();\n  b();");
+  // A selection from the middle of a line still indents that whole line.
+  await left.keyboard.press("Shift+ArrowUp");
+  await left.keyboard.press("Tab");
+  await expectText(code(right), "  a();\n    b();");
+  await left.keyboard.press("Shift+Tab");
+  await expectText(code(right), "a();\n  b();");
+  await left.keyboard.press("Shift+Tab");
+  await expectText(code(right), "a();\nb();");
+  await expect(editor(left)).toBeFocused();
+
+  // The way out: Escape, then Tab leaves the editor as anywhere else.
+  await left.keyboard.press("Escape");
+  await left.keyboard.press("Tab");
+  await expect(editor(left)).not.toBeFocused();
+  await expectText(code(right), "a();\nb();");
+});
+
+test("the caret in a code block shows its fence, and a click on it edits the language", async ({
+  left,
+  right,
+}) => {
+  await bothOnline(left, right);
+  await editor(left).click();
+  await left.keyboard.type("``` ");
+  await left.keyboard.type("plain");
+  await expect(editor(left).locator("pre .md-hint")).toHaveText("```");
+  await left.keyboard.press("Enter");
+  await left.keyboard.press("Enter");
+  await left.keyboard.press("Enter");
+  await expect(editor(left).locator(".md-hint")).toHaveCount(0);
+  await left.keyboard.type("```rust ");
+  await left.keyboard.type("fn main() {}");
+  const block = (page: Page) => editor(page).locator("pre").nth(1);
+  await expect(block(left).locator(".md-hint")).toHaveText("```rust");
+  await expect(editor(right).locator(".md-hint")).toHaveCount(0);
+
+  await block(left).locator(".md-hint").click();
+  await expectText(block(right).locator("code"), "```rust\nfn main() {}");
+  // Tab leaves a written fence alone, or the block would no longer read as code.
+  await left.keyboard.press("Home");
+  await left.keyboard.press("Tab");
+  await left.keyboard.press("Shift+ArrowDown");
+  await left.keyboard.press("Shift+End");
+  await left.keyboard.press("Tab");
+  await expectText(block(right).locator("code"), "```rust\n  fn main() {}");
+  await left.keyboard.press("Control+Home");
+  await expect(block(right)).toHaveAttribute("data-language", "rust");
+  await expectText(block(right).locator("code"), "  fn main() {}");
+
+  await block(left).locator("code").click();
+  await block(left).locator(".md-hint").click();
+  for (let i = 0; i < 4; i++) await left.keyboard.press("Backspace");
+  await left.keyboard.type("python");
+  await left.keyboard.press("Control+Home");
+  await expect(block(right)).toHaveAttribute("data-language", "python");
+  await expectText(block(right).locator("code"), "  fn main() {}");
+});
+
+test("Escape, then Tab leaves the editor from code in a table cell too", async ({ left, right }) => {
+  await bothOnline(left, right);
+  await editor(left).click();
+  await command(left, "table");
+  await left.keyboard.type("```js ");
+  await left.keyboard.type("x");
+  await expect(editor(right).locator("td pre, th pre")).toHaveCount(1);
+  await left.keyboard.press("Escape");
+  await left.keyboard.press("Tab");
+  await expect(editor(left)).not.toBeFocused();
+});
+
 test("a source being edited survives the other browser's typing", async ({ left, right }) => {
   await bothOnline(left, right);
   await editor(left).click();

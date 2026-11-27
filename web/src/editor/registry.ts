@@ -17,7 +17,7 @@ import StarterKit from "@tiptap/starter-kit";
 
 import { FileBlock, ImageBlock } from "./attachments";
 import { Callout, PluginBlock, TableOfContents, Toggle } from "./blocks";
-import { lowlight } from "./code";
+import { CodeIndent, lowlight } from "./code";
 import { CodePreview, InlineMath } from "./math";
 import { Mention } from "./mention";
 import { PageLink } from "./pagelink";
@@ -166,7 +166,7 @@ export const entries: Entry[] = [
   },
   {
     name: "code",
-    extensions: [quietInSource(CodeBlockLowlight).configure({ lowlight, defaultLanguage: null })],
+    extensions: [quietInSource(CodeBlockLowlight).configure({ lowlight, defaultLanguage: null }), CodeIndent],
     commands: [
       {
         get label() {

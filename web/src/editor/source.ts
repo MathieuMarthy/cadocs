@@ -1,6 +1,7 @@
 // The Markdown source of a block, shown where the caret is and edited as text (ADR 0018).
 //
-// A heading under the caret shows its hashes beside it, drawn by this tab alone. Arrowing left
+// A heading under the caret shows its hashes beside it, and code its fence above it, drawn by
+// this tab alone. Arrowing left
 // onto them, or Backspace at the start, writes the source into the block as text: `## ` in a
 // heading, `[ ] ` in a task, `- ` in a bullet, `> ` in a quote, the fence line in code, `---` for
 // a divider. The others see that text while it is edited. Once the caret leaves the block, the
@@ -136,7 +137,7 @@ function inside(state: EditorState, pos: number) {
 }
 
 /** Whether `pos` is in the block being edited as source, where shortcuts must not fire. */
-function inSource(state: EditorState, pos: number) {
+export function inSource(state: EditorState, pos: number) {
   const source = key.getState(state)?.pos;
   if (source == null) return false;
   const node = state.doc.nodeAt(source);
@@ -384,7 +385,7 @@ function decorations(state: EditorState, editable: boolean) {
     const block = empty ? blockAt($from) : null;
     const role = roleOf($from);
     // A block another tab is writing out already shows its source as text: a hint would double it.
-    const hinted = role.kind === "heading" || role.kind === "quote";
+    const hinted = role.kind === "heading" || role.kind === "quote" || role.kind === "code";
     if (block !== null && hinted && !looksWritten(role, $from.parent.textContent)) {
       const hint = sourceOf(role)!.trimEnd();
       found.push(Decoration.node(block, block + $from.parent.nodeSize, { class: "md-hinted" }));
