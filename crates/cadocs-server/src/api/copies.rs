@@ -24,6 +24,7 @@ use uuid::Uuid;
 
 use super::attachments::file_error;
 use super::auth::MAX_BODY_BYTES;
+use super::markdown::Absolute;
 use super::pages::{PageBody, new_slug, placement};
 use super::spaces::present;
 use super::{ApiError, ErrorCode, JsonBody, PathParam};
@@ -160,6 +161,14 @@ async fn fill<S: DocStore + PageStore + AttachmentStore, A>(
     let mut files: HashMap<String, Option<String>> = HashMap::new();
     let mut top_title = None;
     let mut space = None;
+    // Links between pages of the subtree lead to their copies, others stay.
+    let pages: HashMap<&str, &str> = pairs
+        .iter()
+        .map(|(source, copy)| (source.as_str(), copy.as_str()))
+        .collect();
+    let links = Absolute {
+        origin: state.http.public_url.origin(),
+    };
     for (source, copy) in pairs {
         // A copy can last minutes: each source is checked again before it is read. One trashed,
         // unreadable or moved out of the space of the first one is gone, and so is the copy.
@@ -187,6 +196,7 @@ async fn fill<S: DocStore + PageStore + AttachmentStore, A>(
             files.insert(id, copied);
         }
         document.map_attachments(&mut |id| files.get(id).cloned().flatten());
+        document.map_pages(&links, &mut |id| pages.get(id).map(|copy| copy.to_string()));
         // Checked again once the room is open, as a load can take long.
         state.registry.open(copy).await?;
         state.store.page_to_edit(copy, user).await?;

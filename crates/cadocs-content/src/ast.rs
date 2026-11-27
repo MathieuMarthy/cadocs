@@ -35,6 +35,51 @@ impl Document {
         });
     }
 
+    /// Points each page link, and each link whose address `links` reads as a page, at the page
+    /// `replace` answers for its id. An address keeps its form, relative or absolute.
+    pub fn map_pages(
+        &mut self,
+        links: &impl crate::Links,
+        replace: &mut impl FnMut(&str) -> Option<String>,
+    ) {
+        visit_mut(&mut self.blocks, &mut |block| {
+            let (Block::Paragraph(inlines)
+            | Block::Heading {
+                content: inlines, ..
+            }
+            | Block::Details {
+                summary: inlines, ..
+            }) = block
+            else {
+                return;
+            };
+            for inline in inlines {
+                match inline {
+                    Inline::PageLink { id } => {
+                        if let Some(new) = replace(id) {
+                            *id = new;
+                        }
+                    }
+                    Inline::Text {
+                        marks:
+                            Marks {
+                                link: Some(link), ..
+                            },
+                        ..
+                    } => {
+                        if let Some(id) = links.page_id(&link.href)
+                            && let Some(start) = link.href.strip_suffix(id.as_str())
+                            && let Some(new) = replace(&id)
+                        {
+                            link.href = format!("{start}{new}");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+
     /// The ids of the pages the content links to, in order, each once: what a renderer needs the
     /// titles of.
     pub fn page_links(&self) -> Vec<String> {

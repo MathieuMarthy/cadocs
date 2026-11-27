@@ -328,6 +328,56 @@ fn page_links_lists_each_linked_page_once() {
 }
 
 #[test]
+fn map_pages_points_page_links_and_links_to_pages_elsewhere() {
+    let page = |id: &str| Inline::PageLink { id: id.to_owned() };
+    let to = |href: &str| {
+        marked(
+            "see",
+            Marks {
+                link: Some(link(href)),
+                ..Marks::default()
+            },
+        )
+    };
+    let mut document = Document {
+        blocks: vec![
+            Block::Paragraph(vec![
+                page("a"),
+                page("out"),
+                to("/?page=a"),
+                to("/?page=out"),
+            ]),
+            Block::BulletList(vec![ListItem {
+                blocks: vec![Block::Details {
+                    summary: vec![page("b"), to("https://example.org/?page=b")],
+                    content: vec![],
+                }],
+            }]),
+        ],
+    };
+    document.map_pages(&cadocs_content::Relative, &mut |id| {
+        ["a", "b"].contains(&id).then(|| format!("{id}2"))
+    });
+    let expected = Document {
+        blocks: vec![
+            Block::Paragraph(vec![
+                page("a2"),
+                page("out"),
+                to("/?page=a2"),
+                to("/?page=out"),
+            ]),
+            Block::BulletList(vec![ListItem {
+                blocks: vec![Block::Details {
+                    summary: vec![page("b2"), to("https://example.org/?page=b")],
+                    content: vec![],
+                }],
+            }]),
+        ],
+    };
+    assert_eq!(document, expected);
+}
+
+#[test]
 fn mentions_lists_each_mentioned_user_once() {
     let mention = |id: &str| Inline::Mention { id: id.to_owned() };
     let document = Document {
