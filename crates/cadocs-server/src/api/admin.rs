@@ -101,11 +101,18 @@ async fn update_user<S: AccountStore, A>(
     Ok(Json(record.into()))
 }
 
+/// One's own account goes through `DELETE /me`, which asks for the password: a stolen admin
+/// session must not skip it here.
 async fn delete_user<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
+    Extension(current): Extension<CurrentSession>,
     PathParam(user): PathParam,
 ) -> Result<StatusCode, ApiError> {
-    state.store.delete_user(&user).await?;
+    if user == current.user.id {
+        return Err(ApiError::new(ErrorCode::InvalidRequest)
+            .with_message("Delete your own account with DELETE /me"));
+    }
+    state.store.delete_user(&user, None).await?;
     state.access_changed();
     Ok(StatusCode::NO_CONTENT)
 }

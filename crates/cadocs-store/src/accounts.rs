@@ -82,6 +82,8 @@ pub struct NewSession {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveSession {
     pub user: User,
+    /// When a login opened it.
+    pub created_at: i64,
     pub last_seen_at: i64,
 }
 
@@ -208,7 +210,8 @@ pub struct CodeAttempt<'a> {
 pub struct UpdateBasis<'a> {
     /// The hash of the session making the change.
     pub session: &'a str,
-    /// The password hash the caller verified, if the change needed that.
+    /// The password hash the caller verified, if the change needed that. Where a basis is
+    /// checked with `None`, the account must have no password.
     pub checked_hash: Option<&'a str>,
 }
 
@@ -296,8 +299,14 @@ pub trait AccountStore: Send + Sync + 'static {
 
     /// Deletes an account and its sessions. Refused with `LastOwner` or `LastInstanceAdmin`, and
     /// checked inside the transaction, so that two deletions at once cannot both pass. An account
-    /// that does not exist is a `UserNotFound`. The reset links they made for others go too.
-    fn delete_user(&self, user_id: &str) -> impl Future<Output = Result<(), StoreError>> + Send;
+    /// that does not exist is a `UserNotFound`. The reset links they made for others go too. The
+    /// account's own session passes the `basis` it was confirmed with: one that no longer holds
+    /// is a `StaleCredentials`.
+    fn delete_user(
+        &self,
+        user_id: &str,
+        basis: Option<&UpdateBasis<'_>>,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
     /// At most `limit` accounts, oldest first, after the one with the id `after`.
     fn list_users(

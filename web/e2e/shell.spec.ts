@@ -267,12 +267,20 @@ test("the account page changes the name and checks the current password", async 
   await expect(page.getByLabel("name", { exact: true })).toHaveValue("Ada Lovelace");
 });
 
-test("an account deletes itself, after a confirmation", async ({ page, server, browser }) => {
+test("an account deletes itself, after a confirmation with its password", async ({ page, server, browser }) => {
   const grace = await server.addMember("grace@example.org");
   const other = await memberPage(browser, server, grace);
   await other.goto(`${server.url}/account`);
-  await other.getByRole("button", { name: "delete account" }).click();
-  await other.getByRole("button", { name: "delete account" }).click();
+  const removal = other.getByRole("region", { name: "delete account" });
+  const deleteWith = async (password: string) => {
+    await removal.getByLabel("current password").fill(password);
+    await removal.getByRole("button", { name: "delete account" }).click();
+    await removal.getByRole("button", { name: "delete account" }).click();
+  };
+  await deleteWith("wrong password");
+  await expect(removal.getByRole("alert")).toHaveText("wrong");
+  await expect(other).toHaveURL(`${server.url}/account`);
+  await deleteWith(PASSWORD);
   await expect(other).toHaveURL(`${server.url}/login`);
 
   await page.goto(`${server.url}/login`);
