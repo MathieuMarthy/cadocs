@@ -4,7 +4,7 @@ use sqlx::{AssertSqlSafe, Row, SqliteConnection};
 
 use super::mentions::{self, Place};
 use super::pages;
-use super::{BEGIN_WRITE, SqliteStore};
+use super::{BEGIN_WRITE, MAIL_LANGUAGE, SqliteStore};
 use crate::{
     Anchor, Comment, CommentChange, CommentStore, CommentUser, INBOX_SIZE, Inbox, MAX_REPLIES,
     MailDigest, NewComment, Notification, NotificationKind, Notified, PageSite, StoreError, Thread,
@@ -420,19 +420,27 @@ impl CommentStore for SqliteStore {
     }
 
     async fn mail_digest(&self, user: &str) -> Result<Option<MailDigest>, StoreError> {
-        let account: Option<(String, String)> = sqlx::query_as(
-            "SELECT email, name FROM users
-             WHERE id = ?1 AND email_notifications = 1 AND disabled_at IS NULL",
-        )
-        .bind(user)
-        .fetch_optional(&self.reader)
-        .await?;
-        let Some((email, name)) = account else {
+        let query = format!(
+            "SELECT u.email, u.name, {MAIL_LANGUAGE} FROM users u
+             WHERE u.id = ?1 AND u.email_notifications = 1 AND u.disabled_at IS NULL"
+        );
+        let account: Option<(String, String, Option<String>)> =
+            sqlx::query_as(AssertSqlSafe(query))
+                .bind(user)
+                .fetch_optional(&self.reader)
+                .await?;
+        let Some((email, name, language)) = account else {
             return Ok(None);
         };
         let mut items = self.notifications(user).await?.items;
         items.retain(|item| !item.read && !item.mailed);
-        Ok((!items.is_empty()).then_some(MailDigest { email, name, items }))
+        let digest = MailDigest {
+            email,
+            name,
+            language,
+            items,
+        };
+        Ok((!digest.items.is_empty()).then_some(digest))
     }
 
     async fn mark_mailed(&self, user: &str, ids: &[String], now: i64) -> Result<(), StoreError> {

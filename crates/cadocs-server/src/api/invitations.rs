@@ -242,6 +242,7 @@ async fn accept<S: AccountStore + WorkspaceStore, A>(
         email_notifications: false,
         totp: false,
         language: None,
+        browser_language: None,
     };
     Ok(new_account_body(&state, user, workspaces, &session_token))
 }

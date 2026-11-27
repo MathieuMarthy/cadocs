@@ -53,6 +53,13 @@ const REINDEX_DELAY: Duration = Duration::from_secs(5);
 /// How long a notification waits for others before the message that tells of it goes out.
 const MAIL_DELAY: Duration = Duration::from_secs(60);
 
+/// The language mail to user `u` is written in: their setting, else the last browser language
+/// seen, else that of the first workspace they joined whose language mail has (step 62).
+const MAIL_LANGUAGE: &str = "COALESCE(u.language, u.browser_language,
+    (SELECT w.language FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
+     WHERE m.user_id = u.id AND w.language IN ('en', 'fr')
+     ORDER BY m.created_at, w.id LIMIT 1))";
+
 /// SQLite allows one writer at a time: a single connection queues writes in the pool instead of
 /// making them wait on `SQLITE_BUSY`, and reads never wait behind them (ADR 0002).
 #[derive(Debug, Clone)]

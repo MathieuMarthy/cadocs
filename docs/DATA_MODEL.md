@@ -25,6 +25,7 @@ CREATE TABLE users (
     email_2fa      SMALLINT NOT NULL DEFAULT 0 CHECK (email_2fa IN (0, 1)), -- ADR 0026: a login needs a mailed code
     email_notifications SMALLINT NOT NULL DEFAULT 0 CHECK (email_notifications IN (0, 1)), -- step 42
     language       TEXT,                     -- the interface's (`en`, `fr`), NULL follows the browser's
+    browser_language TEXT,                   -- step 62: the last `Accept-Language` seen, as `en` or `fr`, for mail
     created_at     BIGINT NOT NULL,
     updated_at     BIGINT NOT NULL,
     UNIQUE (email)

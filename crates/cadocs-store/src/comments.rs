@@ -108,6 +108,8 @@ pub struct Notification {
 pub struct MailDigest {
     pub email: String,
     pub name: String,
+    /// What `AccountStore::mail_language` answers.
+    pub language: Option<String>,
     pub items: Vec<Notification>,
 }
 

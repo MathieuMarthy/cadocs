@@ -780,6 +780,14 @@ impl WorkspaceStore for FlakyStore {
 }
 
 impl AccountStore for FlakyStore {
+    async fn set_browser_language(&self, user_id: &str, language: &str) -> Result<(), StoreError> {
+        self.inner.set_browser_language(user_id, language).await
+    }
+
+    async fn mail_language(&self, user_id: &str) -> Result<Option<String>, StoreError> {
+        self.inner.mail_language(user_id).await
+    }
+
     async fn set_email_notifications(&self, user_id: &str, on: bool) -> Result<(), StoreError> {
         self.inner.set_email_notifications(user_id, on).await
     }

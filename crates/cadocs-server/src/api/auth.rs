@@ -14,7 +14,7 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::{Extension, Json, Router};
 use cadocs_collab::Authorizer;
 use cadocs_core::permissions::{InstanceAction, instance_allows, instance_role};
-use cadocs_mail::{Mail, Outbox};
+use cadocs_mail::{Lang, Mail, Outbox, Text};
 use cadocs_store::{
     AccountStore, CodeAttempt, CodePurpose, DocStore, FirstUser, MAX_SLUG_CHARS, Membership,
     NewEmailCode, NewSession, NewUser, StoreError, TotpProof, UpdateBasis, User, UserChanges,
@@ -302,6 +302,7 @@ async fn setup<S: AccountStore, A>(
         email_notifications: false,
         totp: false,
         language: None,
+        browser_language: None,
     };
     let first = FirstUser {
         id: user.id.clone(),
@@ -440,6 +441,20 @@ fn code_problem(problem: &'static str) -> ApiError {
     }
 }
 
+/// The language to mail user `user_id` in (step 62).
+async fn mail_lang<S: AccountStore>(store: &S, user_id: &str) -> Result<Lang, StoreError> {
+    Ok(Lang::of(store.mail_language(user_id).await?.as_deref()))
+}
+
+/// The language of a request's `Accept-Language` that mail is written in, if any.
+pub(crate) fn browser_lang(headers: &HeaderMap) -> Option<Lang> {
+    let header = headers
+        .get(axum::http::header::ACCEPT_LANGUAGE)?
+        .to_str()
+        .ok()?;
+    Lang::from_accept_language(header)
+}
+
 /// Mails a code to the address of `user`, in place of the one it had for `purpose`. Silent past
 /// the limit of the address, or with the outbox full: the user asks again.
 async fn mail_code<S: AccountStore, A>(
@@ -471,30 +486,15 @@ async fn mail_code<S: AccountStore, A>(
         })
         .await?;
     let origin = state.http.public_url.origin();
-    let (subject, what, warning) = match purpose {
-        CodePurpose::Login => (
-            "Your cadocs login code",
-            "log in to",
-            "If you did not just log in, someone knows your password: change\n\
-             it.",
-        ),
-        _ => (
-            "Your cadocs code",
-            "turn on the second factor of your account on",
-            "If you did not ask for it, ignore this message: nothing changes\n\
-             without the code.",
-        ),
+    let lang = mail_lang(state.store.as_ref(), &user.id).await?;
+    let (subject, text) = match purpose {
+        CodePurpose::Login => (Text::LoginCodeSubject, Text::LoginCode),
+        _ => (Text::CodeSubject, Text::SecondFactorCode),
     };
     place.send(Mail {
         to: user.email.clone(),
-        subject: subject.to_owned(),
-        text: format!(
-            "Your code to {what}\n\
-             {origin}\n\n\
-             \x20   {code}\n\n\
-             It works for 10 minutes.\n\
-             {warning}\n"
-        ),
+        subject: subject.get(lang).to_owned(),
+        text: text.fill(lang, &[("origin", origin), ("code", &code)]),
     });
     Ok(())
 }
@@ -660,15 +660,11 @@ async fn mail_new_address<S: AccountStore>(
         None => {}
         Some(found) if found.disabled => return Ok(()),
         Some(found) => {
+            let lang = mail_lang(store, &found.user.id).await?;
             outbox.queue(Mail {
                 to: found.user.email,
-                subject: "Your cadocs account".to_owned(),
-                text: format!(
-                    "Someone asked to move another account on\n\
-                     {origin}\n\
-                     to this address, which already has an account. Nothing has\n\
-                     changed.\n"
-                ),
+                subject: Text::AccountSubject.get(lang).to_owned(),
+                text: Text::MoveTaken.fill(lang, &[("origin", origin)]),
             });
             return Ok(());
         }
@@ -677,6 +673,7 @@ async fn mail_new_address<S: AccountStore>(
     let Some(place) = outbox.reserve() else {
         return Ok(());
     };
+    let lang = mail_lang(store, &user_id).await?;
     let code = new_code()?;
     let now = now_ms();
     let purpose = CodePurpose::Email;
@@ -692,15 +689,8 @@ async fn mail_new_address<S: AccountStore>(
         .await?;
     place.send(Mail {
         to: email,
-        subject: "Your cadocs code".to_owned(),
-        text: format!(
-            "Your code to move your account on\n\
-             {origin}\n\
-             to this address\n\n\
-             \x20   {code}\n\n\
-             It works for 10 minutes. If you did not ask for it, ignore this\n\
-             message: nothing changes without the code.\n"
-        ),
+        subject: Text::CodeSubject.get(lang).to_owned(),
+        text: Text::MoveCode.fill(lang, &[("origin", origin), ("code", &code)]),
     });
     Ok(())
 }
@@ -747,17 +737,12 @@ async fn confirm_email<S: AccountStore, A>(
     // The owner may not be the one who moved it: the old address hears of it.
     if let Some(outbox) = &state.mail {
         let origin = state.http.public_url.origin();
+        let lang = mail_lang(state.store.as_ref(), &user.id).await?;
+        let values = [("origin", origin), ("email", email.as_str())];
         let queued = outbox.queue(Mail {
             to: user.email.clone(),
-            subject: "Your cadocs address changed".to_owned(),
-            text: format!(
-                "Your account on\n\
-                 {origin}\n\
-                 now uses the address\n\
-                 {email}\n\
-                 If you did not ask for it, someone else holds your account: ask\n\
-                 an admin of the instance to get it back.\n"
-            ),
+            subject: Text::AddressChangedSubject.get(lang).to_owned(),
+            text: Text::AddressChanged.fill(lang, &values),
         });
         if !queued {
             tracing::warn!("the notice of an address change could not be queued");
@@ -1140,17 +1125,11 @@ async fn mail_reset<S: AccountStore>(
         Err(error) => return Err(error.into()),
     }
     let origin = http.public_url.origin();
+    let lang = mail_lang(store, &found.user.id).await?;
     place.send(Mail {
         to: found.user.email,
-        subject: "Reset your cadocs password".to_owned(),
-        text: format!(
-            "Someone asked to reset the password of your account on\n\
-             {origin}\n\n\
-             To choose a new password, open this link within one hour:\n\n\
-             {link}\n\n\
-             If you did not ask for this, ignore this message: your password\n\
-             has not changed.\n"
-        ),
+        subject: Text::ResetSubject.get(lang).to_owned(),
+        text: Text::Reset.fill(lang, &[("origin", origin), ("link", link.as_str())]),
     });
     Ok(())
 }
@@ -1164,6 +1143,7 @@ struct RegisterRequest {
 /// for a forgotten password, the answer and its time are the same for every address.
 async fn register<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
+    headers: HeaderMap,
     JsonBody(body): JsonBody<RegisterRequest>,
 ) -> Result<StatusCode, ApiError> {
     let Some(outbox) = state.mail.clone() else {
@@ -1180,7 +1160,9 @@ async fn register<S: AccountStore, A>(
             state.code_key.clone(),
         );
         tokio::spawn(async move {
-            let mailed = mail_registration(store.as_ref(), &http, &key, &outbox, email);
+            // An address with no account has no language yet but the browser's that asked.
+            let lang = browser_lang(&headers).unwrap_or(Lang::En);
+            let mailed = mail_registration(store.as_ref(), &http, &key, &outbox, email, lang);
             if let Err(error) = mailed.await {
                 tracing::warn!("a registration code could not be mailed, {error}");
             }
@@ -1195,6 +1177,7 @@ async fn mail_registration<S: AccountStore>(
     key: &[u8; 32],
     outbox: &Outbox,
     email: String,
+    lang: Lang,
 ) -> anyhow::Result<()> {
     // Before first-run setup, an account would take the instance from its operator (ADR 0021).
     if !store.has_users().await? {
@@ -1205,17 +1188,11 @@ async fn mail_registration<S: AccountStore>(
         None => {}
         Some(found) if found.disabled => return Ok(()),
         Some(found) => {
+            let lang = mail_lang(store, &found.user.id).await?;
             outbox.queue(Mail {
                 to: found.user.email,
-                subject: "Your cadocs account".to_owned(),
-                text: format!(
-                    "Someone asked to create an account on\n\
-                     {origin}\n\
-                     with this address, which already has an account. Nothing has\n\
-                     changed.\n\n\
-                     To log in: {origin}/login\n\
-                     If you forgot your password: {origin}/forgot-password\n"
-                ),
+                subject: Text::AccountSubject.get(lang).to_owned(),
+                text: Text::RegisterTaken.fill(lang, &[("origin", origin)]),
             });
             return Ok(());
         }
@@ -1239,14 +1216,8 @@ async fn mail_registration<S: AccountStore>(
         .await?;
     place.send(Mail {
         to: email,
-        subject: "Your cadocs code".to_owned(),
-        text: format!(
-            "Your code to create an account on\n\
-             {origin}\n\n\
-             \x20   {code}\n\n\
-             It works for 10 minutes. If you did not ask for it, ignore this\n\
-             message: no account is made without the code.\n"
-        ),
+        subject: Text::CodeSubject.get(lang).to_owned(),
+        text: Text::RegisterCode.fill(lang, &[("origin", origin), ("code", &code)]),
     });
     Ok(())
 }
@@ -1283,6 +1254,7 @@ async fn confirm_registration<S: AccountStore, A>(
         email_notifications: false,
         totp: false,
         language: None,
+        browser_language: None,
     };
     let new = NewUser {
         id: user.id.clone(),
