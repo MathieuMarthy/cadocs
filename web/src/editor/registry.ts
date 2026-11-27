@@ -274,11 +274,11 @@ export const entries: Entry[] = [
     ],
   },
   {
-    // Column widths are not stored: `resizable` would write them into the document. Writers also
-    // get `+` buttons on the edges and a menu on a cell's right click (`table.ts`).
+    // Writers drag a column's edge, stored as the cells' `colwidth`; they also get `+` buttons on
+    // the edges and a menu on a cell's right click (`table.ts`). 80 is the cells' `min-width`.
     name: "table",
     extensions: [
-      TableKit.configure({ table: { resizable: false, View: TableWithControls } }),
+      TableKit.configure({ table: { resizable: true, cellMinWidth: 80, View: TableWithControls } }),
       TableMenuOnRightClick,
     ],
     commands: [

@@ -277,7 +277,7 @@ pub struct TableCell {
     pub header: bool,
     pub colspan: u32,
     pub rowspan: u32,
-    /// Stays `None` while the editor's tables are not resizable.
+    /// Pixel widths of the columns the cell spans, `0` for one never dragged. Markdown drops them.
     pub colwidth: Option<Vec<i64>>,
     /// `left`, `center` or `right`.
     pub align: Option<String>,

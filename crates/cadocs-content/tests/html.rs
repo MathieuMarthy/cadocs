@@ -278,6 +278,49 @@ fn cells_keep_their_spans_and_alignment() {
 }
 
 #[test]
+fn column_widths_become_a_colgroup_from_the_first_row() {
+    let row = |cells| TableRow { cells };
+    let out = html(vec![Block::Table(vec![
+        row(vec![
+            TableCell {
+                colspan: 2,
+                colwidth: Some(vec![120, 0]),
+                ..cell(true, "a")
+            },
+            TableCell {
+                colspan: 2,
+                ..cell(true, "b")
+            },
+            TableCell {
+                colwidth: Some(vec![200]),
+                ..cell(true, "c")
+            },
+        ]),
+        row(vec![TableCell {
+            colwidth: Some(vec![999]),
+            ..cell(false, "d")
+        }]),
+    ])]);
+    assert!(
+        out.starts_with(concat!(
+            r#"<table><colgroup><col width="120"><col><col><col><col width="200"></colgroup>"#,
+            r#"<tbody><tr><th colspan="2">"#
+        )),
+        "{out}"
+    );
+    // A span written by hand does not make the colgroup endless.
+    let out = html(vec![Block::Table(vec![row(vec![TableCell {
+        colspan: u32::MAX,
+        colwidth: Some(vec![50]),
+        ..cell(false, "x")
+    }])])]);
+    assert_eq!(out.matches("<col").count(), 1001, "{}", &out[..200]);
+    // A table never resized renders as before.
+    let out = html(vec![Block::Table(vec![row(vec![cell(false, "x")])])]);
+    assert!(out.starts_with("<table><tbody>"), "{out}");
+}
+
+#[test]
 fn an_ordered_list_keeps_only_known_types() {
     let out = html(vec![Block::OrderedList {
         start: 1,

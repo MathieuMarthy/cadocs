@@ -171,7 +171,16 @@ fn list_items<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> Vec<ListItem> {
 
 fn cell<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> TableCell {
     let colwidth = match attr(txn, element, "colwidth") {
-        Some(Any::Array(widths)) => Some(widths.iter().filter_map(int).collect()),
+        // A width keeps its place, so the next ones stay on their columns; fractions are rounded.
+        Some(Any::Array(widths)) => Some(
+            widths
+                .iter()
+                .map(|width| match width {
+                    Any::Number(Number::Float(f)) if f.is_finite() => f.round() as i64,
+                    width => int(width).unwrap_or(0),
+                })
+                .collect(),
+        ),
         _ => None,
     };
     TableCell {

@@ -88,6 +88,59 @@ test("a table is filled and grows in one browser, and the other follows", async 
   await expect(editor(right).locator("table")).toHaveCount(0);
 });
 
+/** Drags the right edge of the table's `index`th header cell by `dx` pixels. */
+async function dragColumn(page: Page, index: number, dx: number) {
+  const box = await editor(page).locator("table th").nth(index).boundingBox();
+  if (!box) throw new Error("no header cell");
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width - 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width + dx, y, { steps: 5 });
+  await page.mouse.up();
+}
+
+/** The width the column's `<col>` sets, `""` when it has none. */
+const columnWidth = (page: Page, index: number) =>
+  editor(page)
+    .locator("table col")
+    .nth(index)
+    .evaluate((col: HTMLTableColElement) => col.style.width);
+
+test("a writer drags a column's width and the other browser sees it, a reader cannot", async ({
+  left,
+  right,
+  server,
+  member,
+}) => {
+  // The member opens the page as a reader, then becomes a writer: the resizing must work then too.
+  await grant(server, member, "viewer");
+  await right.reload();
+  await expect(status(left)).toHaveText("synced · 2 online");
+  await expect(status(right)).toHaveText("synced · 2 online · read only");
+  await editor(left).click();
+  await left.keyboard.type("/table");
+  await expect(commands(left).getByRole("option")).toHaveCount(2);
+  await left.keyboard.press("Enter");
+  await expect(editor(right).locator("table th")).toHaveCount(3);
+
+  await dragColumn(left, 0, 100);
+  await expect.poll(() => columnWidth(left, 0)).toMatch(/^\d+px$/);
+  const width = await columnWidth(left, 0);
+  await expect.poll(() => columnWidth(right, 0)).toBe(width);
+
+  // A reader's drag changes nothing, and shows no handle.
+  await right.mouse.move(0, 0);
+  await dragColumn(right, 1, 100);
+  await expect(editor(right).locator(".column-resize-handle")).toHaveCount(0);
+  expect(await columnWidth(right, 1)).toBe("");
+
+  await grant(server, member, "editor");
+  await expect(editor(right)).toHaveAttribute("contenteditable", "true");
+  await dragColumn(right, 1, 100);
+  await expect.poll(() => columnWidth(left, 1)).toMatch(/^\d+px$/);
+  expect(await columnWidth(left, 0)).toBe(width);
+});
+
 test("table commands are not offered outside a table", async ({ left }) => {
   await expect(status(left)).toContainText("synced");
   await editor(left).click();
