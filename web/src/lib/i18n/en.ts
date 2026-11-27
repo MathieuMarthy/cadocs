@@ -79,7 +79,8 @@ export const en = {
   "login.submit": "log in",
   "login.wrong": "wrong email or password",
   "login.again": "this login no longer works. type your email and password again.",
-  "login.codeSent": "a code is on its way to {email}. it works for 10 minutes.",
+  "login.codeSent":
+    "a code is on its way to {email}. it works for 10 minutes. if it does not come, look in the spam folder.",
   "login.noCode": "no code?",
   "login.resend": "send a new code",
   "login.startOver": "use another account",
@@ -98,14 +99,16 @@ export const en = {
   "register.title": "create an account",
   "register.intro": "a code sent to your address proves it is yours.",
   "register.send": "send code",
-  "register.codeSent": "if {email} can make an account, a code is on its way. it works for 10 minutes.",
+  "register.codeSent":
+    "if {email} can make an account, a code is on its way. it works for 10 minutes. if it does not come, look in the spam folder.",
   "register.taken": "this address has an account now. log in instead.",
   "register.submit": "create account",
   "register.haveAccount": "already an account?",
 
   "forgot.title": "forgot password",
   "forgot.send": "send reset link",
-  "forgot.sent": "if an account uses this address, a reset link is on its way. it works for one hour.",
+  "forgot.sent":
+    "if an account uses this address, a reset link is on its way. it works for one hour. if it does not come, look in the spam folder.",
   "forgot.back": "back to log in",
 
   "reset.title": "new password",

@@ -83,7 +83,8 @@ export const fr: Catalogue = {
   "login.submit": "se connecter",
   "login.wrong": "e-mail ou mot de passe incorrect",
   "login.again": "cette connexion ne fonctionne plus. saisissez à nouveau votre e-mail et votre mot de passe.",
-  "login.codeSent": "un code est en route vers {email}. il est valable 10 minutes.",
+  "login.codeSent":
+    "un code est en route vers {email}. il est valable 10 minutes. s'il n'arrive pas, regardez dans les indésirables.",
   "login.noCode": "pas de code ?",
   "login.resend": "envoyer un nouveau code",
   "login.startOver": "utiliser un autre compte",
@@ -107,7 +108,7 @@ export const fr: Catalogue = {
   "register.intro": "un code envoyé à votre adresse prouve qu'elle est à vous.",
   "register.send": "envoyer le code",
   "register.codeSent":
-    "si {email} peut créer un compte, un code est en route. il est valable 10 minutes.",
+    "si {email} peut créer un compte, un code est en route. il est valable 10 minutes. s'il n'arrive pas, regardez dans les indésirables.",
   "register.taken": "cette adresse a maintenant un compte. connectez-vous.",
   "register.submit": "créer le compte",
   "register.haveAccount": "déjà un compte ?",
@@ -115,7 +116,7 @@ export const fr: Catalogue = {
   "forgot.title": "mot de passe oublié",
   "forgot.send": "envoyer le lien de réinitialisation",
   "forgot.sent":
-    "si un compte utilise cette adresse, un lien de réinitialisation est en route. il est valable une heure.",
+    "si un compte utilise cette adresse, un lien de réinitialisation est en route. il est valable une heure. s'il n'arrive pas, regardez dans les indésirables.",
   "forgot.back": "retour à la connexion",
 
   "reset.title": "nouveau mot de passe",

@@ -34,6 +34,7 @@ withMail("a forgotten password comes back through a mailed link", async ({
   await page.getByLabel("email").fill("Ada@example.org");
   await page.getByRole("button", { name: "send reset link" }).click();
   await expect(page.getByRole("status")).toContainText("a reset link is on its way");
+  await expect(page.getByRole("status")).toContainText("spam folder");
 
   const message = await relay.message();
   expect(message.to).toBe("ada@example.org");
@@ -116,6 +117,7 @@ withMail("a code read from the mail makes an account with no workspace", async (
   await page.getByLabel("email").fill("Grace@example.org");
   await page.getByRole("button", { name: "send code" }).click();
   await expect(page.getByRole("status")).toContainText("a code is on its way");
+  await expect(page.getByRole("status")).toContainText("spam folder");
 
   const message = await relay.message();
   expect(message.to).toBe("grace@example.org");
@@ -184,6 +186,7 @@ withMail("a second factor turned on in the account makes a login ask for a maile
   const factor = page.getByRole("region", { name: "second factor" });
   await factor.getByRole("button", { name: "turn on" }).click();
   await expect(factor.getByRole("status")).toContainText("a code is on its way");
+  await expect(factor.getByRole("status")).toContainText("spam folder");
   const code = /^ {4}(\d{6})$/m.exec((await relay.message()).text)?.[1];
   expect(code).toBeTruthy();
   await factor.getByLabel("code").fill(code!);
@@ -197,6 +200,7 @@ withMail("a second factor turned on in the account makes a login ask for a maile
   await page.getByLabel("password").fill(PASSWORD);
   await page.getByRole("button", { name: "log in" }).click();
   await expect(page.getByRole("status")).toContainText("a code is on its way to ada@example.org");
+  await expect(page.getByRole("status")).toContainText("spam folder");
   await expect(page).toHaveURL(`${server.url}/login`);
 
   const login = /^ {4}(\d{6})$/m.exec((await relay.message(2)).text)?.[1];
@@ -259,6 +263,7 @@ withMail("a new email changes only once the code mailed to it is typed", async (
   await login.getByLabel("current password").fill(PASSWORD);
   await login.getByRole("button", { name: "save" }).click();
   await expect(login.getByRole("status")).toContainText("a code is on its way to ada@example.net");
+  await expect(login.getByRole("status")).toContainText("spam folder");
   await expect(login.getByLabel("email")).toHaveValue("ada@example.org");
 
   const message = await relay.message();

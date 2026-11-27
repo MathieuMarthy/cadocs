@@ -60,6 +60,27 @@ test("first run goes from setup to an empty workspace, and login comes back to i
   await expect(page).toHaveURL(`${server.url}/w/acme-docs`);
 });
 
+test("a setup link whose code is refused shows the code's field, which says wrong", async ({
+  page,
+  server,
+}) => {
+  await page.goto(`${server.url}/setup/${"0".repeat(64)}`);
+  await expect(page.getByRole("button", { name: "create workspace" })).toBeVisible();
+  await expect(page.getByLabel("setup code")).toHaveCount(0);
+  await page.getByLabel("name", { exact: true }).fill("Ada");
+  await page.getByLabel("email").fill("ada@example.org");
+  await page.getByLabel("password").fill(PASSWORD);
+  await page.getByLabel("workspace name").fill("Acme Docs");
+  await page.getByRole("button", { name: "create workspace" }).click();
+
+  const code = page.getByLabel("setup code");
+  await expect(code).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByRole("alert")).toHaveText("wrong");
+  await code.fill(await server.setupCode());
+  await page.getByRole("button", { name: "create workspace" }).click();
+  await expect(page).toHaveURL(`${server.url}/w/acme-docs`);
+});
+
 test("setup is gone once an account exists, and an unknown address says so", async ({
   page,
   server,
@@ -442,6 +463,26 @@ test("the theme follows the system until it is chosen, and stays chosen", async 
   await page.reload();
   await expect(page.getByRole("button", { name: "theme: dark" })).toBeVisible();
   await expect.poll(background).toBe(dark);
+});
+
+test("the admin and account screens keep the workspace the sidebar showed", async ({
+  page,
+  server,
+}) => {
+  const second = await server.call("POST", "/workspaces", { name: "Second" });
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/${second.slug}`);
+  const settings = page.getByRole("navigation", { name: "settings" });
+  const workspace = settings.getByRole("link", { name: "workspace" });
+  await expect(workspace).toHaveAttribute("href", `/w/${second.slug}/settings`);
+
+  await settings.getByRole("link", { name: "admin" }).click();
+  await expect(page).toHaveURL(`${server.url}/admin`);
+  await expect(workspace).toHaveAttribute("href", `/w/${second.slug}/settings`);
+  await page.getByRole("button", { name: "Ada", exact: true }).click();
+  await page.getByRole("menuitem", { name: "account" }).click();
+  await expect(page).toHaveURL(`${server.url}/account`);
+  await expect(workspace).toHaveAttribute("href", `/w/${second.slug}/settings`);
 });
 
 test("a phone shows the content first, with no sideways scroll", async ({ page, server }) => {
