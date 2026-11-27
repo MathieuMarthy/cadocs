@@ -23,7 +23,8 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 - `POST /auth/setup` needs `AppState::setup_code`, new at each start and logged by `main` while no account exists (ADR 0021). `tests/common` sends `Api::setup_code`; the end-to-end `TestServer::setupCode` reads it from the log.
 - Over HTTPS the cookie is `__Host-session` (`session::cookie_name`): tests on `common::ORIGIN` use `common::COOKIE`.
 - A failed session touch retries on each request, up to 1 second each, with no back-off.
-- An admin who deletes or disables themself through `/admin/users` gets no removal cookie, unlike `DELETE /me`: the next request is a `401`. The reset links an admin made go when they are disabled, demoted or deleted.
+- An admin who disables themself through `/admin/users` gets no removal cookie, unlike `DELETE /me`: the next request is a `401`. Deleting themself there is a `400`, so that only `DELETE /me` deletes one's own account. The reset links an admin made go when they are disabled, demoted or deleted.
+- Step 67: `require_password_or_fresh_session` in `api/auth.rs` is the one check for what a stolen session must not do on an account that may have no password: the password when there is one, else a session a login opened in the last 10 minutes (`CurrentSession::created_at`, `sessions.created_at`), refused with `session: too_old`. `DELETE /me` and `POST /me/identities/{provider}` use it, and passkeys (step 77) will. `delete_user` takes the `UpdateBasis` of the account's own session and checks it in the write; the admin route passes `None`. `check_basis` compares with `password_hash IS ?3`, so a basis with no checked hash holds only for an account that still has no password.
 
 ## Authenticator app (step 47)
 

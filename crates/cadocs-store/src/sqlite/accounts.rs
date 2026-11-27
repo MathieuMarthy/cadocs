@@ -161,7 +161,7 @@ async fn check_basis(
     let holds: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM sessions s JOIN users u ON u.id = s.user_id
                         WHERE s.token_hash = ?1 AND u.id = ?2
-                          AND (?3 IS NULL OR u.password_hash = ?3))",
+                          AND u.password_hash IS ?3)",
     )
     .bind(basis.session)
     .bind(user_id)
@@ -349,7 +349,7 @@ impl AccountStore for SqliteStore {
         let row = sqlx::query(
             "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.email_notifications, u.language,
                     u.browser_language,
-                    s.last_seen_at,
+                    s.created_at, s.last_seen_at,
                     EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = u.id
                                                        AND t.enabled_at IS NOT NULL) AS totp
              FROM sessions s JOIN users u ON u.id = s.user_id
@@ -361,6 +361,7 @@ impl AccountStore for SqliteStore {
         .await?;
         Ok(row.map(|row| ActiveSession {
             user: user(&row),
+            created_at: row.get("created_at"),
             last_seen_at: row.get("last_seen_at"),
         }))
     }
@@ -498,8 +499,15 @@ impl AccountStore for SqliteStore {
         Ok(())
     }
 
-    async fn delete_user(&self, user_id: &str) -> Result<(), StoreError> {
+    async fn delete_user(
+        &self,
+        user_id: &str,
+        basis: Option<&UpdateBasis<'_>>,
+    ) -> Result<(), StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
+        if let Some(basis) = basis {
+            check_basis(&mut tx, user_id, basis).await?;
+        }
 
         // The owners who would stay. A disabled one cannot act, so they do not count, and this
         // user goes whether or not they are enabled.

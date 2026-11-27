@@ -15,10 +15,17 @@ function sync() {
 }
 
 export function navigate(to: string, { replace = false } = {}) {
-  if (replace) history.replaceState(null, "", to);
-  else history.pushState(null, "", to);
+  // `back` marks an entry with a screen of this app before it, which `goBack` returns to.
+  if (replace) history.replaceState(history.state, "", to);
+  else history.pushState({ back: true }, "", to);
   sync();
   if (!replace) scrollTo(0, 0);
+}
+
+/** Back to the screen the person came from, or to `fallback` when the tab opened on this one. */
+export function goBack(fallback: string) {
+  if (history.state?.back) history.back();
+  else navigate(fallback);
 }
 
 /** A `next` parameter comes from the address, so it must stay on this site. */

@@ -15,7 +15,7 @@
   import { api, type Workspace } from "../lib/api";
   import { t } from "../lib/i18n";
   import { Form } from "../lib/form.svelte";
-  import { acquireNav, type Nav } from "../lib/nav.svelte";
+  import { acquireNav, lastWorkspace, type Nav } from "../lib/nav.svelte";
   import { navigate, route } from "../lib/router.svelte";
   import { app, signOut } from "../lib/session.svelte";
   import { nextTheme, theme } from "../lib/theme.svelte";
@@ -47,13 +47,18 @@
     end?: Snippet;
     /** The content brings its own layout, as the page view does. */
     bare?: boolean;
-    /** Without a `workspace`, show the first one. A page whose workspace is unknown shows none. */
+    /** Without a `workspace`, show the one whose tree showed last, else the first one. A page
+     * whose workspace is unknown shows none. */
     guess?: boolean;
     children: Snippet;
   } = $props();
 
   const session = $derived(app.session!);
-  const current = $derived(workspace ?? (guess ? (session.workspaces[0] ?? null) : null));
+  const guessed = $derived.by(() => {
+    const last = lastWorkspace(session.user.id)?.id;
+    return session.workspaces.find((item) => item.id === last) ?? session.workspaces[0] ?? null;
+  });
+  const current = $derived(workspace ?? (guess ? guessed : null));
 
   let nav = $state<Nav | null>(null);
   /** The new workspace form is open in the selector. */

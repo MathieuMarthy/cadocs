@@ -18,7 +18,7 @@
     roleName,
     SPACE_ROLES,
   } from "../lib/roles";
-  import { navigate } from "../lib/router.svelte";
+  import { goBack, navigate } from "../lib/router.svelte";
   import { app } from "../lib/session.svelte";
   import { currentLanguage, t } from "../lib/i18n";
 
@@ -38,6 +38,9 @@
   const held = acquireNav(app.session!.user.id, workspace);
   const nav = held.nav;
   onDestroy(held.release);
+  /** The person is still on this screen: a save that ends elsewhere leaves them there. */
+  let here = true;
+  onDestroy(() => (here = false));
 
   const space = $derived(nav.spaces.find((item) => item.slug === slug) ?? null);
   const spaceId = $derived(space?.id ?? null);
@@ -66,9 +69,13 @@
     if (!space) return;
     const id = space.id;
     const body = { name, description, default_role: defaultRole || null };
-    const done = await general.run(() => api<Space>("PATCH", `/spaces/${id}`, body));
+    // Inside the form, so the button stays disabled while the spaces read again.
+    const done = await general.run(async () => {
+      await api<Space>("PATCH", `/spaces/${id}`, body);
+      await nav.loadSpaces();
+    });
     if (!done) return;
-    await nav.loadSpaces();
+    if (here) goBack(`/w/${workspace.slug}`);
     notify(t("account.saved"));
   }
 

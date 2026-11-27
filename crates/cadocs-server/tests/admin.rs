@@ -232,8 +232,6 @@ async fn the_last_enabled_instance_admin_stays() {
         let reply = api.patch_user(&admin, &id, change).await;
         assert_eq!((reply.status, reply.code()), (409, "conflict"), "{reply:?}");
     }
-    let reply = api.delete_user(&admin, &id).await;
-    assert_eq!((reply.status, reply.code()), (409, "conflict"), "{reply:?}");
     assert_eq!(api.session(&admin).await.status, 200);
     assert_eq!(
         api.number(
@@ -307,25 +305,47 @@ impl Api {
 
 #[tokio::test]
 async fn the_last_owner_of_a_workspace_cannot_be_deleted() {
-    let (api, admin) = logged_in().await;
+    let (api, _) = logged_in().await;
     let first = api.first_user_id().await;
     api.add_user(OTHER, "bob@example.org").await;
     api.sql(&format!(
         "UPDATE users SET is_instance_admin = 1 WHERE id = '{OTHER}'"
     ))
     .await;
+    let admin = Login::from(&api.login("bob@example.org", PASSWORD).await);
 
     let reply = api.delete_user(&admin, &first).await;
     assert_eq!((reply.status, reply.code()), (409, "conflict"), "{reply:?}");
 
     // A second owner who is disabled does not count, as they cannot act.
-    api.add_owner(OTHER).await;
-    api.sql(&format!(
-        "UPDATE users SET disabled_at = 7 WHERE id = '{OTHER}'"
-    ))
-    .await;
+    api.add_user("carol", "carol@example.org").await;
+    api.add_owner("carol").await;
+    api.sql("UPDATE users SET disabled_at = 7 WHERE id = 'carol'")
+        .await;
     let reply = api.delete_user(&admin, &first).await;
     assert_eq!((reply.status, reply.code()), (409, "conflict"), "{reply:?}");
+}
+
+/// A stolen admin session must not delete its own account without the password (step 67).
+#[tokio::test]
+async fn an_admin_deletes_their_own_account_only_through_delete_me() {
+    let (api, admin) = logged_in().await;
+    let first = api.first_user_id().await;
+    // Another admin and owner, so that nothing else stands in the way.
+    api.add_user(OTHER, "bob@example.org").await;
+    api.sql(&format!(
+        "UPDATE users SET is_instance_admin = 1 WHERE id = '{OTHER}'"
+    ))
+    .await;
+    api.add_owner(OTHER).await;
+
+    let reply = api.delete_user(&admin, &first).await;
+    assert_eq!(
+        (reply.status, reply.code()),
+        (400, "invalid_request"),
+        "{reply:?}"
+    );
+    assert_eq!(api.session(&admin).await.status, 200);
 }
 
 #[tokio::test]
