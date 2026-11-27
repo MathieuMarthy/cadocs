@@ -388,14 +388,20 @@ function decorations(state: EditorState, editable: boolean) {
     const hinted = role.kind === "heading" || role.kind === "quote" || role.kind === "code";
     if (block !== null && hinted && !looksWritten(role, $from.parent.textContent)) {
       const hint = sourceOf(role)!.trimEnd();
-      found.push(Decoration.node(block, block + $from.parent.nodeSize, { class: "md-hinted" }));
-      found.push(
-        Decoration.widget(block + 1, (view, getPos) => hintElement(view, getPos, hint), {
-          side: -1,
-          key: `hint-${hint}`,
-          ignoreSelection: true,
-        }),
-      );
+      const end = block + $from.parent.nodeSize;
+      if (role.kind === "code") {
+        // Drawn above the code by CSS (`data-fence`): a widget before highlighted code moves the caret.
+        found.push(Decoration.node(block, end, { class: "md-hinted", "data-fence": hint }));
+      } else {
+        found.push(Decoration.node(block, end, { class: "md-hinted" }));
+        found.push(
+          Decoration.widget(block + 1, (view, getPos) => hintElement(view, getPos, hint), {
+            side: -1,
+            key: `hint-${hint}`,
+            ignoreSelection: true,
+          }),
+        );
+      }
     }
   }
   return DecorationSet.create(state.doc, found);
@@ -568,6 +574,21 @@ export const MarkdownSource = Extension.create({
             blur: (view) => {
               view.dispatch(view.state.tr.setMeta(key, { focused: false }));
               return false;
+            },
+            // The fence of code is drawn above it, by the `pre` itself: a press there writes it out.
+            mousedown: (view, event) => {
+              const pre = event.target;
+              if (!(pre instanceof HTMLElement) || !pre.matches("pre.md-hinted")) return false;
+              const code = pre.querySelector("code");
+              if (!code || event.clientY >= code.getBoundingClientRect().top) return false;
+              // Only the caret's block is hinted.
+              const block = blockAt(view.state.selection.$from);
+              const tr = view.state.tr;
+              if (block === null || !writeSource(tr, block, 1)) return false;
+              event.preventDefault();
+              view.dispatch(tr.scrollIntoView());
+              view.focus();
+              return true;
             },
           },
           handleKeyDown(view, event) {

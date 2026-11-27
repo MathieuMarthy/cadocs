@@ -238,13 +238,17 @@
   user-select: none;
 }
 
-/* Where the caret is, the fence line takes the language's place, on its own line (ADR 0018). */
+/* Where the caret is, the fence line takes the language's place, above the code (ADR 0018). */
 .tiptap pre.md-hinted::before {
-  content: none;
-}
-
-.tiptap pre .md-hint {
+  position: static;
   display: block;
+  color: var(--muted);
+  content: attr(data-fence);
+  font-size: inherit;
+  font-weight: 500;
+  white-space: pre;
+  cursor: text;
+  user-select: none;
 }
 
 .tiptap pre code {

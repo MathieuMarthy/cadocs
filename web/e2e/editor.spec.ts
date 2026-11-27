@@ -1,6 +1,6 @@
 // The editor's blocks, slash menu, shortcuts, read-only mode and content check, in two browsers.
 
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
@@ -545,10 +545,11 @@ test("a code block shows its language, and its fence edits it", async ({ left, r
   await left.keyboard.type("fn main() {}");
   const block = (page: Page) => editor(page).locator("pre");
   await expect(block(right)).toHaveAttribute("data-language", "rust");
+
+  // With the caret elsewhere: inside, the fence takes the label's place.
+  await left.keyboard.press("Control+Home");
   const label = await block(left).evaluate((pre) => getComputedStyle(pre, "::before").content);
   expect(label).toBe('"rust"');
-
-  await left.keyboard.press("Control+Home");
   await left.keyboard.press("ArrowDown");
   await left.keyboard.press("Home");
   await left.keyboard.press("ArrowLeft");
@@ -597,21 +598,26 @@ test("the caret in a code block shows its fence, and a click on it edits the lan
   right,
 }) => {
   await bothOnline(left, right);
+  // The fence is the `pre`'s own `::before`, on the line above the code.
+  const shown = (pre: Locator) => pre.evaluate((element) => getComputedStyle(element, "::before").content);
+  const press = (pre: Locator) => pre.click({ position: { x: 30, y: 24 } });
   await editor(left).click();
   await left.keyboard.type("``` ");
   await left.keyboard.type("plain");
-  await expect(editor(left).locator("pre .md-hint")).toHaveText("```");
+  const first = editor(left).locator("pre").first();
+  await expect.poll(() => shown(first)).toBe('"```"');
   await left.keyboard.press("Enter");
   await left.keyboard.press("Enter");
   await left.keyboard.press("Enter");
-  await expect(editor(left).locator(".md-hint")).toHaveCount(0);
+  await expect.poll(() => shown(first)).toBe('"auto"');
   await left.keyboard.type("```rust ");
   await left.keyboard.type("fn main() {}");
   const block = (page: Page) => editor(page).locator("pre").nth(1);
-  await expect(block(left).locator(".md-hint")).toHaveText("```rust");
-  await expect(editor(right).locator(".md-hint")).toHaveCount(0);
+  await expectText(block(right).locator("code"), "fn main() {}");
+  await expect.poll(() => shown(block(left))).toBe('"```rust"');
+  await expect.poll(() => shown(block(right))).toBe('"rust"');
 
-  await block(left).locator(".md-hint").click();
+  await press(block(left));
   await expectText(block(right).locator("code"), "```rust\nfn main() {}");
   // Tab leaves a written fence alone, or the block would no longer read as code.
   await left.keyboard.press("Home");
@@ -625,7 +631,7 @@ test("the caret in a code block shows its fence, and a click on it edits the lan
   await expectText(block(right).locator("code"), "  fn main() {}");
 
   await block(left).locator("code").click();
-  await block(left).locator(".md-hint").click();
+  await press(block(left));
   for (let i = 0; i < 4; i++) await left.keyboard.press("Backspace");
   await left.keyboard.type("python");
   await left.keyboard.press("Control+Home");
@@ -636,7 +642,10 @@ test("the caret in a code block shows its fence, and a click on it edits the lan
 test("Escape, then Tab leaves the editor from code in a table cell too", async ({ left, right }) => {
   await bothOnline(left, right);
   await editor(left).click();
-  await command(left, "table");
+  // `table of contents` matches too, below `table`.
+  await left.keyboard.type("/table");
+  await expect(commands(left).getByRole("option")).toHaveText(["table", "table of contents"]);
+  await left.keyboard.press("Enter");
   await left.keyboard.type("```js ");
   await left.keyboard.type("x");
   await expect(editor(right).locator("td pre, th pre")).toHaveCount(1);
