@@ -21,7 +21,7 @@ import { CodeIndent, lowlight } from "./code";
 import { CodePreview, InlineMath } from "./math";
 import { Mention } from "./mention";
 import { PageLink } from "./pagelink";
-import { TableMenuOnRightClick, TableWithControls } from "./table";
+import { CELL_MIN_WIDTH, ColumnResizing, TableMenuOnRightClick, TableWithControls } from "./table";
 import { MarkdownSource, quietInSource } from "./source";
 import { type Key, t } from "../lib/i18n";
 
@@ -277,11 +277,12 @@ export const entries: Entry[] = [
     ],
   },
   {
-    // Writers drag a column's edge, stored as the cells' `colwidth`; they also get `+` buttons on
-    // the edges and a menu on a cell's right click (`table.ts`). 80 is the cells' `min-width`.
+    // Writers drag a column's edge (`ColumnResizing`, not `resizable`), get `+` buttons on the
+    // edges and a menu on a cell's right click (`table.ts`).
     name: "table",
     extensions: [
-      TableKit.configure({ table: { resizable: true, cellMinWidth: 80, View: TableWithControls } }),
+      TableKit.configure({ table: { cellMinWidth: CELL_MIN_WIDTH, View: TableWithControls } }),
+      ColumnResizing,
       TableMenuOnRightClick,
     ],
     commands: [

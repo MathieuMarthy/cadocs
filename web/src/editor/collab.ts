@@ -91,9 +91,7 @@ export function openPage(page: string, elements: Elements, options: Options, cal
 
   const editor = new Editor({
     element: elements.editor,
-    // Plugins read the mode once, at their creation: column resizing must exist for a reader made
-    // a writer later. It checks the mode on each move, and `applyMode` below sets the real one.
-    editable: true,
+    editable,
     // Content this schema lacks pauses the editor instead of being deleted for everyone (ADR 0016).
     enableContentCheck: true,
     onContentError: ({ disableCollaboration }) => {
