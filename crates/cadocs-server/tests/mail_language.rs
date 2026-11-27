@@ -62,14 +62,20 @@ async fn a_person_with_no_setting_and_a_french_browser_gets_french_mail() {
 }
 
 #[tokio::test]
-async fn the_browser_language_is_noted_only_at_a_touch() {
+async fn the_first_browser_language_is_noted_at_once_and_a_change_at_a_touch() {
     let (api, relay) = with_mail().await;
     let ada = ada(&api).await;
-    // A fresh session is not due: two browsers in two languages write at most once a touch.
+    // A fresh session, not due for a touch: the first language seen still counts.
     read_by(&api, &ada, FRENCH_BROWSER).await;
-    let noted = "SELECT count(*) FROM users WHERE browser_language IS NOT NULL";
-    assert_eq!(api.number(noted).await, 0);
     let text = reset_text(&api, &relay, 1).await;
+    assert!(text.contains(FRENCH_RESET), "{text}");
+
+    // A change waits for the touch: two browsers in two languages write once a touch at most.
+    api.sql("UPDATE users SET browser_language = 'en'").await;
+    read_by(&api, &ada, FRENCH_BROWSER).await;
+    let english = "SELECT count(*) FROM users WHERE browser_language = 'en'";
+    assert_eq!(api.number(english).await, 1);
+    let text = reset_text(&api, &relay, 2).await;
     assert!(text.contains(ENGLISH_RESET), "{text}");
 }
 

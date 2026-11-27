@@ -289,9 +289,9 @@ pub async fn require<S: AccountStore, A>(
 
     let due = now - session.last_seen_at >= TOUCH_INTERVAL_MS;
     let renewed = (due && touch(&state, &token, now).await).then(|| cookie(&token, &state.http));
-    // Mail follows the browser language seen at the last touch (step 62), written only when it
-    // changes: a person on two browsers in two languages writes once a touch at most.
-    if due
+    // Mail follows the browser language seen (step 62): the first one at once, a change only at a
+    // touch, so a person on two browsers in two languages writes once a touch at most.
+    if (due || session.user.browser_language.is_none())
         && let Some(lang) = browser_lang(request.headers())
         && session.user.browser_language.as_deref() != Some(lang.code())
     {
