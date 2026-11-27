@@ -105,7 +105,7 @@ async fn delete_user<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
     PathParam(user): PathParam,
 ) -> Result<StatusCode, ApiError> {
-    state.store.delete_user(&user).await?;
+    state.store.delete_user(&user, None).await?;
     state.access_changed();
     Ok(StatusCode::NO_CONTENT)
 }

@@ -44,6 +44,8 @@ const INVITATION_LIFETIME: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 pub struct CurrentSession {
     pub user: User,
     pub token: String,
+    /// When a login opened the session.
+    pub created_at: i64,
 }
 
 impl CurrentSession {
@@ -267,6 +269,7 @@ pub async fn require_in_handler<S: AccountStore, A>(
     Ok(CurrentSession {
         user: session.user,
         token,
+        created_at: session.created_at,
     })
 }
 
@@ -303,6 +306,7 @@ pub async fn require<S: AccountStore, A>(
     request.extensions_mut().insert(CurrentSession {
         user: session.user,
         token,
+        created_at: session.created_at,
     });
     let mut response = next.run(request).await;
     // The browser's copy expires too. A handler that set a cookie, as logout does, has the last word.

@@ -871,8 +871,12 @@ impl AccountStore for FlakyStore {
         self.inner.update_user(user_id, changes, basis, now).await
     }
 
-    async fn delete_user(&self, user_id: &str) -> Result<(), StoreError> {
-        self.inner.delete_user(user_id).await
+    async fn delete_user(
+        &self,
+        user_id: &str,
+        basis: Option<&UpdateBasis<'_>>,
+    ) -> Result<(), StoreError> {
+        self.inner.delete_user(user_id, basis).await
     }
 
     async fn list_users(

@@ -441,6 +441,9 @@ export const fr: Catalogue = {
   "account.recoveryNew": "nouveaux codes de secours",
   "account.delete": "supprimer le compte",
   "account.deleteHint": "le compte est supprimé définitivement",
+  "account.deleteStale":
+    "un compte sans mot de passe se supprime dans les 10 minutes qui suivent une connexion : reconnectez-vous d'abord",
+  "account.logInAgain": "se reconnecter",
 
   "admin.users": "utilisateurs",
   "admin.you": "(vous)",

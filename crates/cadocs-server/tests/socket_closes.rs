@@ -361,7 +361,8 @@ async fn deleting_your_own_account_closes_with_4401() {
     let wiki = wiki(Value::Null).await;
     let bob = wiki.member("admin").await;
     let mut socket = wiki.socket(&bob).await;
-    let reply = wiki.api.raw("DELETE", "/me", &bob.headers(), b"").await;
+    let body = json!({ "current_password": PASSWORD });
+    let reply = wiki.api.send("DELETE", "/me", &bob.headers(), body).await;
     assert_eq!(reply.status, 204, "{reply:?}");
     assert_eq!(close_code(&mut socket).await, Some(SESSION_ENDED));
 }

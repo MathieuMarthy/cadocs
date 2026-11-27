@@ -905,6 +905,29 @@ pub(super) async fn require_password<S: AccountStore, A>(
     }
 }
 
+/// How long after its login a session stands for the password of an account that has none.
+const FRESH_SESSION_MS: i64 = 10 * 60 * 1000;
+
+/// As `require_password`, but an account with no password (made by a provider) proves itself by
+/// a session opened in the last 10 minutes instead: older is a `400` with `session: too_old`,
+/// and the client offers to log in again.
+pub(super) async fn require_password_or_fresh_session<S: AccountStore, A>(
+    state: &AppState<S, A>,
+    current: &CurrentSession,
+    client: (SocketAddr, &HeaderMap),
+    password: Option<String>,
+) -> Result<Option<String>, ApiError> {
+    if state.store.password_hash(&current.user.id).await?.is_some() {
+        return require_password(state, current, client, password).await;
+    }
+    if now_ms() - current.created_at > FRESH_SESSION_MS {
+        return Err(ApiError::new(ErrorCode::ValidationFailed)
+            .with_message("Log in again first")
+            .with_field("session", "too_old"));
+    }
+    Ok(None)
+}
+
 #[derive(Serialize)]
 struct TotpSetup {
     /// Base32, for an app that takes it typed.
@@ -1282,11 +1305,26 @@ async fn confirm_registration<S: AccountStore, A>(
     Ok(new_account_body(&state, user, Vec::new(), &token))
 }
 
+/// A stolen session must not delete the account: it needs the password, or a fresh session.
 async fn delete_me<S: AccountStore, A>(
     State(state): State<AppState<S, A>>,
     Extension(current): Extension<CurrentSession>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    JsonBody(body): JsonBody<PasswordRequest>,
 ) -> Result<Response, ApiError> {
-    state.store.delete_user(&current.user.id).await?;
+    let client = (peer, &headers);
+    let checked_hash =
+        require_password_or_fresh_session(&state, &current, client, body.current_password).await?;
+    let keep = current.token_hash();
+    let basis = UpdateBasis {
+        session: &keep,
+        checked_hash: checked_hash.as_deref(),
+    };
+    state
+        .store
+        .delete_user(&current.user.id, Some(&basis))
+        .await?;
     state.access_changed();
     Ok(session_ended(&state))
 }

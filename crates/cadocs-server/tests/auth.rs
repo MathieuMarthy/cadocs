@@ -576,7 +576,7 @@ async fn the_last_owner_cannot_delete_their_account() {
     api.sql("UPDATE users SET is_instance_admin = 1 WHERE id = 'admin'")
         .await;
     let reply = api
-        .send("DELETE", "/me", &login.headers(), Value::Null)
+        .send("DELETE", "/me", &login.headers(), confirmed())
         .await;
     assert_eq!(reply.status, 409);
     assert_eq!(reply.code(), "conflict");
@@ -597,7 +597,7 @@ async fn the_last_instance_admin_cannot_delete_their_account() {
     )
     .await;
     let reply = api
-        .send("DELETE", "/me", &login.headers(), Value::Null)
+        .send("DELETE", "/me", &login.headers(), confirmed())
         .await;
     assert_eq!(reply.status, 409);
     assert_eq!(reply.code(), "conflict");
@@ -619,7 +619,7 @@ async fn deleting_an_account_ends_its_sessions() {
     );
 
     let reply = api
-        .send("DELETE", "/me", &login.headers(), Value::Null)
+        .send("DELETE", "/me", &login.headers(), confirmed())
         .await;
     assert_eq!(reply.status, 204, "{reply:?}");
     assert!(reply.header("set-cookie").unwrap().contains("Max-Age=0"));
@@ -633,6 +633,125 @@ async fn deleting_an_account_ends_its_sessions() {
         api.number("SELECT count(*) FROM workspace_members").await,
         1
     );
+}
+
+fn confirmed() -> Value {
+    json!({ "current_password": PASSWORD })
+}
+
+/// A stolen session must not delete the account: it needs the password (step 67).
+#[tokio::test]
+async fn deleting_an_account_needs_its_password() {
+    let (api, _) = logged_in().await;
+    let login = api.add_and_login("other", "other@example.org").await;
+    let tries = [
+        (json!({}), "required"),
+        (json!({ "current_password": "wrong password" }), "wrong"),
+    ];
+    for (body, problem) in tries {
+        let reply = api.send("DELETE", "/me", &login.headers(), body).await;
+        assert_eq!(reply.status, 400, "{reply:?}");
+        assert_eq!(
+            reply.body["error"]["fields"],
+            json!({ "current_password": problem })
+        );
+    }
+    let accounts = "SELECT count(*) FROM users WHERE id = 'other'";
+    assert_eq!(api.number(accounts).await, 1);
+    assert_eq!(api.session(&login).await.status, 200);
+
+    let reply = api
+        .send("DELETE", "/me", &login.headers(), confirmed())
+        .await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    assert_eq!(api.number(accounts).await, 0);
+}
+
+#[tokio::test]
+async fn guessing_the_password_of_a_deletion_shares_the_limit_of_guesses() {
+    let (api, login) = logged_in().await;
+    let wrong = json!({ "current_password": "wrong password" });
+    let mut last = 0;
+    for _ in 0..30 {
+        last = api
+            .send("DELETE", "/me", &login.headers(), wrong.clone())
+            .await
+            .status;
+    }
+    assert_eq!(last, 429);
+    let body = json!({ "password": "another long password", "current_password": PASSWORD });
+    let reply = api.send("PATCH", "/me", &login.headers(), body).await;
+    assert_eq!(reply.status, 429, "{reply:?}");
+}
+
+/// An account made by a provider has no password: a login of the last 10 minutes stands for it.
+#[tokio::test]
+async fn an_account_without_a_password_deletes_itself_from_a_fresh_session_only() {
+    let (api, _) = logged_in().await;
+    let login = api.add_and_login("other", "other@example.org").await;
+    api.sql("UPDATE users SET password_hash = NULL WHERE id = 'other'")
+        .await;
+    let ten_minutes = 2 * FIVE_MINUTES_MS;
+    api.sql(&format!(
+        "UPDATE sessions SET created_at = created_at - {ten_minutes} - 1000
+         WHERE user_id = 'other'"
+    ))
+    .await;
+    for body in [json!({}), confirmed()] {
+        let reply = api.send("DELETE", "/me", &login.headers(), body).await;
+        assert_eq!(reply.status, 400, "{reply:?}");
+        assert_eq!(
+            reply.body["error"]["fields"],
+            json!({ "session": "too_old" })
+        );
+    }
+    let accounts = "SELECT count(*) FROM users WHERE id = 'other'";
+    assert_eq!(api.number(accounts).await, 1);
+
+    api.sql("UPDATE sessions SET created_at = created_at + 2000 WHERE user_id = 'other'")
+        .await;
+    let reply = api.send("DELETE", "/me", &login.headers(), json!({})).await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    assert_eq!(api.number(accounts).await, 0);
+}
+
+#[tokio::test]
+async fn a_deletion_checked_against_an_old_password_is_refused() {
+    let (api, _) = logged_in().await;
+    let login = api.add_and_login("other", "other@example.org").await;
+    let token = login.cookie.strip_prefix(&format!("{COOKIE}=")).unwrap();
+    let session = cadocs_server::session::token_hash(token);
+    let (_, hash) = stored_user(&api).await;
+    let stale = [
+        UpdateBasis {
+            session: &session,
+            checked_hash: Some("old hash"),
+        },
+        UpdateBasis {
+            session: "revoked",
+            checked_hash: Some(&hash),
+        },
+        UpdateBasis {
+            session: "revoked",
+            checked_hash: None,
+        },
+    ];
+    for basis in stale {
+        let result = api.store.delete_user("other", Some(&basis)).await;
+        assert!(
+            matches!(result, Err(StoreError::StaleCredentials)),
+            "{result:?}"
+        );
+    }
+    let current = UpdateBasis {
+        session: &session,
+        checked_hash: Some(&hash),
+    };
+    api.store
+        .delete_user("other", Some(&current))
+        .await
+        .unwrap();
+    assert_eq!(api.session(&login).await.status, 401);
 }
 
 #[tokio::test]
@@ -650,7 +769,7 @@ async fn a_disabled_owner_does_not_count_as_another_owner() {
     )
     .await;
     let reply = api
-        .send("DELETE", "/me", &login.headers(), Value::Null)
+        .send("DELETE", "/me", &login.headers(), confirmed())
         .await;
     assert_eq!(reply.status, 409, "{reply:?}");
 }

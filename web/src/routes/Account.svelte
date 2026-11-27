@@ -107,16 +107,19 @@
   let linked = $state<string[]>([]);
   const sso = new Form();
   const ssoOutcome = new URLSearchParams(route.search).get("oidc");
-  /** Whether linking asks for the password: a stolen session must not tie its own provider. */
-  let ssoPassword = $state(true);
+  /**
+   * Whether the account has a password, which linking and deleting ask for: a stolen session must
+   * not tie its own provider, nor delete the account. One made by a provider has none.
+   */
+  let hasPassword = $state(true);
   let ssoCurrentPassword = $state("");
   api<{ providers: string[]; password: boolean }>("GET", "/me/identities").then((read) => {
     linked = read.providers;
-    ssoPassword = read.password;
+    hasPassword = read.password;
   });
 
   async function link(provider: string) {
-    const body = ssoPassword ? { current_password: ssoCurrentPassword } : {};
+    const body = hasPassword ? { current_password: ssoCurrentPassword } : {};
     await sso.run(async () => {
       const started = await api<{ url: string }>("POST", `/me/identities/${provider}`, body);
       location.assign(started.url);
@@ -254,10 +257,17 @@
   }
 
   const removal = new Form();
+  let removalPassword = $state("");
 
   async function remove() {
-    const done = await removal.run(() => api("DELETE", "/me"));
+    const body = hasPassword ? { current_password: removalPassword } : {};
+    const done = await removal.run(() => api("DELETE", "/me", body));
     if (done) signOut();
+  }
+
+  /** An account with no password deletes itself only from a fresh login. */
+  async function logInAgain() {
+    if (await removal.run(() => api("POST", "/auth/logout"))) signOut();
   }
 </script>
 
@@ -425,7 +435,7 @@
         <p class="problem" role="alert">{t("account.ssoFailed")}</p>
       {/if}
       {#if sso.problem}<p class="problem" role="alert">{sso.problem}</p>{/if}
-      {#if ssoPassword && providers.some((id) => !linked.includes(id))}
+      {#if hasPassword && providers.some((id) => !linked.includes(id))}
         <Field
           label={t("form.currentPassword")}
           type="password"
@@ -540,7 +550,24 @@
   <section aria-labelledby="delete-heading">
     <h2 id="delete-heading">{t("account.delete")}</h2>
     <p class="meta">{t("account.deleteHint")}</p>
+    {#if hasPassword}
+      <Field
+        label={t("form.currentPassword")}
+        type="password"
+        bind:value={removalPassword}
+        autocomplete="current-password"
+        problem={removal.field("current_password")}
+      />
+    {/if}
     {#if removal.problem}<p class="problem" role="alert">{removal.problem}</p>{/if}
+    {#if removal.fields.session}
+      <p class="problem" role="alert">{t("account.deleteStale")}</p>
+      <div class="actions">
+        <button class="button" type="button" disabled={removal.busy} onclick={logInAgain}>
+          {t("account.logInAgain")}
+        </button>
+      </div>
+    {/if}
     <div class="actions">
       <Confirm
         label={t("account.delete")}
