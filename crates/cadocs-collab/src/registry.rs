@@ -489,18 +489,22 @@ impl<S: DocStore> Inner<S> {
             Err(error) => Err(error.into()),
         };
         let mut rooms = lock(&self.rooms);
-        let result = match room {
+        let (result, task) = match room {
             Ok(room) => {
                 rooms.slots.insert(doc_id, Slot::Live(room.clone()));
-                tokio::spawn(RoomTask::new(self.clone(), room).run());
-                Ok(())
+                (Ok(()), Some(RoomTask::new(self.clone(), room)))
             }
             Err(error) => {
                 rooms.slots.remove(&doc_id);
-                Err(error)
+                (Err(error), None)
             }
         };
         drop(rooms);
+        // Spawned unlocked: a closing runtime drops the task inline, and its
+        // `Drop` locks the rooms.
+        if let Some(task) = task {
+            tokio::spawn(task.run());
+        }
         done.send_replace(Some(result));
     }
 
@@ -521,6 +525,40 @@ impl<S: DocStore> Inner<S> {
         if is_slot && expired {
             begin_unload(&mut rooms, room);
         }
+    }
+}
+
+impl<S> Inner<S> {
+    /// Frees the slot and estimate of a room whose task ended without unloading it: a panic, which
+    /// a stored document can cause in yrs. Its unflushed edits are lost here, but its sockets close
+    /// with `1001`, and the clients reconnect to a fresh load and resend them.
+    fn forget(&self, room: &Arc<Room>) {
+        warn!(doc_id = %room.doc_id, "a room task ended without unloading its room");
+        let mut rooms = lock(&self.rooms);
+        let mut state = room.state();
+        // Only this room can be unloading under its id: no other loads before its unload ends.
+        let ours = match rooms.slots.get(&room.doc_id) {
+            Some(Slot::Live(live)) => Arc::ptr_eq(live, room),
+            Some(Slot::Unloading(..)) => state.unload.is_some(),
+            _ => false,
+        };
+        if ours {
+            rooms.slots.remove(&room.doc_id);
+        }
+        state.kick_all(CLOSE_GOING_AWAY);
+        if mem::replace(&mut state.failing, false) {
+            self.failing_rooms.fetch_sub(1, Ordering::SeqCst);
+        }
+        let done = state.unload.take();
+        drop(state);
+        drop(rooms);
+        // Any error but `ShuttingDown` lets a waiter try again, and finds the slot free.
+        if let Some(done) = done {
+            done.send_replace(Some(Err(CollabError::CorruptDocument {
+                doc_id: room.doc_id.clone(),
+            })));
+        }
+        self.unloaded.notify_one();
     }
 }
 
@@ -571,6 +609,16 @@ struct RoomTask<S> {
     retry_delay: Duration,
     /// Set after a failed compaction, which encodes the whole document under the room lock.
     next_compact: Option<Instant>,
+    /// Set once the room is unloaded. A task dropped before that panicked, and `drop` frees its slot.
+    finished: bool,
+}
+
+impl<S> Drop for RoomTask<S> {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.inner.forget(&self.room);
+        }
+    }
 }
 
 impl<S: DocStore> RoomTask<S> {
@@ -583,6 +631,7 @@ impl<S: DocStore> RoomTask<S> {
             edit: DocEdit::default(),
             retry_delay,
             next_compact: None,
+            finished: false,
         }
     }
 
@@ -599,6 +648,7 @@ impl<S: DocStore> RoomTask<S> {
             };
             if unloading {
                 if self.unload().await {
+                    self.finished = true;
                     return;
                 }
                 next_flush = None;

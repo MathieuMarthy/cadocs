@@ -1019,11 +1019,6 @@
   overflow-wrap: anywhere;
 }
 
-.share-row.expired code {
-  color: var(--muted);
-  text-decoration: line-through;
-}
-
 .share-foot {
   display: flex;
   flex-wrap: wrap;
@@ -1039,10 +1034,6 @@
 
 .share-facts span + span::before {
   content: " · ";
-}
-
-.share-expired {
-  color: var(--accent-text);
 }
 
 .share-new {

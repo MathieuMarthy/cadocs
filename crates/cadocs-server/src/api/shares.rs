@@ -84,7 +84,7 @@ async fn list<S: ShareStore, A>(
     let after = page.cursor.as_deref();
     let shares = state
         .store
-        .list_shares(&page_id, &current.user.id, after, page.fetch())
+        .list_shares(&page_id, &current.user.id, after, page.fetch(), now_ms())
         .await?;
     Ok(Json(page.cut(shares, |share| share.id.clone())))
 }

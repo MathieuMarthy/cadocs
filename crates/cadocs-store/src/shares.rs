@@ -2,9 +2,10 @@
 //! share says so, its live descendants (ADR 0009).
 //!
 //! Editors manage shares, checked like any page action. The public lookups take a token instead
-//! of a user and check no role: the token is the capability. They answer `None` alike for an
-//! unknown token, an expired share, a page or space in the trash, and a page the share does not
-//! cover, so a visitor learns nothing from the difference.
+//! of a user: the token is the capability, held for as long as its creator may still manage
+//! shares of the page (ADR 0030). They answer `None` alike for an unknown token, an expired
+//! share, a creator who lost that right, a page or space in the trash, and a page the share does
+//! not cover, so a visitor learns nothing from the difference.
 //!
 //! [`DATA_MODEL.md`]: ../../../docs/DATA_MODEL.md#pages
 
@@ -65,14 +66,15 @@ pub trait ShareStore: Send + Sync + 'static {
         new: &NewShare,
     ) -> impl Future<Output = Result<Share, StoreError>> + Send;
 
-    /// At most `limit` shares of the page, oldest first, after the share `after`. Refused as
-    /// `create_share` is.
+    /// At most `limit` shares of the page not expired at `now`, oldest first, after the share
+    /// `after`. Refused as `create_share` is.
     fn list_shares(
         &self,
         page_id: &str,
         actor: &str,
         after: Option<&str>,
         limit: u32,
+        now: i64,
     ) -> impl Future<Output = Result<Vec<Share>, StoreError>> + Send;
 
     /// Refused with `ShareNotFound` for whoever cannot read its page, or `NotAllowed` for a

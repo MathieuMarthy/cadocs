@@ -460,8 +460,11 @@ impl ShareStore for FlakyStore {
         actor: &str,
         after: Option<&str>,
         limit: u32,
+        now: i64,
     ) -> Result<Vec<Share>, StoreError> {
-        self.inner.list_shares(page_id, actor, after, limit).await
+        self.inner
+            .list_shares(page_id, actor, after, limit, now)
+            .await
     }
 
     async fn delete_share(&self, share_id: &str, actor: &str) -> Result<(), StoreError> {

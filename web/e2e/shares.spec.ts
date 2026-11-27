@@ -174,7 +174,7 @@ test("an editor creates a public link with its options, copies it and revokes it
   await expect(page.getByRole("banner").getByRole("button", { name: "more actions for untitled" })).toBeFocused();
 });
 
-test("the dialog lists the links a page has, an expired one as such", async ({ page, server }) => {
+test("the dialog lists the links a page has, an expired one left out", async ({ page, server }) => {
   const id = await server.page("shared");
   await server.call("POST", `/pages/${id}/shares`, {});
   await server.call("POST", `/pages/${id}/shares`, { expires_at: Date.now() + 1000 });
@@ -183,11 +183,10 @@ test("the dialog lists the links a page has, an expired one as such", async ({ p
   await page.goto(`${server.url}/?page=${id}`);
   await openShares(page);
 
-  await expect(links(page)).toHaveCount(2);
+  await expect(links(page)).toHaveCount(1);
   await expect(links(page).nth(0)).toContainText("this page only");
   await expect(links(page).nth(0)).toContainText("hidden from search engines");
   await expect(links(page).nth(0)).toContainText("no expiry");
-  await expect(links(page).nth(1)).toContainText("expired");
 });
 
 test("a date already past is refused", async ({ page, server }) => {

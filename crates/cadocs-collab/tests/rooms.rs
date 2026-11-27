@@ -1145,6 +1145,59 @@ async fn two_callers_for_one_room_evict_one_room() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_eviction_that_panics_frees_its_room_and_budget() {
+    let store = MemStore::new();
+    let registry = budgeted(&store, 2);
+    for doc in ["a", "b"] {
+        let edit = Peer::new(
+            registry
+                .connect(doc, ReadWrite, AUTHOR, SESSION)
+                .await
+                .unwrap(),
+        );
+        edit.write(doc).unwrap();
+        drop(edit);
+        sleep(Duration::from_secs(1)).await;
+    }
+    // The task of a, the oldest idle room, panics in its unload, after its flush.
+    store.panic_compact.store(true, Ordering::SeqCst);
+
+    let c = registry.connect("c", ReadWrite, AUTHOR, SESSION).await;
+
+    assert!(c.is_ok(), "{:?}", c.err());
+    assert_eq!(registry.loaded_rooms(), 2, "a left the budget for c");
+    store.panic_compact.store(false, Ordering::SeqCst);
+    drop(c);
+    sleep(Duration::from_secs(1)).await;
+    let mut a = Peer::new(
+        registry
+            .connect("a", ReadWrite, AUTHOR, SESSION)
+            .await
+            .unwrap(),
+    );
+    a.sync().await;
+    assert_eq!(title(&a.doc), "a");
+    assert_eq!(registry.loaded_rooms(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_room_task_that_panics_closes_its_sockets_and_reloads() {
+    let store = MemStore::new();
+    let registry = compacting(&store, 0);
+    let mut alice = Peer::join(&registry, ReadWrite).await;
+    store.panic_compact.store(true, Ordering::SeqCst);
+    alice.write("x").unwrap();
+    sleep(FLUSH).await;
+    alice.pump().await;
+
+    assert_eq!(alice.closed, Some(CLOSE_GOING_AWAY));
+    assert_eq!(registry.loaded_rooms(), 0);
+    assert!(registry.healthy());
+    store.panic_compact.store(false, Ordering::SeqCst);
+    assert_eq!(connect_title(&registry).await, "x");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_large_document_weighs_on_the_budget_by_its_size() {
     let store = MemStore::new();
     // Room for four small documents.

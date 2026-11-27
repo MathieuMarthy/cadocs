@@ -835,6 +835,82 @@ async fn closed_shares_all_answer_the_same_404() {
     assert_eq!(refusal(&wiki, &format!("/s/{token}")).await, unknown);
 }
 
+/// Step 58: a share answers only while its creator may still manage it (ADR 0030).
+#[tokio::test]
+async fn a_share_closes_when_its_creator_loses_the_editor_role() {
+    let wiki = wiki().await;
+    let page = wiki.page("# Guide\n", None).await;
+    let unknown = refusal(&wiki, "/s/00000000000000000000000000000000").await;
+    let reply = wiki.create(&wiki.bob, &page, json!({})).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let token = reply.body["token"].as_str().unwrap().to_owned();
+    assert_eq!(wiki.public(&format!("/s/{token}")).await.status, 200);
+
+    let path = format!("/spaces/{}/grants", wiki.space);
+    let viewer = json!({ "grants": [{ "user_id": BOB, "role": "viewer" }] });
+    let reply = wiki
+        .api
+        .send("PUT", &path, &wiki.ada.headers(), viewer)
+        .await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    assert_eq!(refusal(&wiki, &format!("/s/{token}")).await, unknown);
+
+    // The share follows the creator's rights of now: given back, they reopen it.
+    let editor = json!({ "grants": [{ "user_id": BOB, "role": "editor" }] });
+    let reply = wiki
+        .api
+        .send("PUT", &path, &wiki.ada.headers(), editor)
+        .await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    assert_eq!(wiki.public(&format!("/s/{token}")).await.status, 200);
+}
+
+#[tokio::test]
+async fn a_share_closes_when_its_creator_leaves_the_workspace() {
+    let wiki = wiki().await;
+    let page = wiki.page("# Guide\n", None).await;
+    let unknown = refusal(&wiki, "/s/00000000000000000000000000000000").await;
+    let reply = wiki.create(&wiki.bob, &page, json!({})).await;
+    assert_eq!(reply.status, 201, "{reply:?}");
+    let token = reply.body["token"].as_str().unwrap().to_owned();
+    let kept = wiki.share(&page, json!({})).await;
+    assert_eq!(wiki.public(&format!("/s/{token}")).await.status, 200);
+
+    let workspace = wiki.api.first_workspace().await;
+    let path = format!("/workspaces/{workspace}/members/{BOB}");
+    let reply = wiki
+        .api
+        .raw("DELETE", &path, &wiki.ada.headers(), b"")
+        .await;
+    assert_eq!(reply.status, 204, "{reply:?}");
+    assert_eq!(refusal(&wiki, &format!("/s/{token}")).await, unknown);
+    // Another editor's share of the page stays open.
+    assert_eq!(wiki.public(&format!("/s/{kept}")).await.status, 200);
+}
+
+#[tokio::test]
+async fn an_expired_share_leaves_the_list() {
+    let wiki = wiki().await;
+    let page = wiki.page("# Guide\n", None).await;
+    let live = wiki.share(&page, json!({})).await;
+    let soon = wiki
+        .share(&page, json!({ "expires_at": 4_000_000_000_000_i64 }))
+        .await;
+    wiki.api
+        .sql(&format!(
+            "UPDATE page_shares SET expires_at = 1 WHERE token = '{soon}'"
+        ))
+        .await;
+    let list = wiki
+        .api
+        .get(&wiki.ada, &format!("/pages/{page}/shares"))
+        .await;
+    assert_eq!(list.status, 200, "{list:?}");
+    let items = list.body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(items[0]["token"], live);
+}
+
 #[tokio::test]
 async fn public_routes_are_rate_limited_per_client() {
     let wiki = wiki().await;

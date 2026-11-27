@@ -234,17 +234,24 @@ withMail("a new email changes only once the code mailed to it is typed", async (
   const code = /^ {4}(\d{6})$/m.exec(message.text)?.[1];
   expect(code).toBeTruthy();
   const proof = page.getByRole("form", { name: "new email" });
-  // Another change meanwhile leaves the code waiting.
+  // A new password meanwhile voids the code (step 57).
   await login.getByLabel("new password").fill(NEW_PASSWORD);
   await login.getByLabel("current password").fill(PASSWORD);
   await login.getByRole("button", { name: "save" }).click();
   await expect(login.getByRole("status")).toContainText("saved");
   await expect(proof).toBeVisible();
-  const wrong = String((Number(code) + 1) % 1_000_000).padStart(6, "0");
-  await proof.getByLabel("code").fill(wrong);
+  await proof.getByLabel("code").fill(code!);
   await proof.getByRole("button", { name: "change email" }).click();
   await expect(proof.getByText("wrong")).toBeVisible();
-  await proof.getByLabel("code").fill(code!);
+
+  await login.getByLabel("email").fill("ada@example.net");
+  await login.getByLabel("current password").fill(NEW_PASSWORD);
+  await login.getByRole("button", { name: "save" }).click();
+  await expect(login.getByRole("status")).toContainText("a code is on its way to ada@example.net");
+  const again = await relay.message(2);
+  expect(again.to).toBe("ada@example.net");
+  const fresh = /^ {4}(\d{6})$/m.exec(again.text)?.[1];
+  await proof.getByLabel("code").fill(fresh!);
   await proof.getByRole("button", { name: "change email" }).click();
   await expect(login.getByRole("status")).toContainText("email changed");
   await expect(proof).toHaveCount(0);

@@ -43,8 +43,9 @@ fn shared_page(row: &SqliteRow) -> SharedPage {
     }
 }
 
-/// A share that opens now: not expired, its page and space out of the trash. Also answers the
-/// workspace of the page, where slugs are unique.
+/// A share that opens now: not expired, its page and space out of the trash, its creator still
+/// allowed to manage it (ADR 0030). Also answers the workspace of the page, where slugs are
+/// unique.
 async fn open_share(
     conn: &mut SqliteConnection,
     token: &str,
@@ -58,9 +59,19 @@ async fn open_share(
     )))
     .bind(token)
     .bind(now)
-    .fetch_optional(conn)
+    .fetch_optional(&mut *conn)
     .await?;
-    Ok(row.map(|row| (share(&row), row.get("workspace_id"))))
+    let Some(row) = row else { return Ok(None) };
+    let share = share(&row);
+    // A creator whose account is gone leaves `created_by` empty.
+    let Some(creator) = &share.created_by else {
+        return Ok(None);
+    };
+    match authorize(conn, &share.page_id, creator, SpaceAction::ManageShares).await {
+        Ok(_) => Ok(Some((share, row.get("workspace_id")))),
+        Err(StoreError::PageNotFound | StoreError::NotAllowed) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 async fn select_share(conn: &mut SqliteConnection, share_id: &str) -> Result<Share, StoreError> {
@@ -142,16 +153,20 @@ impl ShareStore for SqliteStore {
         actor: &str,
         after: Option<&str>,
         limit: u32,
+        now: i64,
     ) -> Result<Vec<Share>, StoreError> {
         let mut reader = self.reader.acquire().await?;
         authorize(&mut reader, page_id, actor, SpaceAction::ManageShares).await?;
         let rows = sqlx::query(AssertSqlSafe(format!(
             "SELECT {SHARE_COLUMNS} FROM page_shares sh
-             WHERE sh.page_id = ?1 AND sh.id > coalesce(?2, '') ORDER BY sh.id LIMIT ?3"
+             WHERE sh.page_id = ?1 AND sh.id > coalesce(?2, '')
+               AND (sh.expires_at IS NULL OR sh.expires_at > ?4)
+             ORDER BY sh.id LIMIT ?3"
         )))
         .bind(page_id)
         .bind(after)
         .bind(limit)
+        .bind(now)
         .fetch_all(&mut *reader)
         .await?;
         Ok(rows.iter().map(share).collect())
