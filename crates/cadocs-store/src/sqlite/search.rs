@@ -74,12 +74,17 @@ impl SearchStore for SqliteStore {
             .bind(rowid)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("INSERT INTO page_fts (rowid, title, body) VALUES (?1, ?2, ?3)")
-            .bind(rowid)
-            .bind(index.title)
-            .bind(index.body)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "INSERT INTO page_fts (rowid, title, body, title_words, body_words)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind(rowid)
+        .bind(index.title)
+        .bind(index.body)
+        .bind(index.title_words)
+        .bind(index.body_words)
+        .execute(&mut *tx)
+        .await?;
         // What the content shows now replaces what it showed, for public shares. The references
         // only grow, since a revision may still show a file.
         sqlx::query("DELETE FROM page_attachments WHERE page_id = ?1")
@@ -172,7 +177,7 @@ impl SearchStore for SqliteStore {
         let rows = sqlx::query(AssertSqlSafe(format!(
             "WITH ranked AS (
                  SELECT t.id AS text_id, p.id AS page_id,
-                        bm25(page_fts, 5.0, 1.0) AS score, -- title, body
+                        bm25(page_fts, 5.0, 1.0, 5.0, 1.0) AS score, -- title, body, their words
                         {access}
                  FROM page_fts f
                  JOIN page_text t ON t.id = f.rowid

@@ -88,6 +88,8 @@ fn index<'a>(page: &'a str, body: &'a str, attachments: &'a [String]) -> PageInd
         page_id: page,
         title: "titl",
         body,
+        title_words: "",
+        body_words: "",
         plain_text: body,
         attachments,
         mentions: &[],

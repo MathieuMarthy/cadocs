@@ -24,6 +24,9 @@ pub struct PageIndex<'a> {
     pub page_id: &'a str,
     pub title: &'a str,
     pub body: &'a str,
+    /// The folded words of the title and body that stemming changes, for prefixes.
+    pub title_words: &'a str,
+    pub body_words: &'a str,
     pub plain_text: &'a str,
     /// The attachments the content shows. Each one of the page's workspace gets a reference
     /// from the page, so its readers can download it.

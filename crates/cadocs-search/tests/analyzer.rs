@@ -77,20 +77,24 @@ fn apostrophes_and_punctuation_split_words() {
 #[test]
 fn a_query_ands_its_terms_and_prefixes_the_last() {
     let query = english().query("deploying Servers").unwrap();
-    assert_eq!(query.fts(), r#""deploy" "server"*"#);
+    assert_eq!(
+        query.fts(),
+        r#"{title body}: ("deploy") AND ("server"* OR "servers"*)"#
+    );
 }
 
 #[test]
 fn a_query_that_ends_with_a_space_has_no_prefix() {
     let query = english().query("deploying servers ").unwrap();
-    assert_eq!(query.fts(), r#""deploy" "server""#);
+    assert_eq!(query.fts(), r#"{title body}: ("deploy" "server")"#);
 }
 
 #[test]
 fn a_query_cannot_inject_fts_syntax() {
     let query = english().query(r#"a" OR title:* NEAR(b) ^c -d"#).unwrap();
-    for part in query.fts().split(' ') {
-        let inner = part.trim_end_matches('*');
+    let syntax = ["{title", "body}:", "AND", "OR"];
+    for part in query.fts().split(' ').filter(|part| !syntax.contains(part)) {
+        let inner = part.trim_matches(['(', ')', '*']);
         assert!(inner.starts_with('"') && inner.ends_with('"'), "{part}");
         assert!(inner[1..inner.len() - 1].chars().all(char::is_alphanumeric));
     }
@@ -106,7 +110,10 @@ fn a_query_with_no_word_is_none() {
 fn a_query_keeps_a_bounded_number_of_terms() {
     let long = "word ".repeat(100);
     let query = english().query(&long).unwrap();
-    assert_eq!(query.fts().split(' ').count(), cadocs_search::MAX_TERMS);
+    assert_eq!(
+        query.fts().matches('"').count(),
+        2 * cadocs_search::MAX_TERMS
+    );
 }
 
 #[test]
@@ -163,7 +170,10 @@ fn an_empty_text_has_an_empty_excerpt() {
 #[test]
 fn a_one_letter_last_word_is_not_a_prefix() {
     // `prefix='2 3'` cannot serve it: it would scan every term.
-    assert_eq!(english().query("plan b").unwrap().fts(), r#""plan" "b""#);
+    assert_eq!(
+        english().query("plan b").unwrap().fts(),
+        r#"{title body}: ("plan" "b")"#
+    );
 }
 
 #[test]
@@ -175,4 +185,36 @@ fn an_excerpt_stops_looking_for_a_match_in_a_long_text() {
     let shown = shown(&english.excerpt(&query, &text));
     assert!(shown.starts_with("filler filler"), "{shown}");
     assert!(!shown.contains('['), "{shown}");
+}
+
+#[test]
+fn a_prefix_is_also_looked_for_among_the_words_as_typed() {
+    // `deployment` stems to `deploy`, which `deploym` does not start.
+    assert_eq!(english().query("deploym").unwrap().fts(), r#""deploym"*"#);
+    assert_eq!(
+        english().query("release deploying").unwrap().fts(),
+        r#"{title body}: ("releas") AND ("deploy"* OR "deploying"*)"#
+    );
+    assert_eq!(french().query("Déploiem").unwrap().fts(), r#""deploiem"*"#);
+}
+
+#[test]
+fn prefix_text_holds_each_word_that_stemming_changed_once() {
+    assert_eq!(
+        english().prefix_text("Deployments deploy the deployment, deployments."),
+        "deployments deployment"
+    );
+    assert_eq!(french().prefix_text("Le Déploiement"), "deploiement");
+}
+
+#[test]
+fn an_excerpt_marks_a_prefix_past_the_stem() {
+    let english = english();
+    let query = english.query("deploym").unwrap();
+    let segments = english.excerpt(&query, "We deploy. The deployment ran.");
+    assert_eq!(shown(&segments), "We deploy. The [deployment] ran.");
+    let french = french();
+    let query = french.query("deploiem").unwrap();
+    let segments = french.excerpt(&query, "Le déploiement");
+    assert_eq!(shown(&segments), "Le [déploiement]");
 }

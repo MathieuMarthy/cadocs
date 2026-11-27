@@ -43,6 +43,8 @@ impl<S: DocStore + SearchStore> Index<S> {
         let (title, document) = self.registry.read(page_id, read_page).await?;
         let plain_text = to_text(&document);
         let analyzer = Analyzer::new(language);
+        let title_words = analyzer.prefix_text(&title);
+        let body_words = analyzer.prefix_text(&plain_text);
         let title = analyzer.index_text(&title);
         let body = analyzer.index_text(&plain_text);
         let attachments = document.attachments();
@@ -53,6 +55,8 @@ impl<S: DocStore + SearchStore> Index<S> {
                 page_id,
                 title: &title,
                 body: &body,
+                title_words: &title_words,
+                body_words: &body_words,
                 plain_text: &plain_text,
                 attachments: &attachments,
                 mentions: &mentions,

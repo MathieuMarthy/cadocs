@@ -44,6 +44,7 @@ Plugins have no route before V2: their rows are tested in the rules only, and th
 | Print stylesheet | `e2e/transfer` `printing shows the page alone` |
 | Attachments on disk or S3, limits | `server/attachments.rs`, `files/local.rs`, `files/s3.rs` (fake S3, and MinIO in CI), `e2e/attachments` |
 | Full-text search, stemming | `server/search.rs`, `search/analyzer.rs`, `store/search.rs`, `e2e/search` |
+| Prefix past the stem (step 60) | `server/search.rs` `a_prefix_past_its_stem_finds_the_word_in_english_and_french` (`deploym`, `déploiem` with and without accents, the excerpt's match, whole words still stemmed, a whole `deploym` finds nothing); `search/analyzer.rs` `a_prefix_is_also_looked_for_among_the_words_as_typed`, `prefix_text_holds_each_word_that_stemming_changed_once`, `an_excerpt_marks_a_prefix_past_the_stem`; `server/upgrade.rs` (search right after migration 0025) |
 | Backlinks | `store/search.rs`, `server/search.rs`, `e2e/blocks` |
 | Revisions: list, view, restore, retention | `server/revisions.rs`, `store/revisions.rs` (thinning), `e2e/revisions` |
 | Brut interface, themes, phone | `e2e/screens` (each screen in both themes), `e2e/shell` (theme, phone width), `e2e/navigation` (drawer) |

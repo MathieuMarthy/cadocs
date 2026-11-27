@@ -418,6 +418,45 @@ async fn a_space_after_the_last_word_ends_it() {
 }
 
 #[tokio::test]
+async fn a_prefix_past_its_stem_finds_the_word_in_english_and_french() {
+    let wiki = wiki().await;
+    let space = wiki.space("Handbook", json!("viewer")).await;
+    let english = wiki.page(&space).await;
+    wiki.write(&english, "Notes", vec![paragraph("The deployment ran.")])
+        .await;
+    assert_eq!(
+        wiki.found(&wiki.ada, "q=deploym", 1).await,
+        vec![english.clone()]
+    );
+    let reply = wiki.search(&wiki.ada, "q=deploym").await;
+    assert_eq!(
+        reply.body["items"][0]["excerpt"][1],
+        json!({ "text": "deployment", "match": true })
+    );
+    assert_eq!(
+        wiki.found(&wiki.ada, "q=deploying+", 1).await,
+        vec![english.clone()],
+        "a whole word is stemmed as before"
+    );
+    assert!(
+        wiki.found(&wiki.ada, "q=deploym+", 0).await.is_empty(),
+        "a whole word is not a prefix"
+    );
+
+    wiki.language("fr").await;
+    let french = wiki.page(&space).await;
+    let body = vec![paragraph("Le déploiement a eu lieu.")];
+    wiki.write(&french, "Notes", body).await;
+    for query in ["q=deploiem", "q=D%C3%A9ploiem", "q=d%C3%A9ploiements+"] {
+        assert_eq!(
+            wiki.found(&wiki.ada, query, 1).await,
+            vec![french.clone()],
+            "{query}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn the_reindex_records_the_members_the_body_mentions() {
     let wiki = wiki().await;
     let space = wiki.space("Open", json!("viewer")).await;

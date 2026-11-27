@@ -418,6 +418,8 @@ CREATE TABLE page_text (
 CREATE VIRTUAL TABLE page_fts USING fts5(
     title,                                   -- stemmed (ADR 0007)
     body,                                    -- stemmed
+    title_words,                             -- folded words that stemming changes, once each
+    body_words,
     tokenize = "unicode61 remove_diacritics 2",
     prefix = '2 3'
 );
@@ -427,6 +429,8 @@ CREATE TRIGGER page_text_delete AFTER DELETE ON page_text BEGIN
 END;
 ```
 
+A whole word of a query is looked for among the stems, `{title body}`. The last word, while it is being typed, is a prefix of its stem or of the word as typed, in every column, so `deploym` finds `deployment` (stem `deploy`) through `body_words`. A word that is its own stem is only in the stems, which the prefix also reaches. Migration 0025 added the two columns, kept the stems and queued a reindex of every page.
+
 `page_fts` is linked by `rowid`, because a lookup on an `UNINDEXED` column would scan the whole table on every reindex. The trigger also runs on the cascade from `pages`.
 
 A page's index is rebuilt by the `reindex_page` job (payload `{"page": "<id>"}`, key `reindex:<id>`). A flush queues it in the same transaction, five seconds ahead, and a pending one absorbs the next flushes. Changing a workspace's `language` queues one for each of its pages, in the transaction of the change, and the migration that added search queued one for every page. The job replaces `page_text` and `page_fts` in one transaction, so a page has one row in each. It also adds a reference from the page to each attachment its content shows, if that attachment belongs to the page's workspace: an id from another workspace, which a crafted client could write, gives nothing. A trashed page keeps its index, which the search query leaves out, and a restore needs no reindex.
@@ -434,7 +438,7 @@ A page's index is rebuilt by the `reindex_page` job (payload `{"page": "<id>"}`,
 Query shape, with permission filtering inside the SQL:
 
 ```sql
-SELECT t.page_id, bm25(page_fts, 5.0, 1.0) AS score -- weights: title, body
+SELECT t.page_id, bm25(page_fts, 5.0, 1.0, 5.0, 1.0) AS score -- weights: title, body, their words
 FROM page_fts f
 JOIN page_text t ON t.id = f.rowid
 JOIN pages p ON p.id = t.page_id
