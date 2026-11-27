@@ -3,11 +3,11 @@
 
 use std::sync::Arc;
 
-use cadocs_collab::DocRegistry;
+use cadocs_collab::{DocRegistry, Event};
 use cadocs_content::text::to_text;
 use cadocs_content::yjs::read_page;
 use cadocs_search::{Analyzer, Language};
-use cadocs_store::{DocStore, Job, PageIndex, SearchStore};
+use cadocs_store::{DocStore, Indexed, Job, PageIndex, SearchStore};
 use serde_json::Value;
 use tracing::warn;
 
@@ -48,7 +48,8 @@ impl<S: DocStore + SearchStore> Index<S> {
         let attachments = document.attachments();
         let mentions = document.mentions();
         let links = document.page_links();
-        self.store
+        let indexed = self
+            .store
             .index_page(&PageIndex {
                 page_id,
                 title: &title,
@@ -59,6 +60,14 @@ impl<S: DocStore + SearchStore> Index<S> {
                 links: &links,
             })
             .await?;
+        // Told once stored, as a comment's mentions are by its handler.
+        let Some(Indexed { site, notified }) = indexed else {
+            return Ok(());
+        };
+        for told in &notified {
+            let event = Event::notification(&site.space_id, &told.user_id, &told.id);
+            self.registry.publish(&site.workspace_id, event);
+        }
         Ok(())
     }
 }

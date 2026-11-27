@@ -24,13 +24,13 @@ use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, CodeAttempt,
     CommentChange, CommentStore, Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant,
-    Group, GroupStore, IdentityUser, IndexTarget, Invitation, InvitationPreview, InvitedUser,
-    MailDigest, Member, Membership, MovedPage, NewAttachment, NewComment, NewEmailCode, NewGrant,
-    NewGroup, NewInvitation, NewPage, NewPasswordReset, NewRevision, NewSession, NewShare,
-    NewSpace, NewTemplate, NewUser, NewWorkspace, PageCopy, PageCrumb, PageIndex, PageMove,
-    PageRecord, PageSite, PageStore, Revision, RevisionStore, RevisionSummary, SearchHit,
-    SearchStore, SessionStanding, Share, ShareStore, SharedPage, SharedView, Snapshot, Space,
-    SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, SubtreePage,
+    Group, GroupStore, IdentityUser, IndexTarget, Indexed, Invitation, InvitationPreview,
+    InvitedUser, MailDigest, Member, Membership, MovedPage, NewAttachment, NewComment,
+    NewEmailCode, NewGrant, NewGroup, NewInvitation, NewPage, NewPasswordReset, NewRevision,
+    NewSession, NewShare, NewSpace, NewTemplate, NewUser, NewWorkspace, PageCopy, PageCrumb,
+    PageIndex, PageMove, PageRecord, PageSite, PageStore, Revision, RevisionStore, RevisionSummary,
+    SearchHit, SearchStore, SessionStanding, Share, ShareStore, SharedPage, SharedView, Snapshot,
+    Space, SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, SubtreePage,
     Template, TemplateStore, TemplateToUse, Thread, TotpProof, UpdateBasis, UploadTarget,
     UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
@@ -277,7 +277,7 @@ impl SearchStore for FlakyStore {
         self.inner.index_target(page_id).await
     }
 
-    async fn index_page(&self, index: &PageIndex<'_>) -> Result<bool, StoreError> {
+    async fn index_page(&self, index: &PageIndex<'_>) -> Result<Option<Indexed>, StoreError> {
         self.inner.index_page(index).await
     }
 

@@ -3,7 +3,7 @@
 
 use std::future::Future;
 
-use crate::{PageRecord, StoreError};
+use crate::{Notified, PageRecord, PageSite, StoreError};
 
 /// The kind of the job that indexes one page, with `{"page": "<id>"}` as its payload and
 /// `reindex:<id>` as its key. A flush queues it, after a delay, so an editing session costs one
@@ -36,6 +36,14 @@ pub struct PageIndex<'a> {
     pub links: &'a [String],
 }
 
+/// A page just indexed, with the notifications its new body mentions made, for the events the
+/// job publishes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Indexed {
+    pub site: PageSite,
+    pub notified: Vec<Notified>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchHit {
     pub page: PageRecord,
@@ -51,12 +59,12 @@ pub trait SearchStore: Send + Sync + 'static {
         page_id: &str,
     ) -> impl Future<Output = Result<Option<IndexTarget>, StoreError>> + Send;
 
-    /// Replaces the page's index and adds its references, in one transaction. Answers `false`
+    /// Replaces the page's index and adds its references, in one transaction. Answers `None`
     /// when the page is gone, and stores nothing then.
     fn index_page(
         &self,
         index: &PageIndex<'_>,
-    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<Indexed>, StoreError>> + Send;
 
     /// The live pages that link to `page_id`, as their last index says, among those the user can
     /// read, by title. `PageNotFound` or `NotAllowed` unless the user can read `page_id`.

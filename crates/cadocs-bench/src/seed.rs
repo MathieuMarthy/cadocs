@@ -195,7 +195,7 @@ async fn index_page<S: SearchStore>(store: &S, id: &str, doc: &Doc) -> anyhow::R
             links: &[],
         })
         .await?;
-    anyhow::ensure!(indexed, "{id} was not indexed");
+    anyhow::ensure!(indexed.is_some(), "{id} was not indexed");
     Ok(())
 }
 
