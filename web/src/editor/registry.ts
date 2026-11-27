@@ -79,7 +79,10 @@ const tableCommand = (
   when: inTable,
 });
 
-const heading = (level: 1 | 2 | 3): SlashCommand => ({
+/** In the schema file too (`HEADING_LEVELS`), so a tab lacking a level reloads (ADR 0016). */
+export const levels = [1, 2, 3, 4, 5, 6] as const;
+
+const heading = (level: (typeof levels)[number]): SlashCommand => ({
   get label() {
     return t("slash.heading", { level });
   },
@@ -117,8 +120,8 @@ export const entries: Entry[] = [
   },
   {
     name: "heading",
-    extensions: [quietInSource(Heading).configure({ levels: [1, 2, 3] })],
-    commands: [heading(1), heading(2), heading(3)],
+    extensions: [quietInSource(Heading).configure({ levels: [...levels] })],
+    commands: levels.map((level) => heading(level)),
   },
   {
     name: "lists",
