@@ -18,7 +18,7 @@
     roleName,
     SPACE_ROLES,
   } from "../lib/roles";
-  import { navigate } from "../lib/router.svelte";
+  import { goBack, navigate } from "../lib/router.svelte";
   import { app } from "../lib/session.svelte";
   import { currentLanguage, t } from "../lib/i18n";
 
@@ -69,6 +69,7 @@
     const done = await general.run(() => api<Space>("PATCH", `/spaces/${id}`, body));
     if (!done) return;
     await nav.loadSpaces();
+    goBack(`/w/${workspace.slug}`);
     notify(t("account.saved"));
   }
 

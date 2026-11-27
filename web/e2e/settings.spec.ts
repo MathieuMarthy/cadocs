@@ -185,7 +185,10 @@ test("a space is renamed, moved to trash with an undo, and restored from the wor
   await general.getByLabel("name").fill("Docs");
   await general.getByLabel("description").fill("What we know");
   await general.getByRole("button", { name: "save" }).click();
+  // Opened by its address, with no screen before it, the save goes to the workspace home.
+  await expect(page).toHaveURL(/\/w\/tests$/);
   await expect(tree(page).getByRole("button", { name: "Docs/", exact: true })).toBeVisible();
+  await page.goto(`${server.url}/w/tests/settings/pages`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Docs settings");
 
   await section(page, "trash").getByRole("button", { name: "move to trash" }).click();
@@ -203,6 +206,25 @@ test("a space is renamed, moved to trash with an undo, and restored from the wor
   await trashed.getByRole("button", { name: "restore Docs" }).click();
   await expect(trashed).toHaveCount(0);
   await expect(tree(page).getByRole("button", { name: "Docs/", exact: true })).toBeVisible();
+});
+
+test("saving a space's settings goes back to the page they were opened from", async ({
+  page,
+  server,
+}) => {
+  const id = await newPage(server, "Plans");
+  await asOwner(page, server);
+  await page.goto(`${server.url}/?page=${id}`);
+  await expect(editor(page)).toBeVisible();
+  await tree(page).getByRole("button", { name: "Pages/", exact: true }).hover();
+  await tree(page).getByRole("button", { name: "more actions for Pages" }).click();
+  await page.getByRole("menuitem", { name: "settings" }).click();
+  await expect(page).toHaveURL(/\/w\/tests\/settings\/pages$/);
+  const general = section(page, "space");
+  await general.getByLabel("description").fill("What we know");
+  await general.getByRole("button", { name: "save" }).click();
+  await expect(page).toHaveURL(`${server.url}/?page=${id}`);
+  await expect(notice(page)).toContainText("saved");
 });
 
 test("an owner deletes a workspace once its name is typed", async ({ page, server }) => {

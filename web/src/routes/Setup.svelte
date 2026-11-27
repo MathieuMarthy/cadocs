@@ -28,12 +28,12 @@
         await signIn(await api<Session>("POST", "/auth/setup", body));
       },
       (error) => {
-        if (error instanceof ApiError && error.fields.code) askCode = true;
         // Someone else finished setup first.
         if (error instanceof ApiError && error.status === 409) void boot();
         return describe(error);
       },
     );
+    if (form.fields.code) askCode = true;
   }
 </script>
 
