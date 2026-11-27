@@ -284,7 +284,7 @@ checksum = "776dfebd015e2d8732c684a2c71003674ccb49457b539b9e82151ba38e96dd7c"
 
 [[package]]
 name = "cadocs-bench"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -306,7 +306,7 @@ dependencies = [
 
 [[package]]
 name = "cadocs-collab"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cadocs-core",
  "cadocs-store",
@@ -322,7 +322,7 @@ dependencies = [
 
 [[package]]
 name = "cadocs-content"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "pulldown-cmark",
  "serde_json",
@@ -332,11 +332,11 @@ dependencies = [
 
 [[package]]
 name = "cadocs-core"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "cadocs-files"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "bytes",
@@ -354,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "cadocs-jobs"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cadocs-collab",
  "cadocs-content",
@@ -375,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "cadocs-mail"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cadocs-mail",
  "getrandom 0.4.3",
@@ -387,14 +387,14 @@ dependencies = [
 
 [[package]]
 name = "cadocs-search"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rust-stemmers",
 ]
 
 [[package]]
 name = "cadocs-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "cadocs-store"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cadocs-core",
  "serde_json",
