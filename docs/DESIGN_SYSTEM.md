@@ -50,6 +50,7 @@ Those subsets have no box-drawing characters, so the tree prefixes of the MVP ne
 | Page title | `page-title` 34/1.2, 600, spacing -0.01em | mono |
 | Section heading (H2) | `section-title` 19/1.3, 600, after its `section-number` | mono |
 | Section number | `section-number` 13/1.3, 500, `accent-text` | mono |
+| Content headings H1 to H6 | `heading-1` 24, `heading-2` 19 (the section heading), `heading-3` 15, `heading-4` 14, `heading-5` 13, all 600 at 1.3; `heading-6` 13, 500, `ink-2`. Tokens in `tokens.css` | mono |
 | Lede | `lede` 19/1.6, `ink-2` | sans |
 | Body | `body` 17/1.7 | sans |
 | Interface | `ui` 13/1.4 | mono |
@@ -155,7 +156,7 @@ The icons, the action menu, the drawer and the lowercase labels come from ADR 00
 
 - `measure` column, centered, `space-14` top margin.
 - Metadata in `meta`, title in `page-title`, lede in `lede`.
-- H2 as described above, with a `space-10` top margin.
+- H1 and H2 with a `space-10` top margin, H3 to H6 with `space-6` above and `space-2` below.
 - Checklist: `[x]` in `accent-text` with a struck, `muted` label when done, `[ ]` in `muted` otherwise.
 - Inline code and blocks on `panel`. Blocks have a `line` border, and the `$` prompt is `muted`.
 - Code highlighting adds no color: comments in `muted`, keywords, types and numbers in `accent-text`, strings in `ok`, titles at 600.

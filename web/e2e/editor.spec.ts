@@ -29,7 +29,7 @@ test("the slash menu lists the blocks, filters them, and moves with the arrows",
   await left.keyboard.type("/");
 
   await expect(commands(left)).toBeVisible();
-  await expect(left.getByText("commands · 21")).toBeVisible();
+  await expect(left.getByText("commands · 24")).toBeVisible();
   const options = commands(left).getByRole("option");
   await expect(options.first()).toHaveAttribute("aria-selected", "true");
   await left.keyboard.press("ArrowDown");
@@ -435,6 +435,30 @@ test("arrowing onto the hashes edits them as text, and leaving applies them", as
   await left.keyboard.press("Enter");
   await expectText(editor(right).locator("h3"), "Section");
   await expect(editor(right).locator("h2")).toHaveCount(0);
+});
+
+test("six hashes make a level 6 heading, typed or written in its source", async ({
+  left,
+  right,
+}) => {
+  await bothOnline(left, right);
+  await editor(left).click();
+  await left.keyboard.type("# Top");
+  await newLine(left);
+  await left.keyboard.type("###### Typed");
+  await expect(editor(left).locator("h6 .md-hint")).toHaveText("######");
+  await expectText(editor(right).locator("h6"), "Typed");
+  await expect(editor(right).locator("h6")).toHaveAttribute("data-number", "01.1");
+
+  await newLine(left);
+  await left.keyboard.type("##### Written");
+  await left.keyboard.press("Home");
+  await left.keyboard.press("ArrowLeft");
+  await left.keyboard.type("#");
+  await left.keyboard.press("End");
+  await left.keyboard.press("Enter");
+  await expectText(editor(right).locator("h6"), "Typed", "Written");
+  await expect(editor(right).locator("h5")).toHaveCount(0);
 });
 
 test("backspace at the start of a heading edits its hashes, down to plain text", async ({

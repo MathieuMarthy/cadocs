@@ -34,7 +34,7 @@ interface SourceState {
 
 const key = new PluginKey<SourceState>("markdownSource");
 
-const HEADING = /^(#{1,3}) /;
+const HEADING = /^(#{1,6}) /;
 const TASK = /^(?:[-*+] )?\[([ xX])\] /;
 const BULLET = /^[-*+] /;
 const ORDERED = /^(\d{1,9})[.)] /;

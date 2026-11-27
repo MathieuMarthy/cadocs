@@ -20,8 +20,8 @@
 //! flags (the first row is always the header), several blocks in a table cell become one line
 //! joined by `<br>`, an ordered list's `type`, a mention, which reads back as its text, and in inline
 //! math a bare `$`, spaces at the edges and line breaks. Import reads `[!TIP]` and `[!IMPORTANT]` as notes,
-//! headings below level 3 as level 3, any other image as its alternative text, and any other HTML
-//! as text. A link whose address [`crate::url::allowed`] refuses keeps only its text both ways.
+//! any other image as its alternative text, and any other HTML as text. A link whose address
+//! [`crate::url::allowed`] refuses keeps only its text both ways.
 
 use std::fmt::Write;
 
@@ -1072,7 +1072,7 @@ impl Reader<'_> {
             }
             TagEnd::Heading(level) => {
                 let content = self.inline.take().map(|i| i.content).unwrap_or_default();
-                let level = (level as u8).min(3);
+                let level = level as u8;
                 // A heading holds no line break.
                 let content = content
                     .into_iter()

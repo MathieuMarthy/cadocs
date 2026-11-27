@@ -204,7 +204,7 @@ fn visit_mut(blocks: &mut [Block], action: &mut impl FnMut(&mut Block)) {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     Paragraph(Vec<Inline>),
-    /// `level` is 1 to 6. The editor offers 1 to 3.
+    /// `level` is 1 to 6, as the editor offers.
     Heading {
         level: u8,
         content: Vec<Inline>,

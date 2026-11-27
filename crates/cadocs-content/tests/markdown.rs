@@ -359,15 +359,29 @@ fn raw_html_imports_as_text() {
 #[test]
 fn import_maps_what_the_schema_lacks() {
     assert_eq!(
-        from_markdown("#### deep\n\n![alt text](https://example.com/i.png)").blocks,
-        vec![
-            Block::Heading {
-                level: 3,
-                content: vec![text("deep")],
-            },
-            para("alt text"),
-        ]
+        from_markdown("![alt text](https://example.com/i.png)").blocks,
+        vec![para("alt text")]
     );
+}
+
+#[test]
+fn six_heading_levels_survive_import_and_export() {
+    let source = "# h1\n\n## h2\n\n### h3\n\n#### h4\n\n##### h5\n\n###### h6\n";
+    let document = from_markdown(source);
+    let levels: Vec<u8> = document
+        .blocks
+        .iter()
+        .map(|block| match block {
+            Block::Heading { level, .. } => *level,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(levels, [1, 2, 3, 4, 5, 6]);
+    assert_eq!(to_markdown(&document, &none).trim_end(), source.trim_end());
+    let html = cadocs_content::html::to_html(&document, &none);
+    for level in 1..=6 {
+        assert!(html.contains(&format!("<h{level} ")), "h{level} in {html}");
+    }
 }
 
 #[test]

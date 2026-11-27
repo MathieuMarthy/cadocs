@@ -39,7 +39,8 @@ fn rust_schema() -> Value {
         .iter()
         .map(|mark| (mark.name.to_string(), json!({ "attrs": attrs(mark.attrs) })))
         .collect();
-    json!({ "nodes": nodes, "marks": marks })
+    let levels: Vec<u8> = (1..=schema::HEADING_LEVELS).collect();
+    json!({ "nodes": nodes, "marks": marks, "headingLevels": levels })
 }
 
 #[test]
