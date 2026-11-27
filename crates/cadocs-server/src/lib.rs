@@ -91,6 +91,8 @@ pub struct AppState<S, A> {
     pub totp_guesses: Arc<AccountLimiter>,
     /// Comments written per account (`api::comments::WRITE_BURST`).
     pub comment_writes: Arc<AccountLimiter>,
+    /// Searches for people to invite, per account (`api::invitations::SEARCH_BURST`).
+    pub people_searches: Arc<AccountLimiter>,
     /// The space exports, running or waiting to be downloaded.
     pub exports: Arc<api::exports::Exports>,
     /// Each socket task holds a receiver, so shutdown can wait for them.
@@ -123,6 +125,7 @@ impl<S, A> Clone for AppState<S, A> {
             public_renders: self.public_renders.clone(),
             totp_guesses: self.totp_guesses.clone(),
             comment_writes: self.comment_writes.clone(),
+            people_searches: self.people_searches.clone(),
             exports: self.exports.clone(),
             sockets: self.sockets.clone(),
             access: self.access.clone(),
@@ -182,6 +185,10 @@ impl<S, A> AppState<S, A> {
             comment_writes: Arc::new(AccountLimiter::new(
                 api::comments::WRITE_BURST,
                 api::comments::WRITE_REFILL,
+            )),
+            people_searches: Arc::new(AccountLimiter::new(
+                api::invitations::SEARCH_BURST,
+                api::invitations::SEARCH_REFILL,
             )),
             exports: Arc::default(),
             sockets: watch::Sender::new(()),

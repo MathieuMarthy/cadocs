@@ -63,7 +63,8 @@ impl SpaceEvent {
 /// A change in one space. Its frame is built once, however many sockets send it.
 #[derive(Debug)]
 pub struct Event {
-    space: String,
+    /// The space its users must read, `None` for an event of its user alone.
+    space: Option<String>,
     frame: String,
     /// The one user the event is for, `None` for every reader of the space.
     user: Option<String>,
@@ -73,7 +74,7 @@ impl Event {
     pub fn page(kind: PageEvent, space: &str, page: &str) -> Self {
         let frame = json!({ "type": kind.wire_name(), "space": space, "page": page });
         Self {
-            space: space.to_owned(),
+            space: Some(space.to_owned()),
             frame: frame.to_string(),
             user: None,
         }
@@ -83,7 +84,7 @@ impl Event {
     pub fn comment(space: &str, page: &str) -> Self {
         let frame = json!({ "type": "comment", "space": space, "page": page });
         Self {
-            space: space.to_owned(),
+            space: Some(space.to_owned()),
             frame: frame.to_string(),
             user: None,
         }
@@ -93,7 +94,17 @@ impl Event {
     pub fn notification(space: &str, user: &str, id: &str) -> Self {
         let frame = json!({ "type": "notification", "id": id });
         Self {
-            space: space.to_owned(),
+            space: Some(space.to_owned()),
+            frame: frame.to_string(),
+            user: Some(user.to_owned()),
+        }
+    }
+
+    /// A new invitation for `user`, whatever workspace their sockets are in.
+    pub fn invitation(user: &str, id: &str) -> Self {
+        let frame = json!({ "type": "invitation", "id": id });
+        Self {
+            space: None,
             frame: frame.to_string(),
             user: Some(user.to_owned()),
         }
@@ -102,7 +113,7 @@ impl Event {
     pub fn space(kind: SpaceEvent, space: &str) -> Self {
         let frame = json!({ "type": kind.wire_name(), "space": space });
         Self {
-            space: space.to_owned(),
+            space: Some(space.to_owned()),
             frame: frame.to_string(),
             user: None,
         }
@@ -265,6 +276,20 @@ impl EventHubs {
         }
     }
 
+    /// To every hub where `event`'s user has a socket.
+    pub(crate) fn publish_to_user(&self, event: Event) {
+        let event = Arc::new(event);
+        for hub in lock(&self.hubs).by_workspace.values() {
+            if hub
+                .listeners
+                .values()
+                .any(|l| event.user.as_ref() == Some(&l.user))
+            {
+                let _ = hub.events.send(event.clone());
+            }
+        }
+    }
+
     pub(crate) fn hold(&self, workspace: &str, event: Event) {
         let mut hubs = lock(&self.hubs);
         if hubs.by_workspace.contains_key(workspace) {
@@ -374,7 +399,8 @@ impl EventConnection {
                 event = self.events.recv() => match event {
                     Ok(event) => {
                         let for_me = event.user.as_ref().is_none_or(|user| *user == self.user);
-                        if for_me && self.reads(&event.space) {
+                        let reads = event.space.as_deref().is_none_or(|space| self.reads(space));
+                        if for_me && reads {
                             return EventOutbound::Text(event.frame.clone());
                         }
                     }

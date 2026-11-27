@@ -23,13 +23,15 @@ Instance admins have no implicit access to content. Their role covers accounts, 
 | Leave the workspace | yes | yes | yes, unless last owner |
 | Update the workspace | no | yes | yes |
 | Create a space | no | yes | yes |
-| Create or revoke an invitation | no | yes | yes |
+| Create or revoke an invitation, find accounts to invite | no | yes | yes |
 | Change or remove a `member` or `admin` | no | yes | yes |
 | Manage groups | no | yes | yes |
 | Choose which installed content plugins the workspace offers (V2) | no | yes | yes |
 | Enable or disable an offered content plugin for oneself (V2) | yes | yes | yes |
 | Change or remove an `owner`, or grant `owner` | no | no | yes |
 | Delete the workspace | no | no | yes |
+
+An invitation made for an account (one held its address when it was made) is also the account's to accept or decline by id, whatever its role anywhere, as long as it holds that address.
 
 A workspace always keeps at least one owner. Any change that would remove the last one returns `409 conflict`.
 
