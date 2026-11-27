@@ -1,6 +1,6 @@
 # Known vulnerabilities, licenses (ADR 0010), secrets and static analysis. On every pull request and
-# weekly, since a new advisory can hit code that did not change. On a push to main, only the secrets
-# scan and CodeQL (ADR 0031).
+# weekly, since a new advisory can hit code that did not change. On a push to main, the secrets scan
+# and CodeQL, and the advisory checks only for a tree no pull request tested (ADR 0031).
 name: Security
 
 on:
@@ -15,11 +15,42 @@ permissions:
   contents: read
 
 jobs:
+  tested:
+    name: Tested as a pull request
+    # ci.yml's check, against this workflow's runs: a merge whose tree its pull request's head passed
+    # skips cargo-deny and npm-audit (a new advisory waits for the next pull request or Monday). A
+    # direct push or a main that moved gets them.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      tested: ${{ steps.check.outputs.tested }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        # Any failure in the test leaves tested=false, so the checks run.
+        run: |
+          tested=false
+          if head=$(git rev-parse -q --verify 'HEAD^2') \
+            && [ "$(git rev-parse 'HEAD^{tree}')" = "$(git rev-parse "$head^{tree}")" ] \
+            && [ "$(gh run list --commit "$head" --event pull_request --workflow security.yml --status success --limit 1 --json databaseId --jq length)" = 1 ]; then
+            tested=true
+          fi
+          echo "tested=$tested" | tee -a "$GITHUB_OUTPUT"
+
   cargo-deny:
     name: Rust advisories, licenses, sources
-    # A merge's lockfile holds only crates its pull requests checked; a new advisory waits for the
-    # next pull request or Monday.
-    if: github.event_name != 'push'
+    needs: tested
+    # On a pull request, on schedule or by hand, tested is skipped and the check runs.
+    if: ${{ !cancelled() && needs.tested.outputs.tested != 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -32,8 +63,8 @@ jobs:
 
   npm-audit:
     name: npm advisories
-    # As cargo-deny.
-    if: github.event_name != 'push'
+    needs: tested
+    if: ${{ !cancelled() && needs.tested.outputs.tested != 'true' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -10,13 +10,13 @@ Status: accepted.
 
 On a push to `main`, a `tested` job compares the merge's tree with its second parent, the pull request's head. When they match and that head has a successful `ci.yml` run as a pull request, `rust` and `web` are skipped; otherwise they run again, so a moved main, a squash or rebase merge and a direct push are tested. `e2e` and `image` run on `main` either way, since no pull request runs them.
 
-`security.yml` on `main` keeps only `secrets`, the only scan of a direct push, and `codeql`, whose analysis of `main` is the alert list and the base every pull request is compared with. `cargo-deny` and `npm-audit` run on pull requests, every Monday and by hand: a merge's lockfiles hold only what its pull requests checked, and an advisory published since waits for the next pull request or Monday.
+`security.yml` on `main` always runs `secrets`, the only scan of a direct push before Monday, and `codeql`, whose analysis of `main` is the alert list and the base every pull request is compared with. Its own `tested` job, the same check against `security.yml`'s runs, gates `cargo-deny` and `npm-audit`: a merge its pull request checked skips them, since its lockfiles are the ones checked and an advisory published since waits for the next pull request or Monday. A direct push, which may bring a crate under a denied license, a git source or a vulnerable npm package, gets them.
 
 ## Consequences
 
-- Per merged pull request, 38.7 job minutes before and 28.3 after (51.1 and 38.5 rounded up per job), measured over those 28 merges.
+- Per merged pull request, 38.7 job minutes before and 28.6 after (51.1 and 39.6 rounded up per job), measured over those 28 merges.
 - No repository setting is needed. A pull request merged red, or before its run finished, has no successful run on its head, so main tests it.
-- A change merged and then reverted on `main` while a pull request was open is in neither the merge's tree nor the head's, but was in the tree the pull request tested, so main does not test the tree without it. Accepted as rare; required up-to-date branches would close it.
+- A green run proves the head merged with the base of its time, not the head's own tree. A change merged and then reverted on `main` while a pull request was open, or a pull request retargeted to `main` after its run (`edited` is not a default `pull_request` type), merges a tree no run tested. Accepted as rare; required up-to-date branches would close it.
 - `rust` and `web` show as skipped on most `main` commits; the run and the README badge stay green.
 
 ## Rejected alternatives

@@ -26,8 +26,10 @@ jobs:
     name: Tested as a pull request
     # A merge whose tree is its pull request's head, and that head passed CI as a pull request, was
     # tested as is. A main that moved since, or a direct push, gets the tests again.
-    # shortcut: a change merged then reverted on main while the pull request was open goes unseen,
-    # upgrade to required up-to-date branches if that ever bites.
+    # shortcut: a run proves the head merged with the base of its time, not the head's own tree, so a
+    # change merged then reverted on main while the pull request was open, or a pull request
+    # retargeted to main after its run, goes untested; upgrade to required up-to-date branches if
+    # that ever bites. security.yml repeats this check.
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
@@ -136,7 +138,8 @@ jobs:
   e2e:
     name: End-to-end
     # The long campaign: after a merge to main, or by hand, once rust and web passed or were skipped.
-    if: ${{ github.event_name != 'pull_request' && !failure() && !cancelled() }}
+    # Only the direct needs: failure() would also count a failed tested job.
+    if: ${{ github.event_name != 'pull_request' && !cancelled() && !contains(needs.*.result, 'failure') }}
     needs: [rust, web]
     runs-on: ubuntu-24.04
     steps:
@@ -174,7 +177,7 @@ jobs:
   image:
     name: Docker image
     # The image as releases build it, then served, backed up and restored.
-    if: ${{ github.event_name != 'pull_request' && !failure() && !cancelled() }}
+    if: ${{ github.event_name != 'pull_request' && !cancelled() && !contains(needs.*.result, 'failure') }}
     needs: [rust, web]
     runs-on: ubuntu-24.04
     steps:
