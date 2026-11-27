@@ -145,9 +145,10 @@ impl Analyzer {
         let mut whole: Vec<&str> = found.iter().map(|(_, word)| *word).collect();
         // A one-letter prefix would scan every term, as `prefix='2 3'` starts at two.
         let mut prefixes = Vec::new();
-        if typing && last.chars().count() > 1 {
+        // Counted once folded: a decomposed `é` is two chars but one letter.
+        let folded = folded(last);
+        if typing && folded.chars().count() > 1 {
             whole.pop();
-            let folded = folded(last);
             let stem = self.stemmer.stem(&folded).into_owned();
             // A stem can be shorter than the word: French `es` stems to `e`.
             if stem != folded && stem.chars().count() > 1 {

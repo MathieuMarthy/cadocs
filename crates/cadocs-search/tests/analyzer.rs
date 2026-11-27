@@ -224,3 +224,11 @@ fn a_one_letter_stem_of_a_prefix_is_left_out() {
     // French drops a final `s`: `es` stems to `e`, which would scan every term.
     assert_eq!(french().query("es").unwrap().fts(), r#""es"*"#);
 }
+
+#[test]
+fn a_decomposed_letter_is_one_letter_and_not_a_prefix() {
+    assert_eq!(
+        french().query("e\u{301}").unwrap().fts(),
+        r#"{title body}: ("e")"#
+    );
+}
