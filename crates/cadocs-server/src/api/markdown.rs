@@ -155,6 +155,26 @@ pub(super) struct Bundle<'a> {
     pub(super) files: &'a [(String, String)],
     /// What leads from the entry of the page to the zip's root: `../` for each folder.
     pub(super) up: &'a str,
+    /// The entries of the zip's pages, by id.
+    pub(super) pages: &'a HashMap<&'a str, &'a str>,
+}
+
+impl Bundle<'_> {
+    /// The relative address of the entry of a page in the zip, with the fragment `id` may end in.
+    pub(super) fn entry(&self, id: &str) -> Option<String> {
+        let (page, fragment) = id.split_once('#').map_or((id, None), |(p, f)| (p, Some(f)));
+        let entry = self.pages.get(page)?;
+        let mut href = self.up.to_owned();
+        let segments = entry
+            .split('/')
+            .map(|s| utf8_percent_encode(s, SEGMENT).to_string());
+        href.push_str(&segments.collect::<Vec<_>>().join("/"));
+        if let Some(fragment) = fragment {
+            href.push('#');
+            href.push_str(fragment);
+        }
+        Some(href)
+    }
 }
 
 impl Links for Bundle<'_> {
@@ -169,7 +189,7 @@ impl Links for Bundle<'_> {
     }
 
     fn page(&self, id: &str) -> String {
-        self.absolute.page(id)
+        self.entry(id).unwrap_or_else(|| self.absolute.page(id))
     }
 }
 
@@ -356,6 +376,7 @@ async fn export<S: DocStore + PageStore + AttachmentStore + RevisionStore, A>(
         absolute,
         files: &files,
         up: "",
+        pages: &HashMap::new(),
     };
     let markdown = render(&title, document, &titles, &links);
     let (pipe, reader) = tokio::io::duplex(PIPE_BYTES);

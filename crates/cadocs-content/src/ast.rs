@@ -42,40 +42,63 @@ impl Document {
         links: &impl crate::Links,
         replace: &mut impl FnMut(&str) -> Option<String>,
     ) {
+        self.inlines_mut(&mut |inline| match inline {
+            Inline::PageLink { id } => {
+                if let Some(new) = replace(id) {
+                    *id = new;
+                }
+            }
+            Inline::Text {
+                marks: Marks {
+                    link: Some(link), ..
+                },
+                ..
+            } => {
+                if let Some(id) = links.page_id(&link.href)
+                    && let Some(start) = link.href.strip_suffix(id.as_str())
+                    && let Some(new) = replace(&id)
+                {
+                    link.href = format!("{start}{new}");
+                }
+            }
+            _ => {}
+        });
+    }
+
+    /// Replaces the whole address of each link that `links` reads as a page with the one
+    /// `address` answers for its id. Page links stay: renderers ask `Links::page` for theirs.
+    pub fn map_page_addresses(
+        &mut self,
+        links: &impl crate::Links,
+        address: &mut impl FnMut(&str) -> Option<String>,
+    ) {
+        self.inlines_mut(&mut |inline| {
+            if let Inline::Text {
+                marks: Marks {
+                    link: Some(link), ..
+                },
+                ..
+            } = inline
+                && let Some(id) = links.page_id(&link.href)
+                && let Some(new) = address(&id)
+            {
+                link.href = new;
+            }
+        });
+    }
+
+    /// Calls `action` on every inline of the blocks that hold some.
+    fn inlines_mut(&mut self, action: &mut impl FnMut(&mut Inline)) {
         visit_mut(&mut self.blocks, &mut |block| {
-            let (Block::Paragraph(inlines)
+            if let Block::Paragraph(inlines)
             | Block::Heading {
                 content: inlines, ..
             }
             | Block::Details {
                 summary: inlines, ..
-            }) = block
-            else {
-                return;
-            };
-            for inline in inlines {
-                match inline {
-                    Inline::PageLink { id } => {
-                        if let Some(new) = replace(id) {
-                            *id = new;
-                        }
-                    }
-                    Inline::Text {
-                        marks:
-                            Marks {
-                                link: Some(link), ..
-                            },
-                        ..
-                    } => {
-                        if let Some(id) = links.page_id(&link.href)
-                            && let Some(start) = link.href.strip_suffix(id.as_str())
-                            && let Some(new) = replace(&id)
-                        {
-                            link.href = format!("{start}{new}");
-                        }
-                    }
-                    _ => {}
-                }
+            } = block
+            {
+                inlines.iter_mut().for_each(&mut *action);
             }
         });
     }
