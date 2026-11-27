@@ -372,7 +372,9 @@ where
     };
     // Attachments already written, by id, with the name of their entry.
     let mut written: HashMap<String, String> = HashMap::new();
-    let mut count = 0;
+    // The tree first, so that a page links to the entry of a page written after it.
+    // Entries are named after the stored titles, which lag a live edit by a flush.
+    let mut entries: Vec<(String, String)> = Vec::new();
     let mut levels = vec![Level {
         parent: None,
         dir: String::new(),
@@ -396,73 +398,11 @@ where
             let Some(last) = batch.last() else { break };
             level.after = Some(last.position.clone());
             for page in batch {
-                count += 1;
-                if count > MAX_PAGES {
+                if entries.len() >= MAX_PAGES {
                     return Err(io::Error::other("the space holds too many pages"));
                 }
-                // A page that cannot be read (corrupt, or trashed meanwhile) must not stop the rest.
-                let (title, document) = match state.registry.read(&page.id, read_page).await {
-                    Ok(read) => read,
-                    Err(error) => {
-                        warn!(%error, page = page.id, "an exported page cannot be read");
-                        continue;
-                    }
-                };
-                let titles = Readable::read(&*state.store, user, &page.id, &document)
-                    .await
-                    .map_err(|error| io::Error::other(format!("{error:?}")))?;
-                let mut files = Vec::new();
-                for id in document.attachments() {
-                    if let Some(name) = written.get(&id) {
-                        files.push((id, name.clone()));
-                        continue;
-                    }
-                    let Some(found) = state
-                        .store
-                        .attachment(&id, user)
-                        .await
-                        .map_err(io::Error::other)?
-                    else {
-                        continue;
-                    };
-                    let name = safe_name(&found.file_name, "file");
-                    let mut body = match state.files.get(&id).await {
-                        Ok(body) => body,
-                        Err(FileError::NotFound) => {
-                            warn!(id, "an exported attachment has a row and no file");
-                            continue;
-                        }
-                        Err(error) => return Err(io::Error::other(error)),
-                    };
-                    let entry = format!("attachments/{id}/{name}");
-                    let builder = ZipEntryBuilder::new(entry.into(), Compression::Stored);
-                    let mut writer = zip.write_entry_stream(builder).await.map_err(zip_error)?;
-                    while let Some(chunk) = body.bytes.next().await {
-                        writer.write_all(&chunk?).await?;
-                    }
-                    writer.close().await.map_err(zip_error)?;
-                    written.insert(id.clone(), name.clone());
-                    files.push((id, name));
-                }
-                let up = "../".repeat(level.dir.matches('/').count());
-                let links = Bundle {
-                    absolute: Absolute {
-                        origin: absolute.origin,
-                    },
-                    files: &files,
-                    up: &up,
-                };
-                let text = if html {
-                    page_html(&title, &document, &titles, &links)
-                } else {
-                    page_markdown(&title, document, &titles, &links)
-                };
-                let stem = unique(&mut level.stems, safe_name(&title, "Untitled"));
-                let entry = format!("{}{stem}.{extension}", level.dir);
-                let builder = ZipEntryBuilder::new(entry.into(), Compression::Stored);
-                zip.write_entry_whole(builder, text.as_bytes())
-                    .await
-                    .map_err(zip_error)?;
+                let stem = unique(&mut level.stems, safe_name(&page.title, "Untitled"));
+                entries.push((page.id.clone(), format!("{}{stem}.{extension}", level.dir)));
                 if page.has_children {
                     levels.push(Level {
                         parent: Some(page.id),
@@ -473,6 +413,77 @@ where
                 }
             }
         }
+    }
+    // shortcut: a page that cannot be read keeps its entry here, so links to it lead nowhere.
+    let pages: HashMap<&str, &str> = entries
+        .iter()
+        .map(|(id, e)| (id.as_str(), e.as_str()))
+        .collect();
+    for (id, entry) in &entries {
+        // A page that cannot be read (corrupt, or trashed meanwhile) must not stop the rest.
+        let (title, mut document) = match state.registry.read(id, read_page).await {
+            Ok(read) => read,
+            Err(error) => {
+                warn!(%error, page = id, "an exported page cannot be read");
+                continue;
+            }
+        };
+        let titles = Readable::read(&*state.store, user, id, &document)
+            .await
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
+        let mut files = Vec::new();
+        for id in document.attachments() {
+            if let Some(name) = written.get(&id) {
+                files.push((id, name.clone()));
+                continue;
+            }
+            let Some(found) = state
+                .store
+                .attachment(&id, user)
+                .await
+                .map_err(io::Error::other)?
+            else {
+                continue;
+            };
+            let name = safe_name(&found.file_name, "file");
+            let mut body = match state.files.get(&id).await {
+                Ok(body) => body,
+                Err(FileError::NotFound) => {
+                    warn!(id, "an exported attachment has a row and no file");
+                    continue;
+                }
+                Err(error) => return Err(io::Error::other(error)),
+            };
+            let entry = format!("attachments/{id}/{name}");
+            let builder = ZipEntryBuilder::new(entry.into(), Compression::Stored);
+            let mut writer = zip.write_entry_stream(builder).await.map_err(zip_error)?;
+            while let Some(chunk) = body.bytes.next().await {
+                writer.write_all(&chunk?).await?;
+            }
+            writer.close().await.map_err(zip_error)?;
+            written.insert(id.clone(), name.clone());
+            files.push((id, name));
+        }
+        let up = "../".repeat(entry.matches('/').count());
+        let links = Bundle {
+            absolute: Absolute {
+                origin: absolute.origin,
+            },
+            files: &files,
+            up: &up,
+            pages: &pages,
+        };
+        // Links written as addresses, not page links, point at the entries too.
+        document.map_page_addresses(&absolute, &mut |id| links.entry(id));
+        let text = if html {
+            page_html(&title, &document, &titles, &links)
+        } else {
+            page_markdown(&title, document, &titles, &links)
+        };
+        let builder = ZipEntryBuilder::new(entry.clone().into(), Compression::Stored);
+        zip.write_entry_whole(builder, text.as_bytes())
+            .await
+            .map_err(zip_error)?;
     }
     let mut file = zip.close().await.map_err(zip_error)?.into_inner();
     tokio::io::AsyncWriteExt::flush(&mut file).await?;

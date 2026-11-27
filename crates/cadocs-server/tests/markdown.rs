@@ -577,6 +577,7 @@ async fn a_space_export_is_a_zip_of_folders_and_pages_only_its_starter_downloads
     assert_eq!(reply.status, 201, "{reply:?}");
     // The same title twice at the root, so the second one is told apart.
     wiki.imported("# Guide\n\nOther.\n").await;
+    wiki.titles_stored(3).await;
 
     let (job, status) = wiki.space_export(&wiki.vic, "format=md").await;
     assert_eq!(status.body["status"], "done", "{status:?}");
@@ -684,6 +685,20 @@ impl Wiki {
         self.api
             .number("SELECT COUNT(*) FROM pages WHERE deleted_at IS NULL")
             .await
+    }
+
+    /// Waits for a flush to store `count` titles, which name the files of a space export.
+    async fn titles_stored(&self, count: i64) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while self
+            .api
+            .number("SELECT COUNT(*) FROM pages WHERE title <> ''")
+            .await
+            < count
+        {
+            assert!(Instant::now() < deadline, "the titles were never stored");
+            sleep(Duration::from_millis(20)).await;
+        }
     }
 }
 
@@ -937,4 +952,92 @@ async fn backslashes_in_a_zip_separate_folders() {
     assert_eq!(status.body["pages"], 2, "{status:?}");
     let root = wiki.children(None).await;
     assert_eq!(root[0].1, "# folder\n");
+}
+
+/// The page links of an exported file, as title and address.
+fn page_links(text: &str, html: bool) -> Vec<(String, String)> {
+    let (open, middle, close) = if html {
+        (r#"<a class="page-link" href=""#, r#"">"#, "</a>")
+    } else {
+        ("[", "](", ")")
+    };
+    let mut links = Vec::new();
+    for part in text.split(open).skip(1) {
+        let (first, rest) = part.split_once(middle).unwrap();
+        let (second, _) = rest.split_once(close).unwrap();
+        links.push(if html {
+            (second.to_owned(), first.to_owned())
+        } else {
+            (first.to_owned(), second.to_owned())
+        });
+    }
+    links
+}
+
+#[tokio::test]
+async fn a_space_export_links_its_pages_to_their_files() {
+    let wiki = wiki(&[("CADOCS_FLUSH_INTERVAL_MS", "50")]).await;
+    let body = zip(&[
+        (
+            "Guide.md",
+            b"# Guide\n\n[x](Guide/Child%20one.md) [x](Notes.md) [x](Other.md)\n",
+        ),
+        (
+            "Guide/Child one.md",
+            b"# Child one\n\n[x](../Guide.md) [x](Child%20one/Leaf.md)\n",
+        ),
+        (
+            "Guide/Child one/Leaf.md",
+            b"# Leaf\n\n[x](../../Notes.md) [x](../../Guide.md) [x](../Child%20one.md)\n",
+        ),
+        ("Notes.md", b"# Notes\n\n[x](Guide/Child%20one/Leaf.md)\n"),
+        // The same title as `Notes.md`, so one of them is written as `Notes (2)`.
+        ("Other.md", b"# Notes\n\n[x](Notes.md) [x](Other.md)\n"),
+    ])
+    .await;
+    let status = wiki.bulk("", &body).await;
+    assert_eq!(status.body["pages"], 5, "{status:?}");
+    wiki.titles_stored(5).await;
+
+    for (format, html) in [("md", false), ("html", true)] {
+        let (job, status) = wiki
+            .space_export(&wiki.ada, &format!("format={format}"))
+            .await;
+        assert_eq!(status.body["status"], "done", "{status:?}");
+        let reply = wiki.api.get(&wiki.ada, &format!("/jobs/{job}/file")).await;
+        let entries = unzip(reply.bytes).await;
+        let mut followed = 0;
+        for (name, bytes) in &entries {
+            let text = String::from_utf8(bytes.clone()).unwrap();
+            let dir = name.rsplit_once('/').map_or("", |(dir, _)| dir);
+            for (title, href) in page_links(&text, html) {
+                // Relative to the file, each segment percent-encoded.
+                let mut path: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+                let decoded = percent_encoding::percent_decode_str(&href)
+                    .decode_utf8()
+                    .unwrap()
+                    .into_owned();
+                for segment in decoded.split('/') {
+                    if segment == ".." {
+                        assert!(path.pop().is_some(), "{href} leaves the zip from {name}");
+                    } else {
+                        path.push(segment);
+                    }
+                }
+                let target = path.join("/");
+                let Some(linked) = entries.get(&target) else {
+                    panic!("{href} in {name} leads to no entry: {:?}", entries.keys());
+                };
+                let linked = String::from_utf8(linked.clone()).unwrap();
+                let heading = if html {
+                    format!("<h1>{title}</h1>")
+                } else {
+                    format!("# {title}\n")
+                };
+                assert!(linked.contains(&heading), "{href} in {name}: {linked}");
+                followed += 1;
+            }
+        }
+        assert_eq!(followed, 11, "{format}: {:?}", entries.keys());
+    }
 }

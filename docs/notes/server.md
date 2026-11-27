@@ -102,8 +102,9 @@ What a change to HTTP, sockets, sessions, administration or mail must know.
 ## Exports (step 52)
 
 - `api/exports.rs`: space exports are in-memory jobs (`AppState::exports`), not rows of `jobs`: the zip goes to `FileStore::scratch()`, an anonymous file that a restart loses anyway, and dropping the job closes it. A semaphore of one runs them in turn, `MAX_JOBS` bounds the jobs running or holding a file (an ended one without a file takes no slot, and only `MAX_USER_ENDED` per user are kept), a task removes its job an hour after it ends. A download reads with `read_at`, so two at once share no offset (unix only).
-- The tree is walked folder by folder with `PageStore::tree` in batches of 100, so memory is one page and its AST, and a stack of folders. A page's title in its entry comes from its room (`registry.read`), as for a page export.
-- Left open: no progress count; a link between pages stays absolute rather than a relative file link; a page moved during the walk may be missed or written twice; HTML pages carry no style.
+- The tree is walked folder by folder with `PageStore::tree` in batches of 100, and names every entry first (id and entry name, at most `MAX_PAGES`), so memory is that list, one page and its AST, and a stack of folders. Entry names come from the stored titles, which lag a live edit by a flush, as the titles of page links already did; the `<h1>` of a file comes from its room (`registry.read`). Tests that export right after an import wait for the titles (`titles_stored`).
+- Links (step 64): `Bundle` points a page link at the entry of its page, relative to the file and percent-encoded per segment, and `Document::map_page_addresses` does the same for link marks to pages, a fragment kept; a page outside the zip stays absolute. A bulk import of the zip reads those links back as page links.
+- Left open: no progress count; a link to a page that cannot be read leads to no entry; a page moved during the walk may be missed or written twice; HTML pages carry no style.
 
 ## Duplication (step 50)
 

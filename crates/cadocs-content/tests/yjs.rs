@@ -378,6 +378,40 @@ fn map_pages_points_page_links_and_links_to_pages_elsewhere() {
 }
 
 #[test]
+fn map_page_addresses_rewrites_whole_links_to_pages_and_leaves_page_links() {
+    let to = |href: &str| {
+        marked(
+            "see",
+            Marks {
+                link: Some(link(href)),
+                ..Marks::default()
+            },
+        )
+    };
+    let page = Inline::PageLink { id: "a".to_owned() };
+    let mut document = Document {
+        blocks: vec![Block::Blockquote(vec![Block::Paragraph(vec![
+            page.clone(),
+            to("/?page=a"),
+            to("/?page=out"),
+            to("https://example.org/"),
+        ])])],
+    };
+    document.map_page_addresses(&cadocs_content::Relative, &mut |id| {
+        (id == "a").then(|| "A.md".to_owned())
+    });
+    let expected = Document {
+        blocks: vec![Block::Blockquote(vec![Block::Paragraph(vec![
+            page,
+            to("A.md"),
+            to("/?page=out"),
+            to("https://example.org/"),
+        ])])],
+    };
+    assert_eq!(document, expected);
+}
+
+#[test]
 fn mentions_lists_each_mentioned_user_once() {
     let mention = |id: &str| Inline::Mention { id: id.to_owned() };
     let document = Document {
