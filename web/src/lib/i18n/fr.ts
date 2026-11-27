@@ -82,6 +82,7 @@ export const fr: Catalogue = {
   "login.title": "connexion",
   "login.submit": "se connecter",
   "login.wrong": "e-mail ou mot de passe incorrect",
+  "login.again": "cette connexion ne fonctionne plus. saisissez à nouveau votre e-mail et votre mot de passe.",
   "login.codeSent": "un code est en route vers {email}. il est valable 10 minutes.",
   "login.noCode": "pas de code ?",
   "login.resend": "envoyer un nouveau code",

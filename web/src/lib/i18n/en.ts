@@ -78,6 +78,7 @@ export const en = {
   "login.title": "log in",
   "login.submit": "log in",
   "login.wrong": "wrong email or password",
+  "login.again": "this login no longer works. type your email and password again.",
   "login.codeSent": "a code is on its way to {email}. it works for 10 minutes.",
   "login.noCode": "no code?",
   "login.resend": "send a new code",

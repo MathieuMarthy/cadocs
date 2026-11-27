@@ -3,7 +3,7 @@
 
 import { expect, type Page } from "@playwright/test";
 
-import { bothOnline, command, DOC, editor, expectText, newLine, test } from "./editing.ts";
+import { bothOnline, command, DOC, editor, expectText, newLine, status, test } from "./editing.ts";
 
 const people = (page: Page) => page.getByRole("listbox", { name: "people" });
 const pages = (page: Page) => page.getByRole("listbox", { name: "pages" });
@@ -79,4 +79,29 @@ test("a comment mentions a member and a page, and its body stays text", async ({
   await own.getByRole("button", { name: "save", exact: true }).click();
   await expect(body).toHaveText("<b>Ask</b> @Grace about Deploy notes today");
   await expect(body.locator(".mention")).toHaveText("@Grace");
+});
+
+test("a page link clicked in a comment composer opens another tab and keeps the draft", async ({ left, server }) => {
+  const target = await server.page("target");
+  await server.call("PATCH", `/pages/${target}`, { title: "Deploy notes" });
+  await server.titleStored(target, "Deploy notes");
+  await expect(status(left)).toHaveText("synced · 1 online");
+
+  await toggle(left).click();
+  await panel(left).getByRole("button", { name: "comment on the page", exact: true }).click();
+  const field = panel(left).getByRole("textbox", { name: "comment", exact: true });
+  await field.click();
+  await left.keyboard.type("see ");
+  await left.keyboard.type("[[depl");
+  await expect(pages(left).getByRole("option")).toHaveText(["Deploy notes"]);
+  await left.keyboard.press("Enter");
+  await left.keyboard.type("first");
+
+  const opened = left.context().waitForEvent("page");
+  await field.getByRole("link", { name: "Deploy notes" }).click();
+  const tab = await opened;
+  await expect(tab).toHaveURL(`${server.url}/?page=${target}`);
+  await tab.close();
+  await expect(left).toHaveURL(`${server.url}/?page=${await server.page(DOC)}`);
+  await expect(field).toHaveText("see Deploy notes first");
 });

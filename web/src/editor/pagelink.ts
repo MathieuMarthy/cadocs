@@ -39,12 +39,17 @@ export function titleOf(id: string) {
  * A link to another page of the instance. Only the id is stored: the title is read when shown,
  * so it follows renames and is never shown to someone who cannot read the page.
  */
-export const PageLink = Node.create({
+export const PageLink = Node.create<{ newTab: boolean }>({
   name: "pageLink",
   group: "inline",
   inline: true,
   atom: true,
   selectable: true,
+
+  addOptions() {
+    // A comment composer opens links in another tab, so its draft stays.
+    return { newTab: false };
+  },
 
   addAttributes() {
     return {
@@ -66,12 +71,15 @@ export const PageLink = Node.create({
   },
 
   addNodeView() {
+    const newTab = this.options.newTab;
     return ({ node }) => {
       const link = document.createElement("a");
       const id = String(node.attrs.id ?? "");
       link.className = "page-link";
       link.dataset.type = "pageLink";
       link.href = `/?page=${encodeURIComponent(id)}`;
+      // The router leaves a link with a target to the browser.
+      if (newTab) link.target = "_blank";
       link.textContent = "…";
       let live = true;
       titleOf(id).then(
@@ -86,7 +94,7 @@ export const PageLink = Node.create({
       );
       return {
         dom: link,
-        // The router opens it in this tab. The press is kept from ProseMirror, whose
+        // The router opens it in this tab, the browser in another one. The press is kept from ProseMirror, whose
         // `handleClick` runs on mouseup, or the link mark's handler would open a new tab as well.
         stopEvent: (event) => ["mousedown", "mouseup", "click"].includes(event.type),
         ignoreMutation: () => true,
