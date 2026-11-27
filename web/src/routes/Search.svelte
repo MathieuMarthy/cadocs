@@ -2,6 +2,7 @@
   import { onDestroy } from "svelte";
 
   import Shell from "../components/Shell.svelte";
+  import Skeleton from "../components/Skeleton.svelte";
   import { api, type Workspace } from "../lib/api";
   import { describe } from "../lib/form.svelte";
   import { acquireNav } from "../lib/nav.svelte";
@@ -125,7 +126,7 @@
   {#if !q.trim()}
     <p class="meta">{t("search.hint")}</p>
   {:else if hits === null}
-    {#if !problem}<p class="meta" role="status">{t("search.searching")}</p>{/if}
+    {#if !problem}<Skeleton kind="records" label={t("search.searching")} />{/if}
   {:else if hits.length === 0}
     <p class="notice" role="status">{t("search.none")}</p>
   {:else}

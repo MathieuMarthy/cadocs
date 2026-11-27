@@ -85,4 +85,10 @@ Plugins have no route before V2: their rows are tested in the rules only, and th
 | Screen faults (step 65) | `e2e/mail` `a second factor turned on in the account makes a login ask for a mailed code` (a wrong code shows `wrong` alone), `a password changed while the code form is open sends the login back to the password` (the `401` returns to email and password, email kept, and says why); `e2e/mentions` `a page link clicked in a comment composer opens another tab and keeps the draft` |
 | Binary under 30 MB, no S3 code in a default build | `scripts/check-build.sh`: the dependency graph of each flavor in CI's `rust` job on every pull request; the size and S3 code of the release binary in the `e2e` job after each push to main, and of each binary in `release.yml` |
 
+## V1.2 scope
+
+| Item | Tests |
+| --- | --- |
+| Loading skeletons (step 75) | `e2e/skeletons`: a page held at its read, then at its sync, keeps one still skeleton (`loading…`, bars, no animation) with no title field, then shows its title; the tree held at its spaces, under reduced motion, then shows them; search held at its answer (`searching…`), then says it. The 300ms delay before a skeleton shows is not tested |
+
 Not automated: the RAM targets (`bench/rss.sh`), except that a hash's memory goes back with no trim (`server/hash_memory.rs`, ADR 0023), and the release workflow as a whole, which runs on a tag.

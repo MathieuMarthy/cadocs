@@ -1086,3 +1086,64 @@ button.row:hover {
   color: var(--danger);
   text-decoration: line-through;
 }
+
+/* Loading skeleton: the shape of what loads, in still bars. A column of flex items, whose
+   margins do not collapse, once its delay is over. */
+
+.skeleton:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+}
+
+.skeleton-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skeleton-bar {
+  height: 12px;
+  background: var(--line);
+}
+
+/* A title, then lines at the body's line height (`.title` and `.tiptap` in page.css). */
+.skeleton[data-kind="page"] .skeleton-bar {
+  margin: calc((17px * 1.7 - 12px) / 2) 0;
+}
+
+.skeleton[data-kind="page"] .skeleton-bar:nth-child(1 of .skeleton-bar) {
+  width: 60%;
+  height: 34px;
+  margin: 0 0 calc(18px + 34px * 0.2);
+}
+
+.skeleton[data-kind="page"] .skeleton-bar:nth-child(3n of .skeleton-bar) {
+  width: 85%;
+}
+
+.skeleton[data-kind="page"] .skeleton-bar:nth-last-child(1 of .skeleton-bar) {
+  width: 45%;
+}
+
+.skeleton[data-kind="rows"] .skeleton-bar {
+  width: 60%;
+  margin: calc((var(--row-height) - 12px) / 2) var(--space-2);
+}
+
+.skeleton[data-kind="rows"] .skeleton-bar:nth-child(even of .skeleton-bar) {
+  width: 40%;
+}
+
+/* A result: its title, then its excerpt. */
+.skeleton[data-kind="records"] .skeleton-bar:nth-child(odd of .skeleton-bar) {
+  width: 30%;
+  height: 14px;
+  margin: 0 0 var(--space-2);
+}
+
+.skeleton[data-kind="records"] .skeleton-bar:nth-child(even of .skeleton-bar) {
+  margin: 0 0 var(--space-6);
+}
