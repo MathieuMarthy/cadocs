@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use cadocs_mail::{Mail, Outbox};
+use cadocs_mail::{Lang, Mail, Outbox, Text};
 use cadocs_store::{CommentStore, Job, MailDigest, NotificationKind, now_ms};
 use serde_json::Value;
 
@@ -49,36 +49,42 @@ impl<S: CommentStore> MailNotifications<S> {
 }
 
 fn message(digest: &MailDigest, origin: &str) -> Mail {
-    let mut text = format!("Hello {},\n\n", digest.name);
+    let lang = Lang::of(digest.language.as_deref());
+    let mut text = Text::Hello.fill(lang, &[("name", &digest.name)]);
     let mut seen: Vec<String> = Vec::new();
     for item in &digest.items {
-        let who = item.actor.as_ref().map_or("Someone", |actor| &actor.name);
+        let who = item
+            .actor
+            .as_ref()
+            .map_or(Text::Someone.get(lang), |actor| &actor.name);
         let what = match item.kind {
-            NotificationKind::Mention => "mentioned you in",
-            NotificationKind::Reply => "replied to you on",
-            NotificationKind::Comment => "commented on",
+            NotificationKind::Mention => Text::MentionLine,
+            NotificationKind::Reply => Text::ReplyLine,
+            NotificationKind::Comment => Text::CommentLine,
         };
         let title = match item.page_title.as_str() {
-            "" => "an untitled page",
+            "" => Text::UntitledPage.get(lang),
             title => title,
         };
         // Two comments on one page by one person read as one line.
-        let line = format!("{who} {what} {title}\n{origin}/?page={}\n\n", item.page_id);
+        let mut line = what.fill(lang, &[("who", who), ("title", title)]);
+        line.push_str(&format!("{origin}/?page={}\n\n", item.page_id));
         if !seen.contains(&line) {
             seen.push(line);
         }
     }
     text.extend(seen.iter().take(LISTED).map(String::as_str));
     if seen.len() > LISTED {
-        text.push_str(&format!("And {} more.\n\n", seen.len() - LISTED));
+        let more = (seen.len() - LISTED).to_string();
+        text.push_str(&Text::More.fill(lang, &[("count", &more)]));
     }
-    text.push_str("You get this because notifications by mail are on in your account.\n");
+    text.push_str(Text::NotificationsFooter.get(lang));
     let count = digest.items.len();
     Mail {
         to: digest.email.clone(),
         subject: match count {
-            1 => "1 new notification on cadocs".to_owned(),
-            _ => format!("{count} new notifications on cadocs"),
+            1 => Text::NotificationSubject.get(lang).to_owned(),
+            _ => Text::NotificationsSubject.fill(lang, &[("count", &count.to_string())]),
         },
         text,
     }

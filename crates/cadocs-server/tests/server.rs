@@ -24,13 +24,13 @@ use cadocs_server::{AppState, router, serve};
 use cadocs_store::{
     AccountStore, ActiveSession, AdminChanges, Attachment, AttachmentStore, CodeAttempt,
     CommentChange, CommentStore, Credentials, DateCursor, DocEdit, DocStore, FirstUser, Grant,
-    Group, GroupStore, IdentityUser, IndexTarget, Invitation, InvitationPreview, InvitedUser,
-    MailDigest, Member, Membership, MovedPage, NewAttachment, NewComment, NewEmailCode, NewGrant,
-    NewGroup, NewInvitation, NewPage, NewPasswordReset, NewRevision, NewSession, NewShare,
-    NewSpace, NewTemplate, NewUser, NewWorkspace, PageCopy, PageCrumb, PageIndex, PageMove,
-    PageRecord, PageSite, PageStore, Revision, RevisionStore, RevisionSummary, SearchHit,
-    SearchStore, SessionStanding, Share, ShareStore, SharedPage, SharedView, Snapshot, Space,
-    SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, SubtreePage,
+    Group, GroupStore, IdentityUser, IndexTarget, Indexed, Invitation, InvitationPreview,
+    InvitedUser, MailDigest, Member, Membership, MovedPage, NewAttachment, NewComment,
+    NewEmailCode, NewGrant, NewGroup, NewInvitation, NewPage, NewPasswordReset, NewRevision,
+    NewSession, NewShare, NewSpace, NewTemplate, NewUser, NewWorkspace, PageCopy, PageCrumb,
+    PageIndex, PageMove, PageRecord, PageSite, PageStore, Revision, RevisionStore, RevisionSummary,
+    SearchHit, SearchStore, SessionStanding, Share, ShareStore, SharedPage, SharedView, Snapshot,
+    Space, SpaceChanges, SpaceStore, SqliteStore, StoreError, StoredDoc, StoredUpdate, SubtreePage,
     Template, TemplateStore, TemplateToUse, Thread, TotpProof, UpdateBasis, UploadTarget,
     UserChanges, UserRecord, Workspace, WorkspaceChanges, WorkspaceReach, WorkspaceStore, now_ms,
 };
@@ -277,7 +277,7 @@ impl SearchStore for FlakyStore {
         self.inner.index_target(page_id).await
     }
 
-    async fn index_page(&self, index: &PageIndex<'_>) -> Result<bool, StoreError> {
+    async fn index_page(&self, index: &PageIndex<'_>) -> Result<Option<Indexed>, StoreError> {
         self.inner.index_page(index).await
     }
 
@@ -780,6 +780,14 @@ impl WorkspaceStore for FlakyStore {
 }
 
 impl AccountStore for FlakyStore {
+    async fn set_browser_language(&self, user_id: &str, language: &str) -> Result<(), StoreError> {
+        self.inner.set_browser_language(user_id, language).await
+    }
+
+    async fn mail_language(&self, user_id: &str) -> Result<Option<String>, StoreError> {
+        self.inner.mail_language(user_id).await
+    }
+
     async fn set_email_notifications(&self, user_id: &str, on: bool) -> Result<(), StoreError> {
         self.inner.set_email_notifications(user_id, on).await
     }

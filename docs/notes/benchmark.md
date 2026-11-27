@@ -16,6 +16,7 @@ What a change to `cadocs-bench` or a RAM measure must know. Scenarios and result
 - `seed` needs an empty database, makes the accounts behind `session_token(i)` (all `BENCH_PASSWORD`), and drains the job queue at the end: `append_updates` queues a reindex and a revision per page, which used to run during measures (likely part of the 13 to 15 MB idle of steps 20c and 20d). Seeded pages have no revision, and are indexed only with `--index`.
 - The generator panics on some seeds (330 is the first): backspaces can empty a paragraph that later gets a word. Seeds 1 to 100 are safe and keep their exact bytes.
 - A search that ends with its last word is a prefix search (`Analyzer::query`), so `latency` sends `q=<word>%20` and checks the hit count.
+- Index size (step 60): `dbstat` on the tables `page_fts%` of a database seeded with `--docs 10000 --index true` gives 315,392,000 bytes before the prefix words and 320,851,968 after. The bench vocabulary repeats 37 words, so real text grows more (+21% on the English ADRs, [store notes](store.md#search)).
 - `latency` and `logins` speak HTTP by hand (`http.rs`).
 
 ## Costs per step

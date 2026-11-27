@@ -9,7 +9,8 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use cadocs_core::permissions::WorkspaceRole;
 use cadocs_store::{
-    AccountStore, ActiveSession, CodePurpose, NewInvitation, NewPasswordReset, User, now_ms,
+    AccountStore, ActiveSession, CodePurpose, NewInvitation, NewPasswordReset, StoreError, User,
+    now_ms,
 };
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -17,6 +18,7 @@ use tokio::time::timeout;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::api::auth::browser_lang;
 use crate::api::{ApiError, ErrorCode};
 use crate::config::{HttpConfig, PublicUrl};
 
@@ -287,6 +289,17 @@ pub async fn require<S: AccountStore, A>(
 
     let due = now - session.last_seen_at >= TOUCH_INTERVAL_MS;
     let renewed = (due && touch(&state, &token, now).await).then(|| cookie(&token, &state.http));
+    // Mail follows the browser language seen (step 62): the first one at once, a change only at a
+    // touch, so a person on two browsers in two languages writes once a touch at most.
+    if (due || session.user.browser_language.is_none())
+        && let Some(lang) = browser_lang(request.headers())
+        && session.user.browser_language.as_deref() != Some(lang.code())
+    {
+        let noted = state
+            .store
+            .set_browser_language(&session.user.id, lang.code());
+        briefly("note a browser language", noted).await;
+    }
     request.extensions_mut().insert(CurrentSession {
         user: session.user,
         token,
@@ -306,19 +319,21 @@ pub async fn require<S: AccountStore, A>(
 async fn touch<S: AccountStore, A>(state: &AppState<S, A>, token: &str, now: i64) -> bool {
     let expires_at = now + state.http.session_lifetime.as_millis() as i64;
     let hash = token_hash(token);
-    match timeout(
-        TOUCH_WAIT,
-        state.store.touch_session(&hash, now, expires_at),
-    )
-    .await
-    {
+    let touched = state.store.touch_session(&hash, now, expires_at);
+    briefly("extend a session", touched).await
+}
+
+/// A write on the side of a request, which says whether it worked: neither a failure nor a busy
+/// writer may fail the request or hold it up for long.
+async fn briefly(what: &str, write: impl Future<Output = Result<(), StoreError>>) -> bool {
+    match timeout(TOUCH_WAIT, write).await {
         Ok(Ok(())) => true,
         Ok(Err(error)) => {
-            tracing::warn!(%error, "cannot extend a session");
+            tracing::warn!(%error, "cannot {what}");
             false
         }
         Err(_) => {
-            tracing::warn!("extending a session took too long");
+            tracing::warn!("cannot {what} in time");
             false
         }
     }

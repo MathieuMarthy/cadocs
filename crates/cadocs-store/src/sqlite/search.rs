@@ -6,7 +6,8 @@ use super::spaces::{HAS_ROLE, space_access};
 use super::workspaces::authorize as authorize_workspace;
 use super::{BEGIN_WRITE, SqliteStore};
 use crate::{
-    IndexTarget, PageIndex, PageRecord, REINDEX_PAGE, SearchHit, SearchStore, StoreError, now_ms,
+    IndexTarget, Indexed, PageIndex, PageRecord, PageSite, REINDEX_PAGE, SearchHit, SearchStore,
+    StoreError, now_ms,
 };
 use cadocs_core::permissions::{SpaceAction, WorkspaceAction};
 
@@ -49,15 +50,15 @@ impl SearchStore for SqliteStore {
         }))
     }
 
-    async fn index_page(&self, index: &PageIndex<'_>) -> Result<bool, StoreError> {
+    async fn index_page(&self, index: &PageIndex<'_>) -> Result<Option<Indexed>, StoreError> {
         let mut tx = self.writer.begin_with(BEGIN_WRITE).await?;
-        let page: Option<(String, Option<String>)> =
-            sqlx::query_as("SELECT workspace_id, updated_by FROM pages WHERE id = ?1")
+        let page: Option<(String, String, Option<String>)> =
+            sqlx::query_as("SELECT workspace_id, space_id, updated_by FROM pages WHERE id = ?1")
                 .bind(index.page_id)
                 .fetch_optional(&mut *tx)
                 .await?;
-        let Some((workspace, last_editor)) = page else {
-            return Ok(false);
+        let Some((workspace, space, last_editor)) = page else {
+            return Ok(None);
         };
         let rowid: i64 = sqlx::query_scalar(
             "INSERT INTO page_text (page_id, plain_text, indexed_at) VALUES (?1, ?2, ?3)
@@ -74,12 +75,17 @@ impl SearchStore for SqliteStore {
             .bind(rowid)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("INSERT INTO page_fts (rowid, title, body) VALUES (?1, ?2, ?3)")
-            .bind(rowid)
-            .bind(index.title)
-            .bind(index.body)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "INSERT INTO page_fts (rowid, title, body, title_words, body_words)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind(rowid)
+        .bind(index.title)
+        .bind(index.body)
+        .bind(index.title_words)
+        .bind(index.body_words)
+        .execute(&mut *tx)
+        .await?;
         // What the content shows now replaces what it showed, for public shares. The references
         // only grow, since a revision may still show a file.
         sqlx::query("DELETE FROM page_attachments WHERE page_id = ?1")
@@ -114,7 +120,8 @@ impl SearchStore for SqliteStore {
         let author = last_editor.as_deref();
         let now = now_ms();
         let mail_at = now.saturating_add(self.mail_delay.as_millis() as i64);
-        mentions::replace(&mut tx, &body, index.mentions, author, now, mail_at).await?;
+        let notified =
+            mentions::replace(&mut tx, &body, index.mentions, author, now, mail_at).await?;
         let links = serde_json::to_string(index.links).expect("strings make JSON");
         sqlx::query("DELETE FROM page_links WHERE source_id = ?1")
             .bind(index.page_id)
@@ -131,7 +138,13 @@ impl SearchStore for SqliteStore {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok(true)
+        Ok(Some(Indexed {
+            site: PageSite {
+                workspace_id: workspace,
+                space_id: space,
+            },
+            notified,
+        }))
     }
 
     async fn backlinks(&self, page_id: &str, actor: &str) -> Result<Vec<PageRecord>, StoreError> {
@@ -172,7 +185,7 @@ impl SearchStore for SqliteStore {
         let rows = sqlx::query(AssertSqlSafe(format!(
             "WITH ranked AS (
                  SELECT t.id AS text_id, p.id AS page_id,
-                        bm25(page_fts, 5.0, 1.0) AS score, -- title, body
+                        bm25(page_fts, 5.0, 1.0, 5.0, 1.0) AS score, -- title, body, their words
                         {access}
                  FROM page_fts f
                  JOIN page_text t ON t.id = f.rowid

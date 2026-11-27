@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use cadocs_content::ast::{Block, Document};
 use cadocs_content::yjs::{FRAGMENT, TITLE, write};
-use common::{Api, Login, Reply, logged_in};
-use futures_util::SinkExt;
+use common::{Api, Login, ORIGIN, Reply, logged_in};
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use tokio::time::{Instant, sleep};
+use tokio::time::{Instant, sleep, timeout};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -418,6 +418,45 @@ async fn a_space_after_the_last_word_ends_it() {
 }
 
 #[tokio::test]
+async fn a_prefix_past_its_stem_finds_the_word_in_english_and_french() {
+    let wiki = wiki().await;
+    let space = wiki.space("Handbook", json!("viewer")).await;
+    let english = wiki.page(&space).await;
+    wiki.write(&english, "Notes", vec![paragraph("The deployment ran.")])
+        .await;
+    assert_eq!(
+        wiki.found(&wiki.ada, "q=deploym", 1).await,
+        vec![english.clone()]
+    );
+    let reply = wiki.search(&wiki.ada, "q=deploym").await;
+    assert_eq!(
+        reply.body["items"][0]["excerpt"][1],
+        json!({ "text": "deployment", "match": true })
+    );
+    assert_eq!(
+        wiki.found(&wiki.ada, "q=deploying+", 1).await,
+        vec![english.clone()],
+        "a whole word is stemmed as before"
+    );
+    assert!(
+        wiki.found(&wiki.ada, "q=deploym+", 0).await.is_empty(),
+        "a whole word is not a prefix"
+    );
+
+    wiki.language("fr").await;
+    let french = wiki.page(&space).await;
+    let body = vec![paragraph("Le déploiement a eu lieu.")];
+    wiki.write(&french, "Notes", body).await;
+    for query in ["q=deploiem", "q=D%C3%A9ploiem", "q=d%C3%A9ploiements+"] {
+        assert_eq!(
+            wiki.found(&wiki.ada, query, 1).await,
+            vec![french.clone()],
+            "{query}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn the_reindex_records_the_members_the_body_mentions() {
     let wiki = wiki().await;
     let space = wiki.space("Open", json!("viewer")).await;
@@ -438,6 +477,48 @@ async fn the_reindex_records_the_members_the_body_mentions() {
     }
     assert_eq!(wiki.api.number(&recorded).await, 1);
     assert_eq!(wiki.api.number("SELECT count(*) FROM mentions").await, 1);
+}
+
+#[tokio::test]
+async fn a_body_mention_is_sent_live_to_its_user() {
+    let wiki = wiki().await;
+    let space = wiki.space("Open", json!("viewer")).await;
+    let page = wiki.page(&space).await;
+    let url = format!(
+        "ws://{}/ws/events?workspace={}",
+        wiki.api.addr, wiki.workspace
+    );
+    let mut request = url.into_client_request().unwrap();
+    let headers = request.headers_mut();
+    headers.insert(COOKIE, wiki.bob.cookie.parse().unwrap());
+    headers.insert("origin", ORIGIN.parse().unwrap());
+    let (mut events, _) = connect_async(request).await.unwrap();
+
+    let mention = cadocs_content::ast::Inline::Mention { id: BOB.to_owned() };
+    wiki.write(&page, "Plan", vec![Block::Paragraph(vec![mention])])
+        .await;
+
+    // The page's own events come first: the reindex follows the flush.
+    let told = timeout(PATIENCE, async {
+        loop {
+            match events.next().await {
+                Some(Ok(Message::Text(text))) => {
+                    let event: Value = serde_json::from_str(&text).unwrap();
+                    if event["type"] == "notification" {
+                        return event;
+                    }
+                }
+                Some(Ok(_)) => {}
+                other => panic!("expected an event, got {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("a notification");
+    let inbox = wiki.api.get(&wiki.bob, "/me/notifications").await;
+    assert_eq!(inbox.body["items"][0]["kind"], "mention");
+    let id = inbox.body["items"][0]["id"].clone();
+    assert_eq!(told, json!({ "type": "notification", "id": id }));
 }
 
 fn link_to(page: &str) -> Block {

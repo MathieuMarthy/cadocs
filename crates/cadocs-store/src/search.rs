@@ -3,7 +3,7 @@
 
 use std::future::Future;
 
-use crate::{PageRecord, StoreError};
+use crate::{Notified, PageRecord, PageSite, StoreError};
 
 /// The kind of the job that indexes one page, with `{"page": "<id>"}` as its payload and
 /// `reindex:<id>` as its key. A flush queues it, after a delay, so an editing session costs one
@@ -24,6 +24,9 @@ pub struct PageIndex<'a> {
     pub page_id: &'a str,
     pub title: &'a str,
     pub body: &'a str,
+    /// The folded words of the title and body that stemming changes, for prefixes.
+    pub title_words: &'a str,
+    pub body_words: &'a str,
     pub plain_text: &'a str,
     /// The attachments the content shows. Each one of the page's workspace gets a reference
     /// from the page, so its readers can download it.
@@ -34,6 +37,14 @@ pub struct PageIndex<'a> {
     /// The pages the content links to. Those of the page's workspace, itself apart, become its
     /// links, the backlinks of their targets.
     pub links: &'a [String],
+}
+
+/// A page just indexed, with the notifications its new body mentions made, for the events the
+/// job publishes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Indexed {
+    pub site: PageSite,
+    pub notified: Vec<Notified>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,12 +62,12 @@ pub trait SearchStore: Send + Sync + 'static {
         page_id: &str,
     ) -> impl Future<Output = Result<Option<IndexTarget>, StoreError>> + Send;
 
-    /// Replaces the page's index and adds its references, in one transaction. Answers `false`
+    /// Replaces the page's index and adds its references, in one transaction. Answers `None`
     /// when the page is gone, and stores nothing then.
     fn index_page(
         &self,
         index: &PageIndex<'_>,
-    ) -> impl Future<Output = Result<bool, StoreError>> + Send;
+    ) -> impl Future<Output = Result<Option<Indexed>, StoreError>> + Send;
 
     /// The live pages that link to `page_id`, as their last index says, among those the user can
     /// read, by title. `PageNotFound` or `NotAllowed` unless the user can read `page_id`.
