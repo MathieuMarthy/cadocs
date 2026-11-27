@@ -441,9 +441,16 @@ fn code_problem(problem: &'static str) -> ApiError {
     }
 }
 
-/// The language to mail user `user_id` in (step 62).
-async fn mail_lang<S: AccountStore>(store: &S, user_id: &str) -> Result<Lang, StoreError> {
-    Ok(Lang::of(store.mail_language(user_id).await?.as_deref()))
+/// The language to mail user `user_id` in (step 62). English when it cannot be read: it is read
+/// after the change a message tells of, and a message in English beats none.
+async fn mail_lang<S: AccountStore>(store: &S, user_id: &str) -> Lang {
+    match store.mail_language(user_id).await {
+        Ok(code) => Lang::of(code.as_deref()),
+        Err(error) => {
+            tracing::warn!(%error, "cannot read the language of mail, English it is");
+            Lang::En
+        }
+    }
 }
 
 /// The language of a request's `Accept-Language` that mail is written in, if any.
@@ -486,7 +493,7 @@ async fn mail_code<S: AccountStore, A>(
         })
         .await?;
     let origin = state.http.public_url.origin();
-    let lang = mail_lang(state.store.as_ref(), &user.id).await?;
+    let lang = mail_lang(state.store.as_ref(), &user.id).await;
     let (subject, text) = match purpose {
         CodePurpose::Login => (Text::LoginCodeSubject, Text::LoginCode),
         _ => (Text::CodeSubject, Text::SecondFactorCode),
@@ -660,7 +667,7 @@ async fn mail_new_address<S: AccountStore>(
         None => {}
         Some(found) if found.disabled => return Ok(()),
         Some(found) => {
-            let lang = mail_lang(store, &found.user.id).await?;
+            let lang = mail_lang(store, &found.user.id).await;
             outbox.queue(Mail {
                 to: found.user.email,
                 subject: Text::AccountSubject.get(lang).to_owned(),
@@ -673,7 +680,7 @@ async fn mail_new_address<S: AccountStore>(
     let Some(place) = outbox.reserve() else {
         return Ok(());
     };
-    let lang = mail_lang(store, &user_id).await?;
+    let lang = mail_lang(store, &user_id).await;
     let code = new_code()?;
     let now = now_ms();
     let purpose = CodePurpose::Email;
@@ -737,7 +744,7 @@ async fn confirm_email<S: AccountStore, A>(
     // The owner may not be the one who moved it: the old address hears of it.
     if let Some(outbox) = &state.mail {
         let origin = state.http.public_url.origin();
-        let lang = mail_lang(state.store.as_ref(), &user.id).await?;
+        let lang = mail_lang(state.store.as_ref(), &user.id).await;
         let values = [("origin", origin), ("email", email.as_str())];
         let queued = outbox.queue(Mail {
             to: user.email.clone(),
@@ -1125,7 +1132,7 @@ async fn mail_reset<S: AccountStore>(
         Err(error) => return Err(error.into()),
     }
     let origin = http.public_url.origin();
-    let lang = mail_lang(store, &found.user.id).await?;
+    let lang = mail_lang(store, &found.user.id).await;
     place.send(Mail {
         to: found.user.email,
         subject: Text::ResetSubject.get(lang).to_owned(),
@@ -1188,7 +1195,7 @@ async fn mail_registration<S: AccountStore>(
         None => {}
         Some(found) if found.disabled => return Ok(()),
         Some(found) => {
-            let lang = mail_lang(store, &found.user.id).await?;
+            let lang = mail_lang(store, &found.user.id).await;
             outbox.queue(Mail {
                 to: found.user.email,
                 subject: Text::AccountSubject.get(lang).to_owned(),

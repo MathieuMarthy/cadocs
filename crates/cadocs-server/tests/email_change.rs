@@ -107,6 +107,19 @@ async fn the_address_only_changes_after_its_code() {
 }
 
 #[tokio::test]
+async fn a_language_that_cannot_be_read_still_tells_the_old_address() {
+    let (api, relay, login) = mail_and_login().await;
+    let code = mailed_code(&api, &relay, &login, NEW, 1).await;
+    // The language of mail reads this table (step 62): an English notice beats none.
+    api.sql("DROP TABLE workspace_members").await;
+    let reply = api.confirm_address(&login, NEW, &code).await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    let notice = &messages(&relay, 2).await[1];
+    assert_eq!(notice.to, "<ada@example.org>");
+    assert!(body(notice).contains("now uses the address"));
+}
+
+#[tokio::test]
 async fn the_other_fields_change_at_once() {
     let (api, relay, login) = mail_and_login().await;
     let body = json!({ "name": "Grace", "email": NEW, "current_password": PASSWORD });

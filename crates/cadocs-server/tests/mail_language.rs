@@ -17,8 +17,13 @@ async fn ada(api: &Api) -> Login {
     Login::from(&reply)
 }
 
-/// Ada's session, read by a browser in `languages`.
+/// Ada's session, read by a browser in `languages` when it is due for a touch.
 async fn seen_by(api: &Api, ada: &Login, languages: &str) {
+    api.sql("UPDATE sessions SET last_seen_at = 0").await;
+    read_by(api, ada, languages).await;
+}
+
+async fn read_by(api: &Api, ada: &Login, languages: &str) {
     let headers = [
         ("cookie", ada.cookie.as_str()),
         ("accept-language", languages),
@@ -53,6 +58,27 @@ async fn a_person_with_no_setting_and_a_french_browser_gets_french_mail() {
 
     seen_by(&api, &ada, "en-GB").await;
     let text = reset_text(&api, &relay, 3).await;
+    assert!(text.contains(ENGLISH_RESET), "{text}");
+}
+
+#[tokio::test]
+async fn the_browser_language_is_noted_only_at_a_touch() {
+    let (api, relay) = with_mail().await;
+    let ada = ada(&api).await;
+    // A fresh session is not due: two browsers in two languages write at most once a touch.
+    read_by(&api, &ada, FRENCH_BROWSER).await;
+    let noted = "SELECT count(*) FROM users WHERE browser_language IS NOT NULL";
+    assert_eq!(api.number(noted).await, 0);
+    let text = reset_text(&api, &relay, 1).await;
+    assert!(text.contains(ENGLISH_RESET), "{text}");
+}
+
+#[tokio::test]
+async fn a_language_that_cannot_be_read_still_mails_a_reset_link() {
+    let (api, relay) = with_mail().await;
+    // The language of mail reads this table: an English link beats none, as the old one is void.
+    api.sql("DROP TABLE workspace_members").await;
+    let text = reset_text(&api, &relay, 1).await;
     assert!(text.contains(ENGLISH_RESET), "{text}");
 }
 
