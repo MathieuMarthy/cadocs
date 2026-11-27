@@ -226,6 +226,15 @@
   user-select: none;
 }
 
+/* Where the caret is, the fence line takes the language's place, on its own line (ADR 0018). */
+.tiptap pre.md-hinted::before {
+  content: none;
+}
+
+.tiptap pre .md-hint {
+  display: block;
+}
+
 .tiptap pre code {
   padding: 0;
   background: none;
