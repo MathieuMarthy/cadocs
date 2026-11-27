@@ -123,8 +123,10 @@ CREATE TABLE workspace_invitations (
     invited_by   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at   BIGINT NOT NULL,
     created_at   BIGINT NOT NULL,
+    invitee_id   TEXT REFERENCES users(id) ON DELETE SET NULL, -- step 73: the account that held `email` then
     UNIQUE (workspace_id, email)             -- a new link replaces the last
 );
+CREATE INDEX workspace_invitations_invitee ON workspace_invitations(invitee_id);
 
 CREATE TABLE groups (                        -- V1
     id           TEXT PRIMARY KEY,

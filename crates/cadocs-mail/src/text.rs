@@ -177,6 +177,20 @@ catalogue! {
          \x20   {code}\n\n\
          Il est valable 10 minutes. Si vous ne l'avez pas demandé, ignorez\n\
          ce message : aucun compte n'est créé sans le code.\n";
+    InvitationSubject:
+        "Your invitation to a cadocs workspace",
+        "Votre invitation dans un espace de travail cadocs";
+    Invitation:
+        "{who} invited you to the workspace {workspace} on\n\
+         {origin}\n\n\
+         To join it, open this link within 7 days:\n\n\
+         {link}\n\n\
+         If you do not know {who}, ignore this message.\n",
+        "{who} vous invite dans l'espace de travail {workspace} sur\n\
+         {origin}\n\n\
+         Pour le rejoindre, ouvrez ce lien dans les 7 jours :\n\n\
+         {link}\n\n\
+         Si vous ne connaissez pas {who}, ignorez ce message.\n";
     NotificationSubject: "1 new notification on cadocs", "1 nouvelle notification sur cadocs";
     NotificationsSubject:
         "{count} new notifications on cadocs",

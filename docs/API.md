@@ -117,6 +117,10 @@ Mail is written in English or French (step 62): the person's `language`, else th
 | DELETE | `/invitations/{id}` | admin | Revoke an invitation |
 | GET | `/invitations/{token}` | none | Workspace name and email, for the acceptance page |
 | POST | `/invitations/{token}/accept` | none | Accept: a new user sends a name and password, a logged-in user with the invited email just joins |
+| GET | `/workspaces/{ws}/invitees?q=` | admin, rate limited | Accounts of the instance to invite, by name or address (step 73) |
+| GET | `/me/invitations` | user | The caller's pending invitations (step 73) |
+| POST | `/me/invitations/{id}/accept` | user | Join with one of them, without the link |
+| DELETE | `/me/invitations/{id}` | user | Decline one of them |
 | GET, POST | `/workspaces/{ws}/groups` | member, admin to create | Groups (V1) |
 | PATCH, DELETE | `/groups/{group}` | admin | Rename or delete a group (V1) |
 | GET | `/groups/{group}/members` | member | Members of a group (V1) |
@@ -130,7 +134,10 @@ Mail is written in English or French (step 62): the person's `language`, else th
 - A member is `{ id, email, name, role, disabled, created_at }`, where `id` is the user's. `GET /workspaces/{ws}/members` is paginated, by account age.
 - `PATCH /workspaces/{ws}/members/{user}` takes `{ role }` and answers the member. A change or a removal that leaves no enabled owner is a `409`, by the rule of [PERMISSIONS.md](PERMISSIONS.md#instance-actions). `DELETE` answers `204`.
 - An invitation is `{ id, email, role, invited_by, expires_at, created_at }`, where `role` is `admin` or `member`. A link ends with the right to make it: when its inviter drops below `admin`, leaves, is removed, disabled or deleted. `GET /workspaces/{ws}/invitations` is paginated, oldest first, and leaves out expired ones.
-- `POST /workspaces/{ws}/invitations` takes `{ email, role }` and answers `201` with the invitation and `link`, once, as `<CADOCS_PUBLIC_URL>/invite/<token>`, valid 7 days (ADR 0013). An email has one link per workspace: a new one replaces the last. The email of a member is a `409`, with `email: member`.
+- `POST /workspaces/{ws}/invitations` takes `{ email, role }` and answers `201` with the invitation and `link`, once, as `<CADOCS_PUBLIC_URL>/invite/<token>`, valid 7 days (ADR 0013). An email has one link per workspace: a new one replaces the last. The email of a member is a `409`, with `email: member`. With a relay the link is also mailed to the address, in the workspace's language when mail is written in it, else in English, with the limit of an address of `/auth/forgot-password` (3 messages at once, then one per 10 minutes) and not the limit of a client: past it the answer is the same, with no mail. The invitation is made for the account that holds the address then, if any, whose events sockets get an `invitation` event.
+- `GET /workspaces/{ws}/invitees?q=` answers `{ items: [{ id, name, email }] }`: at most 10 enabled accounts of the whole instance that are not members, by name, whose address or a word of whose name starts with `q`, whatever the ASCII case. `q` needs 3 characters once trimmed, or it is a `400` with `q: too_short`, and at most 200. An admin gets 30 searches at once, then one a second: past it, `429`. A member gets `403`, anyone else `404`. Suggesting accounts of the whole instance is an accepted risk ([OPERATIONS.md](OPERATIONS.md#security)).
+- `GET /me/invitations` lists the invitations made for the caller while their account held the address it still holds, usable, paginated, oldest first, as `{ id, workspace_id, workspace_name, role, invited_by_name, expires_at, created_at }`. An address taken after the invitation was made, by registration or by a change, does not list it: that needs the link, so an account cannot collect the invitations of an address by moving to it. Invitations made before step 73 have no account and need the link too.
+- `POST /me/invitations/{id}/accept` takes no body and answers `200` with the session body, as accepting by link does, and `DELETE /me/invitations/{id}` answers `204`, the link going with it. An id that is not one of `GET /me/invitations` is a `404` for both.
 - `DELETE /invitations/{id}` answers `204`, and `404` to anyone who is not an admin of its workspace.
 - `GET /invitations/{token}` answers `{ workspace_id, workspace_name, email, role, expires_at, has_account }`. `has_account` tells the page to ask for a login rather than a password.
 - `POST /invitations/{token}/accept` always takes a JSON body. `{ name, password }` makes the account of the invited email, and answers `201` with the session body and the cookie, or `409` with `email: taken` if that email has an account. `{}` joins with the current session, needs the CSRF token, and answers `200` with the session body: `401` with no session, `403` for an account with another email. A member keeps their role. A refused password leaves the link usable.
@@ -397,4 +404,5 @@ Events are hints. The client refetches through REST, and refetches the tree afte
 | `access.changed` | none | The user's permissions changed, reload the space list |
 | `comment` | `space`, `page` | A comment of the page was written, edited, resolved, reopened or deleted |
 | `notification` | `id` | A new notification, sent to its user alone (a socket of the workspace of the page it is about) |
+| `invitation` | `id` | A new invitation for the user, sent to their sockets of every workspace: reload `GET /me/invitations` |
 | `resync` | none | Events were dropped because the client lagged, reload everything shown |

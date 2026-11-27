@@ -8,7 +8,7 @@ mod copies;
 pub mod exports;
 mod groups;
 mod imports;
-mod invitations;
+pub mod invitations;
 mod markdown;
 mod oidc;
 mod pages;

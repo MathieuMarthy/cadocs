@@ -81,6 +81,11 @@ impl<S> DocRegistry<S> {
         self.inner.events.publish(workspace_id, event);
     }
 
+    /// Tells the sockets of the user of `event`, in every workspace.
+    pub fn publish_to_user(&self, event: Event) {
+        self.inner.events.publish_to_user(event);
+    }
+
     /// Publishes `event` after the next recheck, for a space whose readers only that recheck can
     /// tell. A recheck must follow, through `AppState::access_changed` in the server.
     pub fn publish_after_recheck(&self, workspace_id: &str, event: Event) {

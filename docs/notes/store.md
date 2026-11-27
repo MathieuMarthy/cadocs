@@ -16,6 +16,11 @@ What a change to the stores, roles or the workspace, space and page routes must 
 
 - `user_identities` maps `(provider, subject)` to an account. `identity_user` reads it like `credentials`, through `SELECT_CREDENTIALS`; `create_identity_session` opens a session with no password for an enabled user; `register_identity` makes the account, its identity and its session in one transaction, refuses before setup (`NotAllowed`) and on an address in use (`EmailTaken`), never linking to that account.
 
+## Invitations by id (step 73)
+
+- `workspace_invitations.invitee_id` is the account that held the address when `create_invitation` ran, and `create_invitation` returns it for the `invitation` event. `FROM_PENDING` in `sqlite/workspaces.rs` is the one rule for what an account reaches by id: made for it, the address still its own, enabled, not expired. `accept_pending` reuses `join`, so a member keeps their role; `decline_pending` is one `DELETE`, its link with it.
+- `find_invitees` escapes `\`, `%` and `_` for `LIKE ... ESCAPE '\'`; `LIKE` folds ASCII case only. It scans `users`: fine for the accounts of one instance.
+
 ## Documents
 
 - The room assigns `seq` from `StoredDoc::last_seq() + 1`, and must flush its queue before it compacts. `compact` refuses an older snapshot (`StaleSnapshot`). `append_updates` can be replayed after a lost commit, and answers `SeqConflict` for a `seq` the snapshot covers or that holds other data. It takes a `DocEdit` (title and author for the `pages` row), and answers `PageNotFound` without that row: a test on `SqliteStore` inserts one.
