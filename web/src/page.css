@@ -525,6 +525,20 @@
   content: "";
   pointer-events: none;
 }
+/* The edge a writer drags to size a column (`prosemirror-tables` places it). */
+.tiptap .column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  bottom: -1px;
+  z-index: 1;
+  width: 3px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.tiptap.resize-cursor {
+  cursor: col-resize;
+}
 
 /* Link to a page: the page's title, underlined by a dotted rule so it reads apart from a web link. */
 .tiptap a.page-link {
