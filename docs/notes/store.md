@@ -63,7 +63,8 @@ What a change to the stores, roles or the workspace, space and page routes must 
 ## Search
 
 - `search` takes an FTS5 expression, which only `cadocs-search` builds, and filters with `HAS_ROLE`, live pages and live spaces. `with_reindex_delay` exists for tests; production waits 5 seconds (`REINDEX_DELAY`).
-- Left open: a prefix typed past the end of a stem finds nothing until the word is whole (`deploym` misses `deployment`, stemmed `deploy`).
+- Prefixes (step 60): `page_fts` has `title_words` and `body_words` beside the stems, filled by `Analyzer::prefix_text`: each folded word that stemming changes, once per page. Whole words of a query are filtered to `{title body}`, so they stem as before; the typed prefix is looked for as its stem and as typed in every column (`("deploy"* OR "deploying"*)`). FTS5 ands phrases side by side but needs `AND` beside a parenthesis, so `Query::fts` joins with `AND`. Code that changes the columns makes the table again (migration 0025: the trigger goes and comes back, since a rename points it at the old table).
+- Index size with the words (FTS5 pages from `dbstat`, after `optimize`): the 30 English ADRs 228 to 276 KiB (+21%), the French catalogue in 14 pages 72 to 92 KiB (+28%), the 10,000 bench pages (`cadocs-bench seed --docs 10000 --index true`, a 37-word vocabulary) 315.4 to 320.9 MB (+1.7%). Since a word is stored once per page, its count does not weigh in the rank of a prefix match on it. Migration 0025 took 16 s on that bench database, then queues 10,000 reindex jobs.
 
 ## Revisions
 

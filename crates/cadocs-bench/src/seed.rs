@@ -189,6 +189,8 @@ async fn index_page<S: SearchStore>(store: &S, id: &str, doc: &Doc) -> anyhow::R
             page_id: id,
             title: &analyzer.index_text(&title),
             body: &analyzer.index_text(&plain_text),
+            title_words: &analyzer.prefix_text(&title),
+            body_words: &analyzer.prefix_text(&plain_text),
             plain_text: &plain_text,
             attachments: &[],
             mentions: &[],

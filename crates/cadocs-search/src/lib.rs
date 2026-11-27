@@ -4,6 +4,10 @@
 //! A word is a run of letters and digits. It is lowercased, its diacritics are folded, then it is
 //! stemmed. Folding comes first so that a query typed without accents finds the accented words:
 //! both sides then go through the same stemmer with the same letters.
+//!
+//! The index has two columns of stems, `title` and `body`, which whole words are looked for in,
+//! and two of folded words, `title_words` and `body_words`, so a prefix typed past the end of a
+//! stem still finds its word: `deploym` finds `deployment`, stemmed `deploy`.
 
 use std::collections::HashSet;
 use std::ops::Range;
@@ -64,12 +68,13 @@ pub struct Segment {
     pub matched: bool,
 }
 
-/// A parsed query: the terms to find, the last one maybe as a prefix while it is being typed.
+/// A parsed query: the terms to find, the last one maybe as a prefix while it is being typed,
+/// looked for as its stem and as typed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Query {
     fts: String,
     terms: HashSet<String>,
-    prefix: Option<String>,
+    prefixes: Vec<String>,
 }
 
 impl Query {
@@ -79,12 +84,13 @@ impl Query {
         &self.fts
     }
 
-    fn matches(&self, term: &str) -> bool {
-        self.terms.contains(term)
+    /// As the `MATCH` does: the prefixes are looked for in every column.
+    fn matches(&self, folded: &str, stem: &str) -> bool {
+        self.terms.contains(stem)
             || self
-                .prefix
-                .as_deref()
-                .is_some_and(|prefix| term.starts_with(prefix))
+                .prefixes
+                .iter()
+                .any(|prefix| stem.starts_with(prefix) || folded.starts_with(prefix))
     }
 }
 
@@ -111,27 +117,62 @@ impl Analyzer {
         out
     }
 
+    /// The text FTS5 indexes for prefixes: each word that stemming changes, folded, once. A word
+    /// that is its own stem is already in the stems.
+    pub fn prefix_text(&self, text: &str) -> String {
+        let mut seen = HashSet::new();
+        let mut out = String::new();
+        for (_, word) in words(text) {
+            let folded = folded(word);
+            if seen.contains(&folded) || self.stemmer.stem(&folded) == folded {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.push_str(&folded);
+            seen.insert(folded);
+        }
+        out
+    }
+
     /// `None` for a query with no word. The last word is a prefix unless the query ends after it,
     /// with a space or a mark, so results follow what is typed.
     pub fn query(&self, text: &str) -> Option<Query> {
         let found: Vec<(Range<usize>, &str)> = words(text).take(MAX_TERMS).collect();
-        let (last_range, _) = found.last()?;
+        let (last_range, last) = found.last()?;
         let typing = last_range.end == text.len();
-        let mut terms: Vec<String> = found.iter().map(|(_, word)| self.term(word)).collect();
+        let mut whole: Vec<&str> = found.iter().map(|(_, word)| *word).collect();
         // A one-letter prefix would scan every term, as `prefix='2 3'` starts at two.
-        let prefix = if typing && found.last()?.1.chars().count() > 1 {
-            terms.pop()
-        } else {
-            None
-        };
-        let mut fts: Vec<String> = terms.iter().map(|term| format!("\"{term}\"")).collect();
-        if let Some(prefix) = &prefix {
-            fts.push(format!("\"{prefix}\"*"));
+        let mut prefixes = Vec::new();
+        // Counted once folded: a decomposed `é` is two chars but one letter.
+        let folded = folded(last);
+        if typing && folded.chars().count() > 1 {
+            whole.pop();
+            let stem = self.stemmer.stem(&folded).into_owned();
+            // A stem can be shorter than the word: French `es` stems to `e`.
+            if stem != folded && stem.chars().count() > 1 {
+                prefixes.push(stem);
+            }
+            prefixes.push(folded);
+        }
+        let terms: Vec<String> = whole.iter().map(|word| self.term(word)).collect();
+        let mut fts = Vec::new();
+        if !terms.is_empty() {
+            let quoted: Vec<String> = terms.iter().map(|term| format!("\"{term}\"")).collect();
+            fts.push(format!("{{title body}}: ({})", quoted.join(" ")));
+        }
+        let quoted: Vec<String> = prefixes.iter().map(|p| format!("\"{p}\"*")).collect();
+        match quoted.as_slice() {
+            [] => {}
+            [one] => fts.push(one.clone()),
+            _ => fts.push(format!("({})", quoted.join(" OR "))),
         }
         Some(Query {
-            fts: fts.join(" "),
+            // FTS5 ands phrases side by side, but a parenthesis needs `AND`.
+            fts: fts.join(" AND "),
             terms: terms.into_iter().collect(),
-            prefix,
+            prefixes,
         })
     }
 
@@ -140,7 +181,10 @@ impl Analyzer {
     pub fn excerpt(&self, query: &Query, text: &str) -> Vec<Segment> {
         // Two lazy passes and no list of every word, so a long page costs about its window. A
         // match past the first `EXCERPT_SCAN_WORDS` words is not looked for.
-        let matches = |word: &str| query.matches(&self.term(word));
+        let matches = |word: &str| {
+            let folded = folded(word);
+            query.matches(&folded, &self.stemmer.stem(&folded))
+        };
         let first = words(text)
             .take(EXCERPT_SCAN_WORDS)
             .position(|(_, word)| matches(word))
@@ -182,12 +226,17 @@ impl Analyzer {
     }
 
     fn term(&self, word: &str) -> String {
-        let mut folded = String::with_capacity(word.len());
-        for c in word.chars().flat_map(char::to_lowercase) {
-            fold(c, &mut folded);
-        }
-        self.stemmer.stem(&folded).into_owned()
+        self.stemmer.stem(&folded(word)).into_owned()
     }
+}
+
+/// `word` lowercased, with its diacritics folded.
+fn folded(word: &str) -> String {
+    let mut folded = String::with_capacity(word.len());
+    for c in word.chars().flat_map(char::to_lowercase) {
+        fold(c, &mut folded);
+    }
+    folded
 }
 
 #[derive(Default)]
