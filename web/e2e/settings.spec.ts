@@ -214,17 +214,77 @@ test("saving a space's settings goes back to the page they were opened from", as
 }) => {
   const id = await newPage(server, "Plans");
   await asOwner(page, server);
+  const general = await settingsFrom(page, server, id);
+  await general.getByLabel("description").fill("What we know");
+  await general.getByRole("button", { name: "save" }).click();
+  await expect(page).toHaveURL(`${server.url}/?page=${id}`);
+  await expect(notice(page)).toContainText("saved");
+});
+
+/** Opens the settings of the first space from the tree, on the page `id`. */
+async function settingsFrom(page: Page, server: TestServer, id: string) {
   await page.goto(`${server.url}/?page=${id}`);
   await expect(editor(page)).toBeVisible();
   await tree(page).getByRole("button", { name: "Pages/", exact: true }).hover();
   await tree(page).getByRole("button", { name: "more actions for Pages" }).click();
   await page.getByRole("menuitem", { name: "settings" }).click();
   await expect(page).toHaveURL(/\/w\/tests\/settings\/pages$/);
-  const general = section(page, "space");
+  return section(page, "space");
+}
+
+test("a space's settings left while they save do not bring the person back", async ({
+  page,
+  server,
+}) => {
+  const id = await newPage(server, "Plans");
+  const other = await newPage(server, "Other");
+  await server.titleStored(other, "Other");
+  await asOwner(page, server);
+  let release!: () => void;
+  const held = new Promise<void>((done) => (release = done));
+  await page.route("**/api/v1/spaces/*", async (route) => {
+    if (route.request().method() === "PATCH") await held;
+    await route.fallback();
+  });
+
+  const general = await settingsFrom(page, server, id);
   await general.getByLabel("description").fill("What we know");
   await general.getByRole("button", { name: "save" }).click();
-  await expect(page).toHaveURL(`${server.url}/?page=${id}`);
+  await tree(page).getByRole("link", { name: "Other", exact: true }).click();
+  await expect(page).toHaveURL(`${server.url}/?page=${other}`);
+  release();
   await expect(notice(page)).toContainText("saved");
+  await page.waitForTimeout(300);
+  await expect(page).toHaveURL(`${server.url}/?page=${other}`);
+});
+
+test("a space's settings save once while the spaces read again", async ({ page, server }) => {
+  const id = await newPage(server, "Plans");
+  await asOwner(page, server);
+  let patches = 0;
+  await page.route("**/api/v1/spaces/*", async (route) => {
+    if (route.request().method() === "PATCH") patches += 1;
+    await route.fallback();
+  });
+  // The list of spaces read after the save answers late.
+  const spaces = (url: URL) => /\/workspaces\/[^/]+\/spaces$/.test(url.pathname);
+  await page.route(spaces, async (route) => {
+    if (patches > 0) await new Promise((done) => setTimeout(done, 2000));
+    await route.fallback();
+  });
+
+  const general = await settingsFrom(page, server, id);
+  await general.getByLabel("description").fill("What we know");
+  const save = general.getByRole("button", { name: "save" });
+  const reading = page.waitForRequest((request) => patches > 0 && spaces(new URL(request.url())));
+  await save.click();
+  await reading;
+  // `force`, since a second press is what a disabled button must refuse.
+  await save.click({ force: true });
+  await expect(notice(page)).toContainText("saved");
+  await page.waitForTimeout(300);
+  await expect(page).toHaveURL(`${server.url}/?page=${id}`);
+  expect(patches).toBe(1);
 });
 
 test("an owner deletes a workspace once its name is typed", async ({ page, server }) => {
