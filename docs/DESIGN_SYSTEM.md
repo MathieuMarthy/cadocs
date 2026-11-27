@@ -146,7 +146,7 @@ Motion says where something went, and nothing more. It is short, linear and plai
 | The confirm buttons | Opacity, each branch | None: the branch it replaces goes at once, so both never show side by side |
 
 - Only a level that opens or closes moves, once its rows are there, so it unfolds to their height. The ancestors of the page on screen unfold too when it opens them. A level already loaded when the tree shows, and the levels inside one being closed, do not move.
-- Everything else stays still: pages, rows, hover, selection and focus change at once.
+- Everything else stays still: pages, rows, hover, selection and focus change at once. A [loading skeleton](#loading-skeleton) is still too: it has no pulse or shimmer, with or without reduced motion.
 
 ## Components
 
@@ -252,6 +252,14 @@ The short message after an action, such as `moved to trash` or `link copied`, at
 - `bg` surface, 1px `ink` border, no shadow, mono 13px, inside a `status` region that exists only while it shows.
 - At most one action, a secondary button (`undo`). When it has one, the notice takes focus, so a keyboard reaches it without hunting.
 - It goes after 8 seconds, unless the pointer or focus is on it.
+
+### Loading skeleton
+
+The shape of what is loading, in place of an empty screen: a page (its title, then lines of text), the tree's spaces, the search results. Brut has none, so it is drawn from the tokens.
+
+- Bars in `line`, square, with no border, text or shadow: a title bar 34px high on 60% of `measure` for a page, then 12px bars at the body's line height; `row-height` rows for the tree; a title bar and an excerpt bar per result for search.
+- It shows only after 300ms, so a load faster than that does not flash. A page keeps one skeleton from its read to its first sync, so nothing empty shows in between.
+- It never moves (see [Motion](#motion)). For screen readers it is a `status` region whose only text is `loading…` (or `searching…`), hidden on screen; the bars are hidden from them.
 
 ### Comments
 

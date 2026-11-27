@@ -91,4 +91,10 @@ Plugins have no route before V2: their rows are tested in the rules only, and th
 | Table column widths (step 76) | `content/html.rs` `column_widths_become_a_colgroup_from_the_first_row` (spans, a width of `0`, a cell with none, a huge `colspan` bounded, no colgroup when nothing was dragged); `content/yjs.rs` `a_dragged_width_with_a_fraction_keeps_its_column`; `e2e/blocks` `a writer drags a column's width and the other browser sees it, a reader cannot` (the width reaches the other browser, a reader's drag shows no handle and stores nothing, a reader made writer without a reload can drag) |
 | Binary under 30 MB, no S3 code in a default build | `scripts/check-build.sh`: the dependency graph of each flavor in CI's `rust` job on every pull request; the size and S3 code of the release binary in the `e2e` job after each push to main, and of each binary in `release.yml` |
 
+## V1.2 scope
+
+| Item | Tests |
+| --- | --- |
+| Loading skeletons (step 75) | `e2e/skeletons`: a page held at its read, then at its sync, keeps one still skeleton (`loading…`, bars, no animation) with no title field, then shows its title; the tree held at its spaces, under reduced motion, then shows them; search held at its answer (`searching…`), then says it. The 300ms delay before a skeleton shows is not tested |
+
 Not automated: the RAM targets (`bench/rss.sh`), except that a hash's memory goes back with no trim (`server/hash_memory.rs`, ADR 0023), and the release workflow as a whole, which runs on a tag.

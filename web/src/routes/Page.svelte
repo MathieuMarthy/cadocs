@@ -14,6 +14,7 @@
   import Menu, { type MenuItem } from "../components/Menu.svelte";
   import Share from "../components/Share.svelte";
   import Shell from "../components/Shell.svelte";
+  import Skeleton from "../components/Skeleton.svelte";
   import { openPage } from "../editor/collab";
   import { copy, pageLink, showPage, trashPage } from "../lib/actions";
   import { api, ApiError, exportUrl } from "../lib/api";
@@ -43,6 +44,10 @@
   /** Why the editor stopped and asks for a reload: content this version cannot show, or a
    * server of another release (ADR 0016). */
   let stale = $state<Key | null>(null);
+  /** The content arrived once, or the editor stopped on it: the skeleton gives way. */
+  let synced = $state(false);
+  /** One skeleton from the read to the first sync, so its delay does not start again. */
+  const started = performance.now();
   /** Read-only until a read says the role may write. */
   const editable = $derived(row ? canEdit(row.role) : false);
 
@@ -284,7 +289,10 @@
         onRoleChanged: () => void check(),
         onContentError: () => (stale = "page.stale"),
         onOutdated: () => (stale = "page.outdated"),
-        onSynced: () => comments.editorSynced(),
+        onSynced() {
+          synced = true;
+          comments.editorSynced();
+        },
         onCommentsFound: (found) => comments.foundChanged(found),
         onCommentActivated(thread) {
           comments.activate(thread);
@@ -324,8 +332,8 @@
     <Message title={t(gone)} />
   {/if}
 {:else if !showing}
-  <Shell title={t("common.loading")} {workspace} guess={false} crumbWorkspace={false}>
-    <p class="meta" role="status">{t("common.loading")}</p>
+  <Shell title={t("common.loading")} {workspace} guess={false} crumbWorkspace={false} bare>
+    <main class="page"><Skeleton kind="page" since={started} /></main>
   </Shell>
 {:else}
   <Shell title={shownTitle} {workspace} guess={false} {crumbs} bare>
@@ -362,16 +370,19 @@
             <button type="button" class="button" onclick={() => location.reload()}>{t("app.reload")}</button>
           </div>
         {/if}
-        <textarea
-          bind:this={title}
-          class="title"
-          rows="1"
-          placeholder={t("page.untitled")}
-          aria-label={t("page.titleField")}
-          autocomplete="off"
-          spellcheck="false"
-        ></textarea>
-        <div bind:this={editor}></div>
+        {#if !synced && !stale}<Skeleton kind="page" since={started} />{/if}
+        <div hidden={!synced && !stale}>
+          <textarea
+            bind:this={title}
+            class="title"
+            rows="1"
+            placeholder={t("page.untitled")}
+            aria-label={t("page.titleField")}
+            autocomplete="off"
+            spellcheck="false"
+          ></textarea>
+          <div bind:this={editor}></div>
+        </div>
         <Backlinks page={id} />
       </main>
       {#if panelOpen && app.session}

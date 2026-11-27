@@ -5,6 +5,7 @@
   import IconButton from "./IconButton.svelte";
   import Menu, { type MenuItem } from "./Menu.svelte";
   import NewSpace, { managesSpaces } from "./NewSpace.svelte";
+  import Skeleton from "./Skeleton.svelte";
   import TreeLevel, { type Drag, fromTree } from "./TreeLevel.svelte";
   import { describe } from "../lib/form.svelte";
   import { t } from "../lib/i18n";
@@ -118,7 +119,7 @@
   </div>
   {#if adding}<NewSpace {nav} onclose={closeAdding} />{/if}
   {#if !nav.spacesLoaded}
-    <p class="meta" role="status">{t("common.loading")}</p>
+    <Skeleton kind="rows" />
   {:else if nav.problem}
     <p class="problem" role="alert">{nav.problem}</p>
   {:else if nav.spaces.length === 0}
