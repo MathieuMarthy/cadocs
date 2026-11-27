@@ -218,3 +218,9 @@ fn an_excerpt_marks_a_prefix_past_the_stem() {
     let segments = french.excerpt(&query, "Le déploiement");
     assert_eq!(shown(&segments), "Le [déploiement]");
 }
+
+#[test]
+fn a_one_letter_stem_of_a_prefix_is_left_out() {
+    // French drops a final `s`: `es` stems to `e`, which would scan every term.
+    assert_eq!(french().query("es").unwrap().fts(), r#""es"*"#);
+}

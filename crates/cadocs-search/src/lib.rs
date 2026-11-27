@@ -149,7 +149,8 @@ impl Analyzer {
             whole.pop();
             let folded = folded(last);
             let stem = self.stemmer.stem(&folded).into_owned();
-            if stem != folded {
+            // A stem can be shorter than the word: French `es` stems to `e`.
+            if stem != folded && stem.chars().count() > 1 {
                 prefixes.push(stem);
             }
             prefixes.push(folded);
