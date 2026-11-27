@@ -16,7 +16,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 license = "AGPL-3.0-only"
 # Nothing here goes to crates.io: the product is the binary.
