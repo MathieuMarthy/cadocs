@@ -266,6 +266,10 @@ Step 55, on 2026-11-25, the same scenario and machine, one run. RSS in MB (10^6 
 
 Search matching all 10,000 pages: 14.9 ms at p95. The release binary is 20.3 MB, with `web/dist` and no S3 code. Idle grew by 1.6 MB since the mail stage, with the V1 code in the binary; anonymous memory did not move. Details in the [benchmark notes](notes/benchmark.md#measures).
 
+### V1.1 results
+
+Step 66, on 2026-11-27, the same scenario and machine, one run: idle 13.4 MB, 30 active users 34.7, after 3 login peaks 15.7 (target 23.2), 256 rooms 21.0. Every target holds, within one run's noise of V1. Search matching all pages: 17.9 ms at p95 (14.9 at V1, not compared side by side). Binary 20.4 MB. Details in the [benchmark notes](notes/benchmark.md#measures).
+
 ## Limits accepted by design
 
 - One process on one machine: no horizontal scaling or active-active high availability (ADR 0006).

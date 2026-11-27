@@ -46,34 +46,11 @@ Exit criteria open:
 
 ## V1.1
 
-Purpose: close the gaps V1 left open, before new features.
+Purpose, reached: close the gaps V1 left open. Done in steps 57 to 66: sessions on account changes (57), shares that follow their creator (58, ADR 0030), room panics (59), prefix search (60), live body mentions (61), the language of mails (62), links in copies and exports (63, 64), two screen faults (65), the exit review (66). Lessons in `docs/notes/`, tests in [COVERAGE.md](COVERAGE.md), measures in [ARCHITECTURE.md](ARCHITECTURE.md#v11-results).
 
-Scope: what `docs/notes/` lists as left open and V1 users would meet: sessions on account changes, shares of people who left, room panics, prefix search, live mentions, the language of mails, links in copies and exports, two screen faults.
+Exit criteria met: each fix has its test in `COVERAGE.md` and left `docs/notes/`; the binary is 20.4 MB and the MVP RSS thresholds hold.
 
-Steps. The rules of the MVP steps apply. Each step removes the items it fixes from the "Left open" lines of `docs/notes/`.
-
-- [x] Step 57: sessions and account changes. Turning on a second factor (authenticator app or code by mail) ends the person's other sessions, a password change or reset voids the pending codes by mail, and an address change mails the old address. Done when a test covers each.
-- [x] Step 58: shares follow their creator. A share stops answering once its creator can no longer edit its page or has left the workspace, recorded in an ADR as a refinement of ADR 0009. An expired share leaves the share dialog's list. Done when tests show the share of a removed member and of a demoted one answer `404`.
-- [x] Step 59: room panics. A room task that panics frees its `Unloading` slot and its memory estimate, so callers no longer get `ShuttingDown` until a restart. Done when a test with an injected panic shows the budget back where it was and the page opening again.
-- [x] Step 60: prefix search. A prefix typed past the end of its stem finds the word: `deploym` finds `deployment`. Done when search tests cover it in English and French, whole words stem as before, and the index size is measured before and after.
-- [x] Step 61: live body mentions. A mention the indexing job finds in a page body publishes the `notification` event, as a mention in a comment does. Done when a test sees it on the events socket.
-- [x] Step 62: language of mails. The server knows a person's language with no choice made: their setting, else the last browser language it saw (`Accept-Language`, or what the front end reports), else the workspace's language, else English. An invitation takes the workspace's. Every mail (notifications, codes, reset links, invitations) comes from a server-side catalogue in English and French. No IP geolocation: a GeoIP database costs RAM and binary size, and guesses wrong in countries with several languages. Done when a person with no setting and a French browser gets French mail, and a test fails on a mail string left untranslated.
-- [x] Step 63: links in copies. Links between pages of a duplicated subtree point at the copies, not the sources. Done when a test duplicates a tree whose pages link to each other, into the same space and another.
-- [x] Step 64: links in exports. A space export writes links between exported pages as relative file links, in Markdown and HTML, so the zip reads offline. Done when a test follows every page link of an exported zip to a file inside it.
-- [x] Step 65: screen faults. A wrong second-factor code says so, not `wrong email or password`, and a page link clicked inside a comment composer keeps the draft. Done when end-to-end tests cover both.
-- [ ] Step 66: V1.1 exit. Benchmark, binary size, `COVERAGE.md`, and a review of what stays left open in `docs/notes/`.
-
-Steps 57 to 65 are independent and can run in any order. 57 and 62 both touch mail, and 63 and 64 both rewrite page links, so rebase the second of each pair on the first.
-
-Set aside, not in this stage:
-
-- Accessibility: no keyboard way to move a page in the tree.
-- OIDC: only RS256; an account made by a provider has no password, so the routes that need the current one are closed to it.
-- Authenticator app: the per-account limit counts right codes too, so someone who holds the password can keep the owner at `429`; no screen shows how many recovery codes are left.
-
-Exit criteria:
-- [ ] Every step's fix has a test listed in `COVERAGE.md`, and its item is gone from `docs/notes/`.
-- [ ] Binary size stays under 30 MB, and the RSS thresholds of the MVP still hold.
+Still left open, each in its note: keyboard moves in the tree, OIDC beyond RS256 and for accounts with no password, the authenticator's per-account limit and recovery code count, and smaller screens and edges (step 66 review: none loses data or reaches past a permission).
 
 ## V2
 
