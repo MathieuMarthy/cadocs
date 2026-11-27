@@ -252,6 +252,47 @@ async fn a_copy_takes_its_descendants_with_copies_of_their_attachments() {
 }
 
 #[tokio::test]
+async fn links_between_copied_pages_point_at_the_copies() {
+    let wiki = wiki(&[]).await;
+    let outside = wiki.imported("# Outside\n\nAlone.\n", None).await;
+    let root = wiki
+        .imported(&format!("# Root\n\n[x](/?page={outside})\n"), None)
+        .await;
+    let first = wiki
+        .imported(
+            &format!("# First\n\n[x](/?page={root}) [x]({ORIGIN}/?page={outside})\n"),
+            Some(&root),
+        )
+        .await;
+    wiki.imported(&format!("# Second\n\n[x](/?page={first})\n"), Some(&root))
+        .await;
+    // Titles show as the store has them, which a flush may not have written yet: ids only.
+    let pages = |markdown: String| -> Vec<String> {
+        markdown
+            .split(&format!("{ORIGIN}/?page="))
+            .skip(1)
+            .map(|rest| rest[..36].to_owned())
+            .collect()
+    };
+
+    let other = wiki.new_space(&wiki.workspace).await;
+    for space in [wiki.space.clone(), other] {
+        let copy = wiki.copy(&root, json!({ "space_id": space })).await;
+        let children = wiki.tree(&space, Some(&copy)).await;
+        assert_eq!(children.len(), 2);
+        assert_eq!(pages(wiki.markdown(&copy).await), [outside.as_str()]);
+        assert_eq!(
+            pages(wiki.markdown(&children[0]).await),
+            [copy.clone(), outside.clone()]
+        );
+        assert_eq!(
+            pages(wiki.markdown(&children[1]).await),
+            [children[0].clone()]
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_copy_goes_where_it_is_asked() {
     let wiki = wiki(&[]).await;
     let first = wiki.page(&wiki.space, None).await;

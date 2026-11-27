@@ -204,7 +204,8 @@ withMail("a second factor turned on in the account makes a login ask for a maile
   const wrong = String((Number(login) + 1) % 1_000_000).padStart(6, "0");
   await page.getByLabel("code").fill(wrong);
   await page.getByRole("button", { name: "log in" }).click();
-  await expect(page.getByText("wrong")).toBeVisible();
+  // The code is wrong, not the email or the password.
+  await expect(page.getByRole("alert")).toHaveText("wrong");
   await page.getByLabel("code").fill(login!);
   await page.getByRole("button", { name: "log in" }).click();
   await expect(page).toHaveURL(`${server.url}/w/tests`);
@@ -213,6 +214,37 @@ withMail("a second factor turned on in the account makes a login ask for a maile
   await factor.getByLabel("current password").fill(PASSWORD);
   await factor.getByRole("button", { name: "turn off" }).click();
   await expect(factor).toContainText("off: after your password");
+});
+
+withMail("a password changed while the code form is open sends the login back to the password", async ({
+  page,
+  server,
+  relay,
+}) => {
+  // Through the test's own session, which turning the factor on keeps.
+  await server.call("POST", "/me/email-2fa", {});
+  const on = /^ {4}(\d{6})$/m.exec((await relay.message()).text)?.[1];
+  await server.call("POST", "/me/email-2fa/confirm", { code: on });
+
+  await page.goto(`${server.url}/login`);
+  await page.getByLabel("email").fill("ada@example.org");
+  await page.getByLabel("password").fill(PASSWORD);
+  await page.getByRole("button", { name: "log in" }).click();
+  await expect(page.getByRole("status")).toContainText("a code is on its way to ada@example.org");
+  const login = /^ {4}(\d{6})$/m.exec((await relay.message(2)).text)?.[1];
+
+  await server.call("PATCH", "/me", { password: NEW_PASSWORD, current_password: PASSWORD });
+  await page.getByLabel("code").fill(login!);
+  await page.getByRole("button", { name: "log in" }).click();
+  await expect(page.getByRole("alert")).toHaveText("this login no longer works. type your email and password again.");
+  await expect(page.getByLabel("email")).toHaveValue("ada@example.org");
+  await page.getByLabel("password").fill(NEW_PASSWORD);
+  await page.getByRole("button", { name: "log in" }).click();
+  await expect(page.getByRole("status")).toContainText("a code is on its way to ada@example.org");
+  const again = /^ {4}(\d{6})$/m.exec((await relay.message(3)).text)?.[1];
+  await page.getByLabel("code").fill(again!);
+  await page.getByRole("button", { name: "log in" }).click();
+  await expect(page).toHaveURL(`${server.url}/w/tests`);
 });
 
 withMail("a new email changes only once the code mailed to it is typed", async ({
