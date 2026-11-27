@@ -53,7 +53,7 @@
           underline: false,
         }),
         Mention,
-        PageLink,
+        PageLink.configure({ newTab: true }),
         MentionPicker.configure({ workspace: () => workspace }),
         PagePicker.configure({ workspace: () => workspace }),
       ],

@@ -34,13 +34,22 @@
     const body: Record<string, string> = { email, password };
     if (withCode) body.code = withCode;
     if (withTotp) body.totp = withTotp;
+    // Past the password, a `401` means it changed or the account went meanwhile, not a wrong code.
+    const secondFactor = codeAsked || totpAsked;
+    let stale = false;
     await form.run(
       async () => await signIn(await api<Session>("POST", "/auth/login", body)),
-      (error) =>
-        error instanceof ApiError && error.status === 401
-          ? t("login.wrong")
-          : describe(error),
+      (error) => {
+        if (!(error instanceof ApiError && error.status === 401)) return describe(error);
+        stale = secondFactor;
+        return t(secondFactor ? "login.again" : "login.wrong");
+      },
     );
+    if (stale) {
+      const problem = form.problem;
+      startOver();
+      form.problem = problem;
+    }
     if (form.fields.code === "required") {
       form.fields = {};
       codeAsked = true;
