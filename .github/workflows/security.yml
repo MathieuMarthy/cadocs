@@ -1,5 +1,6 @@
-# Known vulnerabilities, licenses (ADR 0010), secrets and static analysis. On every pull request,
-# every push to main, and weekly, since a new advisory can hit code that did not change.
+# Known vulnerabilities, licenses (ADR 0010), secrets and static analysis. On every pull request and
+# weekly, since a new advisory can hit code that did not change. On a push to main, only the secrets
+# scan and CodeQL (ADR 0031).
 name: Security
 
 on:
@@ -16,6 +17,9 @@ permissions:
 jobs:
   cargo-deny:
     name: Rust advisories, licenses, sources
+    # A merge's lockfile holds only crates its pull requests checked; a new advisory waits for the
+    # next pull request or Monday.
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -28,6 +32,8 @@ jobs:
 
   npm-audit:
     name: npm advisories
+    # As cargo-deny.
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,6 +49,7 @@ jobs:
 
   secrets:
     name: Secrets in history
+    # On main too: the only scan of a direct push before Monday, for 15 seconds.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -56,6 +63,7 @@ jobs:
 
   codeql:
     name: CodeQL (${{ matrix.language }})
+    # On main too: main's analysis is the alert list, and the base each pull request is compared with.
     runs-on: ubuntu-24.04
     permissions:
       contents: read
