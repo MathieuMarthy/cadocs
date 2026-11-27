@@ -31,6 +31,8 @@ pub struct User {
     pub totp: bool,
     /// The language of the interface, `None` to follow the browser's.
     pub language: Option<String>,
+    /// The last browser language seen among those mail is written in (step 62).
+    pub browser_language: Option<String>,
 }
 
 /// What stands in for the code of the app at login.
@@ -390,6 +392,19 @@ pub trait AccountStore: Send + Sync + 'static {
         user_id: &str,
         attempt: &CodeAttempt<'_>,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// Keeps `language` as the last browser language seen of a user (step 62).
+    fn set_browser_language(
+        &self,
+        user_id: &str,
+        language: &str,
+    ) -> impl Future<Output = Result<(), StoreError>> + Send;
+
+    /// The language to mail a user in, `None` for English or an unknown user (step 62).
+    fn mail_language(
+        &self,
+        user_id: &str,
+    ) -> impl Future<Output = Result<Option<String>, StoreError>> + Send;
 
     /// Turns the mail of notifications on or off for a user.
     fn set_email_notifications(

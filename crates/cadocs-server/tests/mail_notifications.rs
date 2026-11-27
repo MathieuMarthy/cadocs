@@ -83,6 +83,22 @@ async fn a_burst_of_notifications_sends_one_message_to_who_asked() {
 }
 
 #[tokio::test]
+async fn the_message_is_in_the_language_of_who_gets_it() {
+    let (api, relay) = with_mail().await;
+    let ada = ada(&api).await;
+    let (bob, page) = wiki(&api, &ada).await;
+    assert_eq!(choose(&api, &ada, true).await, 204);
+    api.sql("UPDATE workspaces SET language = 'fr'").await;
+
+    comment(&api, &bob, &page, "Premier").await;
+
+    let text = body(&messages(&relay, 1).await[0]);
+    assert!(text.contains("Bonjour Ada,"), "{text}");
+    assert!(text.contains("Other a comment"), "{text}");
+    assert!(!text.contains("commented on"), "{text}");
+}
+
+#[tokio::test]
 async fn nothing_is_sent_to_who_did_not_ask_or_already_read() {
     let (api, relay) = with_mail().await;
     let ada = ada(&api).await;

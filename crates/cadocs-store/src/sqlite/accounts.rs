@@ -4,7 +4,7 @@ use cadocs_core::permissions::{
 use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, SqliteConnection, SqliteExecutor};
 
-use super::{BEGIN_WRITE, SqliteStore};
+use super::{BEGIN_WRITE, MAIL_LANGUAGE, SqliteStore};
 use crate::now_ms;
 use crate::{
     AccountStore, ActiveSession, AdminChanges, CodeAttempt, Credentials, FirstUser, IdentityUser,
@@ -39,6 +39,7 @@ const USABLE_RESET: &str = "SELECT r.user_id FROM password_resets r
 
 const SELECT_RECORD: &str =
     "SELECT id, email, name, is_instance_admin, email_2fa, email_notifications, language,
+            browser_language,
             disabled_at, created_at,
             EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = users.id
                                                AND t.enabled_at IS NOT NULL) AS totp
@@ -205,6 +206,7 @@ async fn insert_recovery_codes(
 
 const SELECT_CREDENTIALS: &str =
     "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.email_notifications, u.language,
+            u.browser_language,
             u.password_hash, u.disabled_at, t.secret AS totp_secret, t.secret IS NOT NULL AS totp
      FROM users u LEFT JOIN user_totp t ON t.user_id = u.id AND t.enabled_at IS NOT NULL";
 
@@ -227,6 +229,7 @@ fn user(row: &SqliteRow) -> User {
         email_notifications: row.get::<i64, _>("email_notifications") != 0,
         totp: row.get("totp"),
         language: row.get("language"),
+        browser_language: row.get("browser_language"),
     }
 }
 
@@ -345,6 +348,7 @@ impl AccountStore for SqliteStore {
     ) -> Result<Option<ActiveSession>, StoreError> {
         let row = sqlx::query(
             "SELECT u.id, u.email, u.name, u.is_instance_admin, u.email_2fa, u.email_notifications, u.language,
+                    u.browser_language,
                     s.last_seen_at,
                     EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = u.id
                                                        AND t.enabled_at IS NOT NULL) AS totp
@@ -881,6 +885,24 @@ impl AccountStore for SqliteStore {
             .await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn set_browser_language(&self, user_id: &str, language: &str) -> Result<(), StoreError> {
+        sqlx::query("UPDATE users SET browser_language = ?2 WHERE id = ?1")
+            .bind(user_id)
+            .bind(language)
+            .execute(&self.writer)
+            .await?;
+        Ok(())
+    }
+
+    async fn mail_language(&self, user_id: &str) -> Result<Option<String>, StoreError> {
+        let query = format!("SELECT {MAIL_LANGUAGE} FROM users u WHERE u.id = ?1");
+        let language: Option<Option<String>> = sqlx::query_scalar(AssertSqlSafe(query))
+            .bind(user_id)
+            .fetch_optional(&self.reader)
+            .await?;
+        Ok(language.flatten())
     }
 
     async fn set_email_notifications(&self, user_id: &str, on: bool) -> Result<(), StoreError> {
