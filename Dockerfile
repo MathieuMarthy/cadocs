@@ -28,7 +28,7 @@ RUN cargo build --release --locked -p cadocs-server --features "$FEATURES" \
 FROM scratch AS binary
 COPY --from=build /cadocs /cadocs
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cc66d222f0a7ec996b78a99fe76a969bc80b539a5016ad866c14d1949bc6d0ab
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:532c7a94f9e96ba9db75eb9388f4227751131c7cb0a411d1a8521af4096135de
 COPY --from=build /cadocs /usr/local/bin/cadocs
 # Owned by the image's user, so a new named volume is too.
 COPY --from=build --chown=nonroot:nonroot /data /data
