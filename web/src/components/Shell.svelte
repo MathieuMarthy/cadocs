@@ -10,11 +10,17 @@
 </script>
 
 <script lang="ts">
-  import { tick, type Snippet } from "svelte";
+  import { tick, untrack, type Snippet } from "svelte";
 
   import { api, type Workspace } from "../lib/api";
   import { t } from "../lib/i18n";
   import { Form } from "../lib/form.svelte";
+  import {
+    declineInvitation,
+    joinInvitation,
+    loadInvitations,
+    pending,
+  } from "../lib/invitations.svelte";
   import { acquireNav, lastWorkspace, type Nav } from "../lib/nav.svelte";
   import { navigate, route } from "../lib/router.svelte";
   import { app, signOut } from "../lib/session.svelte";
@@ -80,6 +86,13 @@
     nav = held.nav;
     return () => held.release();
   });
+
+  $effect(() => {
+    void session;
+    untrack(() => void loadInvitations());
+  });
+
+  const answering = new Form();
 
   const leaving = new Form();
 
@@ -187,6 +200,9 @@
         <span class="selector-current">
           {current?.name ?? (guess ? t("workspace.none") : "…")} ▾
         </span>
+        {#if pending.items.length > 0}
+          <span class="badge">{t("workspace.pending", { count: pending.items.length })}</span>
+        {/if}
       </summary>
       <ul class="rows">
         {#each session.workspaces as item (item.id)}
@@ -200,6 +216,25 @@
             </a>
           </li>
         {/each}
+        {#each pending.items as invitation (invitation.id)}
+          <li class="invitation-row">
+            <button
+              class="row"
+              type="button"
+              disabled={answering.busy}
+              onclick={() => void answering.run(() => joinInvitation(invitation))}
+            >
+              {t("invite.join", { workspace: invitation.workspace_name })}
+            </button>
+            <IconButton
+              icon="x"
+              verb={t("workspace.decline")}
+              label={t("workspace.declineOf", { workspace: invitation.workspace_name })}
+              disabled={answering.busy}
+              onclick={() => void answering.run(() => declineInvitation(invitation))}
+            />
+          </li>
+        {/each}
         {#if session.can_create_workspace && !addingWorkspace}
           <li>
             <button class="row new-workspace-row" type="button" onclick={() => (addingWorkspace = true)}>
@@ -208,6 +243,7 @@
           </li>
         {/if}
       </ul>
+      {#if answering.problem}<p class="problem" role="alert">{answering.problem}</p>{/if}
       {#if session.can_create_workspace && addingWorkspace}
         <NewWorkspace onclose={closeAddingWorkspace} />
       {/if}

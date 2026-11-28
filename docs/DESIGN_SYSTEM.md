@@ -216,7 +216,7 @@ A modal surface for a task that needs the page to wait, such as the share dialog
 
 ### Workspace selector
 
-A 22px `accent` square, the name at 600, and the current workspace in `muted` followed by `▾`. It opens in place, as rows below it: only the command menu floats. A last `new workspace` row, in `muted`, shows to who may create one, and opens the name form in place of itself.
+A 22px `accent` square, the name at 600, and the current workspace in `muted` followed by `▾`. It opens in place, as rows below it: only the command menu floats. A last `new workspace` row, in `muted`, shows to who may create one, and opens the name form in place of itself. Pending invitations add a badge in `accent-text` to the right of the current workspace (`1 invitation`), and a row each above `new workspace`: `join <name>` and an `x` icon button to decline.
 
 ### Search field
 
@@ -235,6 +235,7 @@ The floating surface of the slash menu and the `Ctrl K` palette.
 - Items at `control-height`, command on the left, description or shortcut on the right in `muted`.
 - Active item: full inversion, description in `selection-ink`.
 - The palette is the same surface, 560px wide, with an input at the top.
+- A field's suggestions (the invitation form's people) take the same surface under the field, its width, with the name on the left and the address on the right in `muted`. Arrows move, Enter picks, Escape closes; Enter with none chosen submits the form.
 
 ### Action menu
 
