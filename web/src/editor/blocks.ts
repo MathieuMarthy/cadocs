@@ -3,6 +3,7 @@
 
 import { type Editor, mergeAttributes, Node } from "@tiptap/core";
 import { Details } from "@tiptap/extension-details";
+import { Plugin } from "@tiptap/pm/state";
 
 import { headingNumbers } from "./source";
 import { t } from "../lib/i18n";
@@ -108,7 +109,24 @@ export const Callout = Node.create({
 });
 
 /** A toggle: a summary line over blocks each tab opens or closes for itself, not for the others. */
-export const Toggle = Details.configure({
+export const Toggle = Details.extend({
+  addProseMirrorPlugins() {
+    // ProseMirror took presses on the button as presses on the text: they moved the caret, and a
+    // triple click selected the whole toggle, which the next key then replaced.
+    const button = new Plugin({
+      props: {
+        handleDOMEvents: {
+          mousedown: (_view, event) => {
+            if (!(event.target instanceof Element) || !event.target.closest(".toggle-button")) return false;
+            event.preventDefault();
+            return true;
+          },
+        },
+      },
+    });
+    return [...(this.parent?.() ?? []), button];
+  },
+}).configure({
   persist: false,
   renderToggleButton: ({ element, isOpen }) => {
     element.textContent = isOpen ? "▾" : "▸";
