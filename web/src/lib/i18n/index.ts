@@ -42,6 +42,18 @@ export function t(key: Key, params: Params = {}): string {
 }
 
 /**
+ * What changed in `current` (step 81), as the keys of its entries by kind: none for a browser that
+ * never ran an earlier release (`seen` is `null`), nor for the release it last ran.
+ */
+export function releaseNotes(seen: string | null, current: string) {
+  const of = (kind: string) =>
+    seen === null || seen === current
+      ? []
+      : (Object.keys(en) as Key[]).filter((key) => key.startsWith(`news.${current}.${kind}.`));
+  return { features: of("feature"), fixes: of("fix") };
+}
+
+/**
  * The language to show: the person's choice if the interface has it, else the first of the
  * browser's it has, matched on the whole tag then on its primary subtag, else English.
  */

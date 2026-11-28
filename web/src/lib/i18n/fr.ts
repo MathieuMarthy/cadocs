@@ -530,4 +530,22 @@ export const fr: Catalogue = {
   "upload.started": "envoi de {name}…",
   "upload.done": "{name} envoyé",
   "upload.failed": "{name} : {problem}",
+  "news.title": "nouveautés de {version}",
+  "news.close": "fermer",
+  "news.features": "fonctionnalités",
+  "news.fixes": "corrections",
+  "news.0.3.1.feature.headings":
+    "les titres vont jusqu'au niveau 6, dans l'éditeur, les imports et les exports.",
+  "news.0.3.1.feature.code":
+    "tab et maj-tab indentent les lignes d'un bloc de code, et sa clôture s'affiche sous le curseur.",
+  "news.0.3.1.feature.tables": "faites glisser le bord d'une colonne pour régler sa largeur.",
+  "news.0.3.1.feature.skeletons":
+    "les pages, l'arbre et les résultats de recherche montrent leur forme pendant le chargement.",
+  "news.0.3.1.feature.deletion": "supprimer votre compte demande d'abord votre mot de passe.",
+  "news.0.3.1.fix.setup": "un code d'installation refusé réaffiche son champ.",
+  "news.0.3.1.fix.admin": "l'écran d'administration garde l'espace de travail où vous étiez.",
+  "news.0.3.1.fix.space":
+    "enregistrer les réglages d'un espace ramène à la page d'où vous veniez.",
+  "news.0.3.1.fix.spam":
+    "les écrans qui annoncent l'envoi d'un mail précisent qu'il peut être dans les indésirables.",
 };

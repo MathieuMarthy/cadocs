@@ -501,4 +501,20 @@ export const en = {
   "upload.started": "uploading {name}…",
   "upload.done": "uploaded {name}",
   "upload.failed": "{name}: {problem}",
+  "news.title": "what's new in {version}",
+  "news.close": "close",
+  "news.features": "features",
+  "news.fixes": "fixes",
+  // One key per entry of a release, `news.<version>.feature.<name>` or `news.<version>.fix.<name>`,
+  // in the order they show.
+  "news.0.3.1.feature.headings": "headings go down to level 6, in the editor, imports and exports.",
+  "news.0.3.1.feature.code":
+    "tab and shift-tab indent the lines of a code block, and its fence shows under the caret.",
+  "news.0.3.1.feature.tables": "drag a column's edge to set its width.",
+  "news.0.3.1.feature.skeletons": "pages, the tree and search results show their shape while they load.",
+  "news.0.3.1.feature.deletion": "deleting your account asks for your password first.",
+  "news.0.3.1.fix.setup": "a refused setup code shows its field again.",
+  "news.0.3.1.fix.admin": "the admin screen keeps the workspace you were in.",
+  "news.0.3.1.fix.space": "saving a space's settings goes back to the page you came from.",
+  "news.0.3.1.fix.spam": "screens that say a mail was sent add that it may be in the spam folder.",
 } satisfies Record<string, string | { one?: string; other: string }>;

@@ -796,6 +796,16 @@ button.row:hover {
   font-weight: 400;
 }
 
+/* What's new (step 81): the release as a section heading, then a label per kind of entry. */
+.news-dialog h2 {
+  font-size: var(--heading-2);
+  font-weight: 600;
+}
+
+.news-dialog h3 {
+  margin-top: var(--space-3);
+}
+
 /* A checkbox as the design system draws boxes: square, `ink`, filled when on. */
 .check {
   display: flex;
