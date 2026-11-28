@@ -32,6 +32,11 @@ test("a callout reaches the other browser, and so does a change of its kind", as
   await expect(callout(right).getByLabel("callout kind")).toHaveValue("warning");
   // The text stayed where it was.
   await expectText(callout(right).locator("p"), "Back up first.");
+
+  // Printed, the list shows its text only, without its arrow.
+  await left.emulateMedia({ media: "print" });
+  const arrow = () => callout(left).getByLabel("callout kind").evaluate((e) => getComputedStyle(e).appearance);
+  await expect.poll(arrow).toBe("none");
 });
 
 test("a toggle's summary and content reach the other browser, which opens it on its own", async ({
@@ -55,6 +60,31 @@ test("a toggle's summary and content reach the other browser, which opens it on 
   await expect(content).toBeVisible();
   await expectText(content.locator("p"), "Hidden text");
   await expect(toggle(left).getByRole("button", { name: "close" })).toBeVisible();
+});
+
+test("a toggle clicked five times fast stays, with its content", async ({ left, right }) => {
+  await bothOnline(left, right);
+  await editor(left).click();
+  await command(left, "toggle");
+  await left.keyboard.type("Details");
+  await toggle(left).getByRole("button", { name: "open" }).click();
+  await toggle(left).locator('div[data-type="detailsContent"] p').click();
+  await left.keyboard.type("Hidden text");
+
+  const button = toggle(left).locator("button.toggle-button");
+  // One burst, as a person clicks: the third press is a triple click to ProseMirror.
+  await button.click({ clickCount: 5 });
+  await expect(toggle(left).getByRole("button", { name: "open" })).toBeVisible();
+  // A triple click selected the whole toggle, so the next key replaced it.
+  await expect(toggle(left)).not.toHaveClass(/ProseMirror-selectednode/);
+  // The caret was in the content: closing moves it to the end of the summary, not its start.
+  await left.keyboard.type("!");
+
+  await expect(toggle(left).locator("summary")).toHaveText(/^Details/);
+  await button.click();
+  await expect(toggle(left).locator('div[data-type="detailsContent"] p')).toHaveText(/^Hidden text/);
+  await expect(toggle(right).locator("summary")).toHaveText(/^Details/);
+  await expect(toggle(right).locator('div[data-type="detailsContent"] p')).toHaveText(/^Hidden text/);
 });
 
 test("a table is filled and grows in one browser, and the other follows", async ({ left, right }) => {

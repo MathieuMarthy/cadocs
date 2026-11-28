@@ -193,7 +193,12 @@
             </label>
             <h2 class="history-title">{shown.title || t("page.untitled")}</h2>
             <!-- The server escapes every text and attribute of this HTML (cadocs-content). -->
-            <div class="tiptap revision-content">
+            <div
+              class="tiptap revision-content"
+              style:--callout-note={JSON.stringify(t("callout.note"))}
+              style:--callout-warning={JSON.stringify(t("callout.warning"))}
+              style:--callout-danger={JSON.stringify(t("callout.danger"))}
+            >
               {#if compared}
                 {@html compared}
               {:else}

@@ -1017,11 +1017,45 @@ button.row:hover {
   list-style: none;
 }
 
+/* The callout of `page.css`, its head drawn from the kind: `History.svelte` sets the labels. */
 .revision-content .callout {
-  margin: var(--space-3) 0;
-  padding: var(--space-2) var(--space-3);
-  border-left: 3px solid var(--ink);
-  background: var(--panel);
+  --kind: var(--ink);
+  --kind-text: var(--muted);
+  margin: 0 0 var(--space-4);
+  padding: 0 var(--space-4) var(--space-3);
+  border: 1px solid var(--line);
+}
+.revision-content .callout[data-kind="warning"] {
+  --kind: var(--accent);
+  --kind-text: var(--accent-text);
+}
+.revision-content .callout[data-kind="danger"] {
+  --kind: var(--danger);
+  --kind-text: var(--danger);
+}
+.revision-content .callout::before {
+  content: var(--callout-note);
+  display: block;
+  margin: 0 calc(-1 * var(--space-4)) var(--space-3);
+  padding: var(--space-1) var(--space-3) var(--space-1) calc(var(--space-3) + 3px + var(--space-2));
+  border-bottom: 1px solid var(--line);
+  background:
+    linear-gradient(var(--kind), var(--kind)) no-repeat var(--space-3) 50% / 3px 1.2em,
+    var(--panel);
+  color: var(--kind-text);
+  font: 500 11px/1.4 var(--font-mono);
+}
+.revision-content .callout[data-kind="warning"]::before {
+  content: var(--callout-warning);
+}
+.revision-content .callout[data-kind="danger"]::before {
+  content: var(--callout-danger);
+}
+.revision-content .callout > :first-child {
+  margin-top: 0;
+}
+.revision-content .callout > :last-child {
+  margin-bottom: 0;
 }
 
 /* Printing (to paper or PDF): the page alone, in the light theme, with no interface around it. */

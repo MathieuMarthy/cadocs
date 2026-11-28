@@ -2,7 +2,7 @@
 
 import { expect } from "@playwright/test";
 
-import { DOC, editor, expectText, test as base } from "./editing.ts";
+import { command, DOC, editor, expectText, test as base } from "./editing.ts";
 import { TestServer } from "./server.ts";
 
 /** A revision a second after typing stops, so a test does not wait two minutes. */
@@ -74,4 +74,19 @@ test("a reader sees the history but cannot restore", async ({ server, member, ri
   await expect(right.getByRole("heading", { name: "history", level: 1 })).toBeVisible();
   await expect(right.getByText("no revision yet")).toBeVisible();
   await expect(right.getByRole("button", { name: "restore" })).toHaveCount(0);
+});
+
+test("a callout in a revision shows its kind, in the language of the interface", async ({ server, left }) => {
+  await editor(left).click();
+  await command(left, "callout");
+  await left.keyboard.type("Back up first.");
+  await editor(left).getByLabel("callout kind").selectOption("warning");
+  await revisions(server, 1);
+
+  await left.goto(`${left.url()}&history`);
+  const callout = left.getByRole("region", { name: "revision 1" }).locator(".callout");
+  await expect(callout).toContainText("Back up first.");
+  // The server writes no label: the head is drawn from the kind, with the catalogue's words.
+  const label = () => callout.evaluate((element) => getComputedStyle(element, "::before").content);
+  await expect.poll(label).toBe('"warning"');
 });

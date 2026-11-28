@@ -68,9 +68,9 @@ const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
 /// The only style of a public page, allowed by its hash: no `'unsafe-inline'`, and no request.
 const STYLE: &str = "\
 :root{color-scheme:light dark;--bg:#f5f5f4;--ink:#141414;--muted:#5a5a58;--line:#cdcdca;\
---panel:#ebebea;--accent:#b3390d}\
+--panel:#ebebea;--accent:#b3390d;--danger:#b3261e}\
 @media (prefers-color-scheme:dark){:root{--bg:#0e0e0e;--ink:#e6e6e4;--muted:#999996;\
---line:#2b2b2b;--panel:#151515;--accent:#ff8a5c}}\
+--line:#2b2b2b;--panel:#151515;--accent:#ff8a5c;--danger:#ff7b72}}\
 *{box-sizing:border-box}\
 body{margin:0;background:var(--bg);color:var(--ink);\
 font:16px/1.6 \"IBM Plex Sans\",system-ui,sans-serif}\
@@ -89,8 +89,14 @@ td p,th p{margin:0}\
 [data-align=center]{text-align:center}[data-align=right]{text-align:right}\
 img{max-width:100%;height:auto}figure{margin:1rem 0}\
 .tasks{list-style:none;padding-left:0}.task{display:flex;gap:.5rem}.task>div>p{margin:0}\
-.callout{border:1px solid var(--line);border-left:4px solid var(--accent);padding:.5rem 1rem;\
-margin:1rem 0}\
+.callout{--kind:var(--ink);--kind-text:var(--muted);border:1px solid var(--line);padding:0 1rem .75rem;margin:1rem 0}\
+.callout[data-kind=warning]{--kind:var(--accent);--kind-text:var(--accent)}\
+.callout[data-kind=danger]{--kind:var(--danger);--kind-text:var(--danger)}\
+.callout::before{content:attr(data-kind);display:block;margin:0 -1rem .75rem;\
+padding:.25rem .75rem .25rem 1.4rem;border-bottom:1px solid var(--line);color:var(--kind-text);\
+background:linear-gradient(var(--kind),var(--kind)) no-repeat .75rem 50%/3px 1.2em,var(--panel);\
+font:500 .7rem/1.4 \"IBM Plex Mono\",ui-monospace,monospace}\
+.callout>:first-child{margin-top:0}.callout>:last-child{margin-bottom:0}\
 .toc ol{list-style:none;padding-left:0}\
 .toc [data-depth=\"1\"]{padding-left:1rem}.toc [data-depth=\"2\"]{padding-left:2rem}\
 .toc [data-depth=\"3\"]{padding-left:3rem}.toc [data-depth=\"4\"]{padding-left:4rem}\
