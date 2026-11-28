@@ -5,6 +5,7 @@
   import Field from "../components/Field.svelte";
   import Groups from "../components/Groups.svelte";
   import IconButton from "../components/IconButton.svelte";
+  import InviteeField from "../components/InviteeField.svelte";
   import Select from "../components/Select.svelte";
   import Shell from "../components/Shell.svelte";
   import Time from "../components/Time.svelte";
@@ -22,7 +23,7 @@
     stemmingLanguages,
   } from "../lib/roles";
   import { navigate } from "../lib/router.svelte";
-  import { app, refreshSession } from "../lib/session.svelte";
+  import { app, mailFeatures, refreshSession } from "../lib/session.svelte";
   import { t } from "../lib/i18n";
 
   interface Invitation {
@@ -145,6 +146,9 @@
   let invitedRole = $state("member");
   const invitationForm = new Form();
   const invitationList = new Form();
+  /** With a relay, the server mails each new link. */
+  let mail = $state(false);
+  void mailFeatures().then((features) => (mail = features.mail));
 
   async function loadInvitations() {
     await invitationList.run(async () => {
@@ -305,14 +309,11 @@
   {#if manages}
     <section aria-labelledby="invitations-heading">
       <h2 id="invitations-heading">{t("workspace.invitations")}</h2>
-      <p class="meta">{t("workspace.invitationsHint")}</p>
+      <p class="meta">{t(mail ? "workspace.invitationsMailed" : "workspace.invitationsHint")}</p>
       <form onsubmit={invite}>
-        <Field
-          label={t("form.email")}
-          type="email"
+        <InviteeField
+          workspace={workspace.id}
           bind:value={email}
-          required
-          autocomplete="off"
           problem={invitationForm.field("email")}
         />
         <Select

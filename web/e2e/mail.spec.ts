@@ -297,3 +297,18 @@ withMail("a new email changes only once the code mailed to it is typed", async (
   await page.reload();
   await expect(login.getByLabel("email")).toHaveValue("ada@example.net");
 });
+
+withMail("an invitation to a new address is mailed with its link", async ({ page, server, relay }) => {
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/tests/settings`);
+  const invitations = page.getByRole("main").getByRole("region", { name: "invitations" });
+  await expect(invitations).toContainText("mailed to the address");
+  await invitations.getByLabel("email").fill("linus@example.org");
+  await expect(invitations.getByRole("listbox", { name: "people" }).getByRole("option")).toHaveCount(0);
+  await invitations.getByRole("button", { name: "invite" }).click();
+  const link = await invitations.getByLabel("invitation link", { exact: true }).inputValue();
+
+  const message = await relay.message();
+  expect(message.to).toBe("linus@example.org");
+  expect(message.text).toContain(link);
+});

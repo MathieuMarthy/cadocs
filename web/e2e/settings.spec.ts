@@ -531,3 +531,83 @@ test("a language picked on the account screen redraws it, and outlives a reload"
   // Read once: a retried count would wait for the notice to leave.
   expect(await saved.count()).toBe(1);
 });
+
+test("an existing account is suggested, and joins from the workspace selector without the link", async ({
+  page,
+  server,
+  browser,
+}) => {
+  const member = await server.addMember("grace@example.org");
+  const second = await server.call("POST", "/workspaces", { name: "Second" });
+  const third = await server.call("POST", "/workspaces", { name: "Third" });
+  const body = { email: "grace@example.org", role: "member" };
+  await server.call("POST", `/workspaces/${third.id}/invitations`, body);
+
+  // An invitation made before the page loads shows at load, and can be declined.
+  const grace = await memberPage(browser, server, member);
+  await grace.goto(`${server.url}/w/tests`);
+  const selector = grace.locator(".selector");
+  await expect(selector.locator("summary")).toContainText("1 invitation");
+  await selector.locator("summary").click();
+  const fromThird = selector.getByRole("listitem").filter({ hasText: "Third" });
+  await fromThird.getByRole("button", { name: "decline the invitation to Third" }).click();
+  await expect(fromThird).toHaveCount(0);
+  expect((await server.call("GET", `/workspaces/${third.id}/invitations`)).items).toEqual([]);
+
+  // The form suggests the account after 3 characters, and still takes any address.
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/${second.slug}/settings`);
+  const invitations = section(page, "invitations");
+  const email = invitations.getByLabel("email");
+  const people = invitations.getByRole("listbox", { name: "people" });
+  await email.fill("gr");
+  await page.waitForTimeout(400);
+  await expect(people.getByRole("option")).toHaveCount(0);
+  await email.fill("gra");
+  const suggestion = people.getByRole("option", { name: /Grace/ });
+  await expect(suggestion).toContainText("grace@example.org");
+  await email.press("ArrowDown");
+  await email.press("Enter");
+  await expect(email).toHaveValue("grace@example.org");
+  await expect(people.getByRole("option")).toHaveCount(0);
+  await invitations.getByRole("button", { name: "invite" }).click();
+  await expect(invitations.getByRole("listitem").filter({ hasText: "grace@example.org" })).toBeVisible();
+
+  // The event brings it to the open selector, and joining needs no link.
+  const fromSecond = selector.getByRole("listitem").filter({ hasText: "Second" });
+  await fromSecond.getByRole("button", { name: "join Second" }).click();
+  await expect(grace).toHaveURL(`${server.url}/w/${second.slug}`);
+  await expect(selector.locator("summary")).not.toContainText("invitation");
+  await expect(grace.getByRole("heading", { level: 1 })).toHaveText("Second");
+});
+
+test("suggestions close when the form submits, and a link accepted in the tab leaves the selector", async ({
+  page,
+  server,
+  browser,
+}) => {
+  const member = await server.addMember("grace@example.org");
+  const second = await server.call("POST", "/workspaces", { name: "Second" });
+  await asOwner(page, server);
+  await page.goto(`${server.url}/w/${second.slug}/settings`);
+  const invitations = section(page, "invitations");
+  const email = invitations.getByLabel("email");
+  await email.fill("grace@example.org");
+  await expect(invitations.getByRole("listbox", { name: "people" }).getByRole("option")).toHaveCount(1);
+  await email.press("Enter");
+  const link = await invitations.getByLabel("invitation link", { exact: true }).inputValue();
+  await expect(email).toHaveValue("");
+  await page.waitForTimeout(400);
+  await expect(invitations.getByRole("listbox", { name: "people" })).toHaveCount(0);
+
+  const grace = await memberPage(browser, server, member);
+  await grace.goto(`${server.url}/w/tests`);
+  await expect(grace.locator(".selector summary")).toContainText("1 invitation");
+  await grace.evaluate((to) => {
+    history.pushState({}, "", new URL(to).pathname);
+    dispatchEvent(new PopStateEvent("popstate"));
+  }, link);
+  await grace.getByRole("button", { name: "join Second" }).click();
+  await expect(grace).toHaveURL(`${server.url}/w/${second.slug}`);
+  await expect(grace.locator(".selector summary")).not.toContainText("invitation");
+});

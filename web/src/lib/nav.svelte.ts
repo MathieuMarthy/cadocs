@@ -7,6 +7,7 @@ import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
 import { api, ApiError, type Page, type Workspace } from "./api";
 import { describe } from "./form.svelte";
+import { loadInvitations } from "./invitations.svelte";
 import { refreshSession, sessionEnded } from "./session.svelte";
 
 export interface Space {
@@ -212,6 +213,9 @@ export class Nav {
         break;
       case "notification":
         this.notifications += 1;
+        break;
+      case "invitation":
+        void loadInvitations(true);
         break;
       case "page.created":
       case "page.moved":

@@ -167,6 +167,9 @@ export const fr: Catalogue = {
   "workspace.noneCreate":
     "créez-en un, ou demandez une invitation à un admin d'espace de travail.",
   "workspace.noneAsk": "demandez une invitation à un admin d'espace de travail.",
+  "workspace.pending": { one: "{count} invitation", other: "{count} invitations" },
+  "workspace.decline": "refuser",
+  "workspace.declineOf": "refuser l'invitation à {workspace}",
   "workspace.new": "nouvel espace de travail",
   "workspace.name": "nom de l'espace de travail",
   "workspace.create": "créer l'espace de travail",
@@ -181,6 +184,8 @@ export const fr: Catalogue = {
   "workspace.remove": "retirer",
   "workspace.removeConfirm": "retirer {name}",
   "workspace.invitations": "invitations",
+  "workspace.invitationsMailed": "un lien sert une fois, pendant 7 jours. il est envoyé à l'adresse par mail.",
+  "workspace.suggestions": "personnes",
   "workspace.invitationsHint":
     "un lien sert une fois, pendant 7 jours. envoyez-le vous-même à la personne.",
   "workspace.role": "rôle",
