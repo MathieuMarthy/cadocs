@@ -77,3 +77,14 @@ test("French has every entry, with the parameters and forms of English", async (
     assert.deepEqual(shape(module.fr[key as keyof typeof module.fr]), shape(entry), key);
   }
 });
+
+test("release notes show once a browser ran an earlier release, and only if they exist", () => {
+  const notes = i18n.releaseNotes("0.3.0", "0.3.1");
+  assert.ok(notes.features.length > 0 && notes.fixes.length > 0);
+  assert.ok(notes.features.every((key) => key.startsWith("news.0.3.1.feature.")));
+  assert.ok(notes.fixes.every((key) => key.startsWith("news.0.3.1.fix.")));
+  const none = { features: [], fixes: [] };
+  assert.deepEqual(i18n.releaseNotes(null, "0.3.1"), none);
+  assert.deepEqual(i18n.releaseNotes("0.3.1", "0.3.1"), none);
+  assert.deepEqual(i18n.releaseNotes("0.3.1", "9.9.9"), none);
+});

@@ -636,3 +636,32 @@ test("the caret stays beside the name when the workspace name is cut", async ({ 
   expect(caret!.y + caret!.height).toBeLessThanOrEqual(box!.y + box!.height);
   expect(box!.height).toBeLessThan(28);
 });
+
+test("what's new shows once after an upgrade, and not to a browser on its first visit", async ({
+  page,
+  server,
+}) => {
+  await asOwner(page, server);
+  const shell = page.getByRole("button", { name: "Ada", exact: true });
+  const news = page.getByRole("dialog", { name: /^what's new in / });
+
+  await page.goto(server.url);
+  await expect(shell).toBeVisible();
+  await expect(news).toHaveCount(0);
+  const version = await page.evaluate(() => localStorage.getItem("cadocs-version"));
+  expect(version).toBeTruthy();
+
+  // The browser last ran an earlier release.
+  await page.evaluate(() => localStorage.setItem("cadocs-version", "0.0.0"));
+  await page.reload();
+  await expect(news).toBeVisible();
+  await expect(news.getByRole("heading", { level: 2 })).toHaveText(`what's new in ${version}`);
+  await expect(news.getByRole("heading", { level: 3 })).toHaveText(["features", "fixes"]);
+  await expect(news.getByRole("list")).toHaveCount(2);
+  await news.getByRole("button", { name: "close" }).click();
+  await expect(news).toHaveCount(0);
+
+  await page.reload();
+  await expect(shell).toBeVisible();
+  await expect(news).toHaveCount(0);
+});

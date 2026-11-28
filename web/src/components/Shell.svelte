@@ -26,6 +26,7 @@
   import NewWorkspace from "./NewWorkspace.svelte";
   import Source from "./Source.svelte";
   import Tree from "./Tree.svelte";
+  import WhatsNew from "./WhatsNew.svelte";
 
   let {
     title,
@@ -307,3 +308,5 @@
     {/if}
   </div>
 </div>
+
+<WhatsNew />
